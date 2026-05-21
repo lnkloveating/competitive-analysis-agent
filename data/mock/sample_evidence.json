@@ -1,0 +1,14 @@
+[
+  {"evidence_id":"EV001","platform":"Tencent Video","claim":"腾讯视频拥有较强的内容版权和IP生态",
+   "source_type":"official","source_title":"腾讯视频官方内容介绍","source_url":"https://v.qq.com",
+   "publish_time":"2024-12-01","collected_time":"2025-05-21","credibility":"high",
+   "related_dimension":"content_ecosystem","used_by_agent":"BusinessAgent"},
+  {"evidence_id":"EV002","platform":"Netflix","claim":"Netflix全球拥有超过2.6亿付费订阅用户",
+   "source_type":"report","source_title":"Netflix 2024 Q4财报","source_url":"https://ir.netflix.net",
+   "publish_time":"2025-01-22","collected_time":"2025-05-21","credibility":"high",
+   "related_dimension":"membership","used_by_agent":"BusinessAgent"},
+  {"evidence_id":"EV003","platform":"iQIYI","claim":"爱奇艺会员数量2024年保持在1亿左右",
+   "source_type":"report","source_title":"爱奇艺2024年度财报","source_url":"https://ir.iqiyi.com",
+   "publish_time":"2025-03-01","collected_time":"2025-05-21","credibility":"high",
+   "related_dimension":"membership","used_by_agent":"BusinessAgent"}
+]
