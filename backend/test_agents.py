@@ -9,6 +9,7 @@ os.environ["LANGSMITH_TRACING"] = "false"
 os.environ["RESEARCH_AGENT_USE_LLM"] = "0"
 os.environ["EVIDENCE_AGENT_USE_LLM"] = "0"
 os.environ["PRODUCT_AGENT_USE_LLM"] = "0"
+os.environ["BUSINESS_AGENT_USE_LLM"] = "0"
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 load_dotenv(Path(__file__).resolve().parent / ".env")
@@ -16,6 +17,7 @@ load_dotenv(Path(__file__).resolve().parent / ".env")
 from agents.research_agent import research_agent
 from agents.evidence_agent import evidence_agent
 from agents.product_agent import product_agent
+from agents.business_agent import business_agent
 from agents.state import CompetitiveAnalysisState
 
 
@@ -95,3 +97,25 @@ if __name__ == "__main__":
     assert non_empty_dimensions, "至少一个维度需要有数据"
 
     print("ProductAgent 测试通过")
+
+    print("\n=== 测试 BusinessAgent ===")
+    business_result = business_agent(product_result)
+    business_matrix = business_result["business_matrix"]
+
+    print(f"商业矩阵维度数: {len(business_matrix.get('dimensions', {}))}")
+    assert business_matrix, "business_matrix 不能为空"
+    assert "dimensions" in business_matrix, "business_matrix 缺少 dimensions 字段"
+
+    non_empty_business_dimensions = [
+        dimension
+        for dimension, platform_map in business_matrix["dimensions"].items()
+        if platform_map
+    ]
+    assert non_empty_business_dimensions, "至少一个商业维度需要有数据"
+
+    first_dimension_name = non_empty_business_dimensions[0]
+    first_platform_count = len(business_matrix["dimensions"][first_dimension_name])
+    print(f"第一个商业维度: {first_dimension_name}")
+    print(f"平台数量: {first_platform_count}")
+
+    print("BusinessAgent 测试通过")
