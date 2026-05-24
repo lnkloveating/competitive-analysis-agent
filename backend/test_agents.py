@@ -12,6 +12,7 @@ os.environ["PRODUCT_AGENT_USE_LLM"] = "0"
 os.environ["BUSINESS_AGENT_USE_LLM"] = "0"
 os.environ["RISK_AGENT_USE_LLM"] = "0"
 os.environ["QUALITY_AGENT_USE_LLM"] = "0"
+os.environ["STRATEGY_AGENT_USE_LLM"] = "0"
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 load_dotenv(Path(__file__).resolve().parent / ".env")
@@ -22,6 +23,7 @@ from agents.product_agent import product_agent
 from agents.business_agent import business_agent
 from agents.risk_agent import risk_agent
 from agents.quality_agent import quality_agent, quality_router
+from agents.strategy_agent import strategy_agent
 from agents.state import CompetitiveAnalysisState
 
 
@@ -161,3 +163,17 @@ if __name__ == "__main__":
         assert quality_result.get("required_fix"), "rejected 时必须包含 required_fix"
 
     print("QualityAgent 测试通过")
+
+    print("\n=== 测试 StrategyAgent ===")
+    strategy_result = strategy_agent(quality_result_state)
+    final_report = strategy_result["final_report"]
+
+    assert final_report, "final_report 不能为空"
+    for field in ("executive_summary", "competitive_ranking", "swot_analysis"):
+        assert field in final_report, f"final_report 缺少字段: {field}"
+    assert isinstance(final_report["competitive_ranking"], list), "competitive_ranking 必须是列表"
+    assert final_report["competitive_ranking"], "competitive_ranking 不能为空"
+    assert "strengths" in final_report["swot_analysis"], "swot_analysis 缺少 strengths 字段"
+
+    print(f"executive_summary 前100字: {final_report['executive_summary'][:100]}")
+    print("StrategyAgent 测试通过")
