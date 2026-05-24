@@ -1,14 +1,17 @@
-from typing import TypedDict, List, Dict, Optional
+from typing import Annotated, TypedDict, List, Dict
+
+
+def latest_current_agent(left: str, right: str) -> str:
+    return right or left
+
 
 class CompetitiveAnalysisState(TypedDict):
-    # 输入
     target_platform: str
     competitors: List[str]
     analysis_scene: str
     target_user: str
     time_range: str
     focus_dimensions: List[str]
-    # 各 Agent 输出
     raw_research: List[Dict]
     evidence_list: List[Dict]
     product_matrix: Dict
@@ -16,8 +19,7 @@ class CompetitiveAnalysisState(TypedDict):
     risk_flags: List[Dict]
     quality_result: Dict
     final_report: Dict
-    # 流程控制
-    current_agent: str
+    current_agent: Annotated[str, latest_current_agent]
     iteration_count: int
     rejected_agents: List[str]
     is_approved: bool
