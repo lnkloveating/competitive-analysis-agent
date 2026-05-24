@@ -6,11 +6,14 @@ from dotenv import load_dotenv
 
 os.environ["LANGCHAIN_TRACING_V2"] = "false"
 os.environ["LANGSMITH_TRACING"] = "false"
+# os.environ["RESEARCH_AGENT_USE_LLM"] = "0"
+# os.environ["EVIDENCE_AGENT_USE_LLM"] = "0"
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 load_dotenv(Path(__file__).resolve().parent / ".env")
 
 from agents.research_agent import research_agent
+from agents.evidence_agent import evidence_agent
 from agents.state import CompetitiveAnalysisState
 
 
@@ -53,3 +56,22 @@ if __name__ == "__main__":
         assert first.get(field), f"第一条数据缺少字段: {field}"
 
     print("ResearchAgent 测试通过")
+
+    print("\n=== 测试 EvidenceAgent ===")
+    evidence_result = evidence_agent(result)
+    evidence_list = evidence_result["evidence_list"]
+
+    print(f"证据条数: {len(evidence_list)}")
+    assert evidence_list, "evidence_list 不能为空"
+
+    first_evidence = evidence_list[0]
+    print(f"evidence_id: {first_evidence.get('evidence_id')}")
+    print(f"platform: {first_evidence.get('platform')}")
+    print(f"claim: {first_evidence.get('claim')}")
+    print(f"credibility: {first_evidence.get('credibility')}")
+
+    for field in ("evidence_id", "platform", "claim", "credibility"):
+        assert first_evidence.get(field), f"第一条证据缺少字段: {field}"
+
+    assert first_evidence["credibility"] in {"high", "medium", "low"}, "credibility 值非法"
+    print("EvidenceAgent 测试通过")
