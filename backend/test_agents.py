@@ -10,6 +10,7 @@ os.environ["RESEARCH_AGENT_USE_LLM"] = "0"
 os.environ["EVIDENCE_AGENT_USE_LLM"] = "0"
 os.environ["PRODUCT_AGENT_USE_LLM"] = "0"
 os.environ["BUSINESS_AGENT_USE_LLM"] = "0"
+os.environ["RISK_AGENT_USE_LLM"] = "0"
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 load_dotenv(Path(__file__).resolve().parent / ".env")
@@ -18,6 +19,7 @@ from agents.research_agent import research_agent
 from agents.evidence_agent import evidence_agent
 from agents.product_agent import product_agent
 from agents.business_agent import business_agent
+from agents.risk_agent import risk_agent
 from agents.state import CompetitiveAnalysisState
 
 
@@ -119,3 +121,20 @@ if __name__ == "__main__":
     print(f"平台数量: {first_platform_count}")
 
     print("BusinessAgent 测试通过")
+
+    print("\n=== 测试 RiskAgent ===")
+    risk_result = risk_agent(business_result)
+    risk_flags = risk_result["risk_flags"]
+
+    print(f"风险数量: {len(risk_flags)}")
+    assert isinstance(risk_flags, list), "risk_flags 必须是列表"
+
+    for risk in risk_flags:
+        for field in ("risk_id", "risk_type", "severity"):
+            assert risk.get(field), f"风险记录缺少字段: {field}"
+        assert risk["severity"] in {"high", "medium", "low"}, "severity 值非法"
+
+    if risk_flags:
+        print(f"第一条风险类型: {risk_flags[0].get('risk_type')}")
+
+    print("RiskAgent 测试通过")
