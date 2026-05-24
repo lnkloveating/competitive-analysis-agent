@@ -11,6 +11,7 @@ os.environ["EVIDENCE_AGENT_USE_LLM"] = "0"
 os.environ["PRODUCT_AGENT_USE_LLM"] = "0"
 os.environ["BUSINESS_AGENT_USE_LLM"] = "0"
 os.environ["RISK_AGENT_USE_LLM"] = "0"
+os.environ["QUALITY_AGENT_USE_LLM"] = "0"
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 load_dotenv(Path(__file__).resolve().parent / ".env")
@@ -20,6 +21,7 @@ from agents.evidence_agent import evidence_agent
 from agents.product_agent import product_agent
 from agents.business_agent import business_agent
 from agents.risk_agent import risk_agent
+from agents.quality_agent import quality_agent, quality_router
 from agents.state import CompetitiveAnalysisState
 
 
@@ -138,3 +140,24 @@ if __name__ == "__main__":
         print(f"第一条风险类型: {risk_flags[0].get('risk_type')}")
 
     print("RiskAgent 测试通过")
+
+    print("\n=== 测试 QualityAgent ===")
+    quality_result_state = quality_agent(risk_result)
+    quality_result = quality_result_state["quality_result"]
+
+    assert quality_result, "quality_result 不能为空"
+    assert quality_result.get("status") in {"approved", "rejected"}, "status 值非法"
+    assert "quality_score" in quality_result, "quality_result 缺少 quality_score 字段"
+
+    print(f"status: {quality_result.get('status')}")
+    print(f"reason: {quality_result.get('reason')}")
+    print(f"quality_score: {quality_result.get('quality_score')}")
+    print(f"router: {quality_router(quality_result_state)}")
+
+    if quality_result["status"] == "rejected":
+        print(f"target_agent: {quality_result.get('target_agent')}")
+        print(f"required_fix: {quality_result.get('required_fix')}")
+        assert quality_result.get("target_agent"), "rejected 时必须包含 target_agent"
+        assert quality_result.get("required_fix"), "rejected 时必须包含 required_fix"
+
+    print("QualityAgent 测试通过")
