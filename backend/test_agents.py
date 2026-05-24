@@ -6,14 +6,16 @@ from dotenv import load_dotenv
 
 os.environ["LANGCHAIN_TRACING_V2"] = "false"
 os.environ["LANGSMITH_TRACING"] = "false"
-# os.environ["RESEARCH_AGENT_USE_LLM"] = "0"
-# os.environ["EVIDENCE_AGENT_USE_LLM"] = "0"
+os.environ["RESEARCH_AGENT_USE_LLM"] = "0"
+os.environ["EVIDENCE_AGENT_USE_LLM"] = "0"
+os.environ["PRODUCT_AGENT_USE_LLM"] = "0"
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 load_dotenv(Path(__file__).resolve().parent / ".env")
 
 from agents.research_agent import research_agent
 from agents.evidence_agent import evidence_agent
+from agents.product_agent import product_agent
 from agents.state import CompetitiveAnalysisState
 
 
@@ -75,3 +77,21 @@ if __name__ == "__main__":
 
     assert first_evidence["credibility"] in {"high", "medium", "low"}, "credibility 值非法"
     print("EvidenceAgent 测试通过")
+
+    print("\n=== 测试 ProductAgent ===")
+    product_result = product_agent(evidence_result)
+    product_matrix = product_result["product_matrix"]
+
+    print(f"产品矩阵维度数: {len(product_matrix.get('dimensions', {}))}")
+    assert product_matrix, "product_matrix 不能为空"
+    assert "dimensions" in product_matrix, "product_matrix 缺少 dimensions 字段"
+
+    non_empty_dimensions = [
+        dimension
+        for dimension, platform_map in product_matrix["dimensions"].items()
+        if platform_map
+    ]
+    print(f"有数据的维度: {non_empty_dimensions}")
+    assert non_empty_dimensions, "至少一个维度需要有数据"
+
+    print("ProductAgent 测试通过")
