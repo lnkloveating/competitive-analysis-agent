@@ -420,16 +420,16 @@ def _build_prompt(state: CompetitiveAnalysisState, fallback_report: Dict[str, An
 {{
   "executive_summary": "执行摘要，200字以内",
   "competitive_ranking": [
-    {{"platform": "{example_platform}", "score": 8.5, "rank": 1, "summary": "说明"}}
+    {{"platform": "{example_platform}", "score": 8.5, "rank": 1, "summary": "说明（证据：EV001）"}}
   ],
   "swot_analysis": {{
-    "strengths": ["优势1", "优势2", "优势3"],
-    "weaknesses": ["劣势1", "劣势2", "劣势3"],
+    "strengths": ["优势1（证据：EV001）", "优势2（证据：EV002）", "优势3（证据：EV003）"],
+    "weaknesses": ["劣势1（证据：EV004）", "劣势2（证据：EV005）", "劣势3（证据：EV006）"],
     "opportunities": ["机会1", "机会2", "机会3"],
     "threats": ["威胁1", "威胁2", "威胁3"]
   }},
   "opportunities": ["机会点1", "机会点2", "机会点3"],
-  "strategic_recommendations": ["建议1", "建议2", "建议3"],
+  "strategic_recommendations": ["建议内容（证据：EV001、EV003）", "建议内容（证据：EV002）", "建议内容（证据：EV004）"],
   "data_confidence": "整体数据置信度说明",
   "generated_at": "时间戳",
   "quality_score": 76,
@@ -437,10 +437,18 @@ def _build_prompt(state: CompetitiveAnalysisState, fallback_report: Dict[str, An
 }}
 
 规则：
+- StrategyAgent 不能凭空生成新结论，所有结论必须基于输入数据中的 evidence_list、product_matrix、business_matrix、quality_result。
 - competitive_ranking 的 score 为 1-10 分，rank 从 1 开始。
 - SWOT 是目标平台的 SWOT，每个字段至少 3 条。
 - opportunities 和 strategic_recommendations 各 3-5 条。
 - 如果 quality_result 为 rejected，必须在 data_confidence 和建议中说明证据限制。
+
+证据引用规则（必须严格遵守）：
+1. competitive_ranking 里每个平台的 summary 必须在末尾引用至少1个证据，格式：（证据：EV001）
+2. strategic_recommendations 里每条建议必须在末尾引用至少1个证据，格式：（证据：EV001、EV003）
+3. swot_analysis 的 strengths 和 weaknesses 每条尽量引用1个证据
+4. 只能引用 evidence_list 里真实存在的 evidence_id，不能编造
+5. 如果证据不足，在 data_confidence 里说明限制，不要补造事实。
 
 输入数据：
 {json.dumps(payload, ensure_ascii=False)}

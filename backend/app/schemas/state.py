@@ -1,0 +1,29 @@
+from typing import Any, Dict, List
+
+from pydantic import BaseModel, Field
+
+
+class StateSnapshot(BaseModel):
+    target_platform: str = ""
+    competitors: List[str] = Field(default_factory=list)
+    analysis_scene: str = ""
+    target_user: str = ""
+    time_range: str = ""
+    focus_dimensions: List[str] = Field(default_factory=list)
+    industry_key: str = ""
+    industry_name: str = ""
+    raw_research: List[Dict[str, Any]] = Field(default_factory=list)
+    evidence_list: List[Dict[str, Any]] = Field(default_factory=list)
+    claims: List[Dict[str, Any]] = Field(default_factory=list)
+    product_matrix: Dict[str, Any] = Field(default_factory=dict)
+    business_matrix: Dict[str, Any] = Field(default_factory=dict)
+    risk_flags: List[Dict[str, Any]] = Field(default_factory=list)
+    quality_result: Dict[str, Any] = Field(default_factory=dict)
+    final_report: Dict[str, Any] = Field(default_factory=dict)
+    metrics: Dict[str, Any] = Field(default_factory=dict)
+    current_agent: str = ""
+    iteration_count: int = 0
+    rejected_agents: List[str] = Field(default_factory=list)
+    is_approved: bool = False
+    error_log: List[Dict[str, Any]] = Field(default_factory=list)
+    trace_log: List[Dict[str, Any]] = Field(default_factory=list)
