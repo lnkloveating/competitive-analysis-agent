@@ -16,13 +16,16 @@ class CompetitiveAnalysisState(TypedDict):
     focus_dimensions: List[str]
     raw_research: List[Dict]
     evidence_list: List[Dict]
+    claims: List[Dict]
     product_matrix: Dict
     business_matrix: Dict
     risk_flags: List[Dict]
     quality_result: Dict
     final_report: Dict
+    metrics: Dict
     current_agent: Annotated[str, latest_current_agent]
     iteration_count: int
     rejected_agents: List[str]
     is_approved: bool
     error_log: List[str]
+    trace_log: List[Dict]
