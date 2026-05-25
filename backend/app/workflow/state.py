@@ -31,6 +31,8 @@ class CompetitiveAnalysisState(TypedDict, total=False):
     risk_flags: List[Dict[str, Any]]
     quality_result: Dict[str, Any]
     final_report: Dict[str, Any]
+    used_claim_ids: List[str]
+    used_evidence_ids: List[str]
     metrics: Dict[str, Any]
 
     current_agent: Annotated[str, latest_current_agent]

@@ -20,10 +20,14 @@ class StateSnapshot(BaseModel):
     risk_flags: List[Dict[str, Any]] = Field(default_factory=list)
     quality_result: Dict[str, Any] = Field(default_factory=dict)
     final_report: Dict[str, Any] = Field(default_factory=dict)
+    used_claim_ids: List[str] = Field(default_factory=list)
+    used_evidence_ids: List[str] = Field(default_factory=list)
     metrics: Dict[str, Any] = Field(default_factory=dict)
     current_agent: str = ""
     iteration_count: int = 0
     rejected_agents: List[str] = Field(default_factory=list)
     is_approved: bool = False
+    needs_human_review: bool = False
+    quality_status: str = ""
     error_log: List[Dict[str, Any]] = Field(default_factory=list)
     trace_log: List[Dict[str, Any]] = Field(default_factory=list)

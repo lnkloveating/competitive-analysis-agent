@@ -65,6 +65,8 @@ class CompetitiveAnalysisState(TypedDict):
     risk_flags: List[Dict]
     quality_result: Dict
     final_report: Dict
+    used_claim_ids: List[str]
+    used_evidence_ids: List[str]
     metrics: Dict
     current_agent: Annotated[str, latest_current_agent]
     iteration_count: int
