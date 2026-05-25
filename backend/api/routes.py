@@ -1,12 +1,36 @@
-from fastapi import FastAPI
+from __future__ import annotations
+
+import threading
+from typing import Any, Dict, List
+from uuid import uuid4
+
+from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
-from typing import List
+
+from agents.industry_config import INDUSTRY_CONFIGS, get_state_dimensions, get_state_industry_name
+from agents.workflow import app as workflow_app
+
 
 app = FastAPI(title="竞品分析 Agent 系统", version="1.0.0")
 app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"])
 
+TASKS: Dict[str, Dict[str, Any]] = {}
+TASK_LOCK = threading.Lock()
+
+AGENT_PROGRESS = {
+    "ResearchAgent": 14,
+    "EvidenceAgent": 28,
+    "ProductAgent": 42,
+    "BusinessAgent": 42,
+    "RiskAgent": 57,
+    "QualityAgent": 71,
+    "StrategyAgent": 100,
+}
+
+
 class AnalysisRequest(BaseModel):
+    industry_key: str
     target_platform: str
     competitors: List[str]
     analysis_scene: str
@@ -14,18 +38,153 @@ class AnalysisRequest(BaseModel):
     time_range: str
     focus_dimensions: List[str]
 
+
+def _build_initial_state(request: AnalysisRequest) -> Dict[str, Any]:
+    state = request.model_dump()
+    state["industry_name"] = get_state_industry_name(state)
+    state["focus_dimensions"] = get_state_dimensions(state)
+    state.update(
+        {
+            "raw_research": [],
+            "evidence_list": [],
+            "product_matrix": {},
+            "business_matrix": {},
+            "risk_flags": [],
+            "quality_result": {},
+            "final_report": {},
+            "current_agent": "",
+            "iteration_count": 0,
+            "rejected_agents": [],
+            "is_approved": False,
+            "error_log": [],
+        }
+    )
+    return state
+
+
+def _get_task(task_id: str) -> Dict[str, Any]:
+    task = TASKS.get(task_id)
+    if task is None:
+        raise HTTPException(status_code=404, detail="task_id 不存在")
+    return task
+
+def _task_progress(task: Dict[str, Any]) -> int:
+    if task.get("status") == "completed":
+        return 100
+    current_agent = task.get("current_agent", "")
+    return AGENT_PROGRESS.get(current_agent, 0)
+
+
+def _run_workflow(task_id: str, initial_state: Dict[str, Any]) -> None:
+    try:
+        final_state = dict(initial_state)
+        with TASK_LOCK:
+            TASKS[task_id]["current_agent"] = "ResearchAgent"
+
+        for event in workflow_app.stream(
+            initial_state,
+            {"recursion_limit": 50},
+            stream_mode="updates",
+        ):
+            for node_name, update in event.items():
+                if not isinstance(update, dict):
+                    continue
+                final_state.update(update)
+                current_agent = update.get("current_agent")
+                with TASK_LOCK:
+                    TASKS[task_id]["state"] = dict(final_state)
+                    if current_agent:
+                        TASKS[task_id]["current_agent"] = current_agent
+
+        current_agent = final_state.get("current_agent", "StrategyAgent")
+
+        with TASK_LOCK:
+            TASKS[task_id].update(
+                {
+                    "status": "completed",
+                    "current_agent": current_agent,
+                    "state": final_state,
+                    "error": "",
+                }
+            )
+    except Exception as exc:
+        with TASK_LOCK:
+            task = TASKS.get(task_id)
+            if task is not None:
+                task.update(
+                    {
+                        "status": "failed",
+                        "state": {**initial_state, **task.get("state", {})},
+                        "error": str(exc),
+                    }
+                )
+
+
 @app.get("/health")
 async def health():
     return {"status": "ok"}
 
+
+@app.get("/api/industries")
+async def get_industries():
+    industries = [
+        {
+            "key": key,
+            "name": config.get("name", ""),
+            "competitors": config.get("competitors", []),
+            "dimensions": config.get("dimensions", []),
+            "data_sources": config.get("data_sources", {}),
+            "schema_fields": config.get("schema_fields", []),
+        }
+        for key, config in INDUSTRY_CONFIGS.items()
+    ]
+    return {"industries": industries}
+
+
 @app.post("/api/analysis/start")
 async def start_analysis(request: AnalysisRequest):
-    return {"task_id": "task_001", "status": "started"}
+    task_id = str(uuid4())
+    initial_state = _build_initial_state(request)
+
+    with TASK_LOCK:
+        TASKS[task_id] = {
+            "status": "running",
+            "current_agent": "",
+            "state": initial_state,
+            "error": "",
+        }
+
+    thread = threading.Thread(target=_run_workflow, args=(task_id, initial_state), daemon=True)
+    thread.start()
+
+    return {"task_id": task_id, "status": "running"}
+
 
 @app.get("/api/analysis/{task_id}/status")
 async def get_status(task_id: str):
-    return {"task_id": task_id, "current_agent": "ResearchAgent", "progress": 0}
+    with TASK_LOCK:
+        task = _get_task(task_id).copy()
+
+    return {
+        "task_id": task_id,
+        "status": task.get("status", "failed"),
+        "current_agent": task.get("current_agent", ""),
+        "progress": _task_progress(task),
+        "error": task.get("error", ""),
+    }
+
 
 @app.get("/api/analysis/{task_id}/report")
 async def get_report(task_id: str):
-    return {"task_id": task_id, "report": None}
+    with TASK_LOCK:
+        task = _get_task(task_id).copy()
+        state = dict(task.get("state", {}))
+
+    return {
+        "task_id": task_id,
+        "status": task.get("status", "failed"),
+        "final_report": state.get("final_report", {}),
+        "quality_result": state.get("quality_result", {}),
+        "evidence_list": state.get("evidence_list", []),
+        "error": task.get("error", ""),
+    }
