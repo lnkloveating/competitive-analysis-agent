@@ -1,9 +1,11 @@
 from typing import Literal, Optional
 
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict
 
 
 class RawResearchItem(BaseModel):
+    model_config = ConfigDict(extra="allow")
+
     item_id: str
     platform: str
     source_type: Literal[
