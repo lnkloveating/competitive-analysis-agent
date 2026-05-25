@@ -13,6 +13,7 @@ from typing import Any, Dict, Iterable, List
 from dotenv import load_dotenv
 from langchain_openai import ChatOpenAI
 
+from .industry_config import get_state_dimensions, get_state_industry_name
 from .state import CompetitiveAnalysisState
 
 
@@ -268,6 +269,9 @@ def _ensure_count(items: List[str], defaults: List[str], count: int = 3) -> List
 
 def _fallback_swot(state: CompetitiveAnalysisState) -> Dict[str, List[str]]:
     target = state.get("target_platform", "目标平台")
+    industry_name = get_state_industry_name(state)
+    dimensions = get_state_dimensions(state)
+    dimension_focus = "、".join(dimensions[:2]) if dimensions else "核心竞争维度"
     summary = _target_dimension_summary(state)
     strong = summary["strong"]
     weak = summary["weak"]
@@ -283,38 +287,38 @@ def _fallback_swot(state: CompetitiveAnalysisState) -> Dict[str, List[str]]:
         "strengths": _ensure_count(
             strengths,
             [
-                f"{target}具备本土内容理解和运营经验。",
-                f"{target}可依托现有会员体系沉淀用户资产。",
-                f"{target}在长视频消费场景中仍有品牌认知基础。",
+                f"{target}在{industry_name}赛道具备一定品牌认知和渠道基础。",
+                f"{target}可围绕{dimension_focus}沉淀差异化竞争资产。",
+                f"{target}已有产品线和用户反馈可用于持续优化。",
             ],
         ),
         "weaknesses": _ensure_count(
             weaknesses,
             [
                 "部分维度缺少直接证据引用，分析置信度有提升空间。",
-                "国际化和技术体验维度仍需更多公开信息验证。",
-                "会员增长与商业化效率需要更清晰的差异化抓手。",
+                "产品体验、渠道表现和生态协同仍需更多公开信息验证。",
+                "定价、定位和产品组合需要更清晰的差异化抓手。",
             ],
         ),
         "opportunities": _ensure_count(
             [
-                "围绕高价值会员分层和内容资产复用提升 ARPU。",
-                "通过 AI 推荐和垂类内容运营提高观看转化。",
-                "在家庭、多端和互动场景中拓展增量消费。",
+                f"围绕{dimension_focus}打造更清晰的目标人群定位。",
+                "通过产品组合、软件生态和用户反馈闭环提升复购与口碑。",
+                "在渠道、配件、服务和生态兼容场景中拓展增量需求。",
             ],
             [
-                "探索短剧、综艺衍生和社区互动的联动增长。",
-                "利用版权合作和自制内容组合降低内容波动。",
+                "探索跨品类组合和场景化套装带来的联动增长。",
+                "利用供应链、渠道和服务合作降低产品波动。",
             ],
         ),
         "threats": _ensure_count(
             [
-                "国际平台在内容工业化和订阅体验上持续形成标杆压力。",
-                "头部内容版权成本和监管合规要求可能压缩利润空间。",
-                "用户时间被短视频、直播和游戏等娱乐形态持续分流。",
+                "头部品牌在技术迭代、渠道覆盖和用户心智上持续形成压力。",
+                "关键零部件、成本和渠道政策变化可能压缩利润空间。",
+                "同质化产品和价格促销可能削弱品牌溢价。",
             ],
             [
-                "竞品价格促销可能削弱会员留存。",
+                "竞品价格促销可能削弱用户留存和品牌溢价。",
                 "低可信数据可能导致策略判断偏差。",
             ],
         ),
@@ -323,21 +327,25 @@ def _fallback_swot(state: CompetitiveAnalysisState) -> Dict[str, List[str]]:
 
 def _fallback_opportunities(state: CompetitiveAnalysisState) -> List[str]:
     target = state.get("target_platform", "目标平台")
+    industry_name = get_state_industry_name(state)
+    dimensions = get_state_dimensions(state)
+    dimension_focus = "、".join(dimensions[:2]) if dimensions else "核心维度"
     return [
-        f"{target}可围绕会员分层、家庭账号和长周期权益包提升付费深度。",
-        "以内容生态为核心，把剧综 IP、衍生内容和社区互动串成连续运营链路。",
-        "强化推荐系统对新内容冷启动、老内容复看和垂类人群的精细化分发。",
-        "补齐技术体验、跨端连续观看和离线场景，提升高频用户满意度。",
+        f"{target}可围绕{dimension_focus}建立更清晰的{industry_name}差异化定位。",
+        "以核心产品体验为中心，把硬件、软件、服务和渠道反馈串成连续优化链路。",
+        "强化目标人群洞察，对新品定位、价格带和场景化卖点做精细化运营。",
+        "补齐证据薄弱维度的公开数据和用户反馈，提升高频用户满意度。",
     ]
 
 
 def _fallback_recommendations(state: CompetitiveAnalysisState) -> List[str]:
     target = state.get("target_platform", "目标平台")
+    industry_name = get_state_industry_name(state)
     quality_result = state.get("quality_result", {})
     recommendations = [
-        f"{target}应优先建立内容生态和会员体系的证据化指标看板，用于持续跟踪竞品变化。",
+        f"{target}应优先建立{industry_name}核心维度的证据化指标看板，用于持续跟踪竞品变化。",
         "围绕高分维度放大差异化定位，同时对低分维度设立专项补强计划。",
-        "将版权、财报、官网和 App Store 等来源分层管理，提升战略判断的可追溯性。",
+        "将官网、评测、报告和用户口碑等来源分层管理，提升战略判断的可追溯性。",
     ]
     if quality_result.get("status") == "rejected":
         recommendations.append(f"先处理质检打回项：{quality_result.get('required_fix', '补齐证据链后再更新最终判断。')}")
@@ -363,6 +371,7 @@ def _fallback_confidence(state: CompetitiveAnalysisState) -> str:
 
 def _fallback_report(state: CompetitiveAnalysisState) -> Dict[str, Any]:
     target = state.get("target_platform", "目标平台")
+    industry_name = get_state_industry_name(state)
     ranking = _fallback_ranking(state)
     evidence_count = len(state.get("evidence_list", []))
     quality_score = int(state.get("quality_result", {}).get("quality_score", 0) or 0)
@@ -370,9 +379,9 @@ def _fallback_report(state: CompetitiveAnalysisState) -> Dict[str, Any]:
     target_rank = next((item["rank"] for item in ranking if item["platform"] == target), "待确认")
 
     executive_summary = (
-        f"本次竞品分析围绕{target}及主要竞品的产品与商业矩阵展开。"
+        f"本次竞品分析围绕{industry_name}赛道中{target}及主要竞品的产品与商业矩阵展开。"
         f"当前综合排名第一为{top_platform}，{target}排名为{target_rank}。"
-        f"报告基于{evidence_count}条证据和质检得分{quality_score}生成，建议优先补强证据薄弱维度并推进会员与内容生态联动。"
+        f"报告基于{evidence_count}条证据和质检得分{quality_score}生成，建议优先补强证据薄弱维度并推进产品、价格和用户口碑联动。"
     )[:200]
 
     return {
@@ -389,7 +398,11 @@ def _fallback_report(state: CompetitiveAnalysisState) -> Dict[str, Any]:
 
 
 def _build_prompt(state: CompetitiveAnalysisState, fallback_report: Dict[str, Any]) -> str:
+    example_platform = state.get("target_platform") or "目标品牌"
     payload = {
+        "industry_key": state.get("industry_key", ""),
+        "industry_name": get_state_industry_name(state),
+        "focus_dimensions": get_state_dimensions(state),
         "target_platform": state.get("target_platform", ""),
         "competitors": state.get("competitors", []),
         "analysis_scene": state.get("analysis_scene", ""),
@@ -407,7 +420,7 @@ def _build_prompt(state: CompetitiveAnalysisState, fallback_report: Dict[str, An
 {{
   "executive_summary": "执行摘要，200字以内",
   "competitive_ranking": [
-    {{"platform": "腾讯视频", "score": 8.5, "rank": 1, "summary": "说明"}}
+    {{"platform": "{example_platform}", "score": 8.5, "rank": 1, "summary": "说明"}}
   ],
   "swot_analysis": {{
     "strengths": ["优势1", "优势2", "优势3"],

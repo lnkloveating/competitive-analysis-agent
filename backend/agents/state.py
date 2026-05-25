@@ -6,6 +6,8 @@ def latest_current_agent(left: str, right: str) -> str:
 
 
 class CompetitiveAnalysisState(TypedDict):
+    industry_key: str
+    industry_name: str
     target_platform: str
     competitors: List[str]
     analysis_scene: str
