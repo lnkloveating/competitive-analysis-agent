@@ -22,12 +22,14 @@ from agents.state import CompetitiveAnalysisState
 
 
 initial_state: CompetitiveAnalysisState = {
-    "target_platform": "腾讯视频",
-    "competitors": ["爱奇艺"],
-    "analysis_scene": "长视频平台会员增长与内容生态战略分析",
-    "target_user": "视频平台产品经理",
+    "industry_key": "gaming_peripherals",
+    "industry_name": "电竞外设",
+    "target_platform": "罗技",
+    "competitors": ["雷蛇", "海盗船"],
+    "analysis_scene": "电竞外设产品竞争格局与增长策略分析",
+    "target_user": "电竞外设产品经理",
     "time_range": "近 12 个月",
-    "focus_dimensions": ["内容生态", "会员体系", "商业模式", "推荐系统"],
+    "focus_dimensions": ["硬件性能", "软件驱动", "用户口碑", "定价策略"],
     "raw_research": [],
     "evidence_list": [],
     "product_matrix": {},

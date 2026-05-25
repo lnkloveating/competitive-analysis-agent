@@ -8,10 +8,16 @@ import os
 import re
 from pathlib import Path
 from typing import Any, Dict, Iterable, List
+from urllib.parse import quote_plus
 
 from dotenv import load_dotenv
 from langchain_openai import ChatOpenAI
 
+from .industry_config import (
+    get_state_data_sources,
+    get_state_dimensions,
+    get_state_industry_name,
+)
 from .state import CompetitiveAnalysisState
 
 
@@ -25,38 +31,7 @@ REQUIRED_FIELDS = (
     "publish_time",
 )
 
-SOURCE_URLS = {
-    "腾讯视频": {
-        "official": "https://v.qq.com",
-        "financial_report": "https://www.tencent.com/zh-cn/investors/financial-reports.html",
-        "news": "https://v.qq.com/channel/news",
-        "app_store": "https://apps.apple.com/cn/app/id458318329",
-    },
-    "爱奇艺": {
-        "official": "https://www.iqiyi.com",
-        "financial_report": "https://ir.iqiyi.com/financial-information/annual-reports",
-        "news": "https://www.iqiyi.com/news",
-        "app_store": "https://apps.apple.com/cn/app/id393765873",
-    },
-    "芒果TV": {
-        "official": "https://www.mgtv.com",
-        "financial_report": "https://www.mgtv.com",
-        "news": "https://www.mgtv.com/news",
-        "app_store": "https://apps.apple.com/cn/app/id629774477",
-    },
-    "Netflix": {
-        "official": "https://www.netflix.com",
-        "financial_report": "https://ir.netflix.net/financials/quarterly-earnings/default.aspx",
-        "news": "https://about.netflix.com/newsroom",
-        "app_store": "https://apps.apple.com/app/netflix/id363590051",
-    },
-    "Disney+": {
-        "official": "https://www.disneyplus.com",
-        "financial_report": "https://thewaltdisneycompany.com/investor-relations/",
-        "news": "https://press.disneyplus.com",
-        "app_store": "https://apps.apple.com/app/disney/id1446075923",
-    },
-}
+VALID_SOURCE_TYPES = {"official", "news", "review", "report", "user_survey"}
 
 
 def _load_env() -> None:
@@ -92,13 +67,20 @@ def _get_platforms(state: CompetitiveAnalysisState) -> List[str]:
 
 
 def _build_prompt(state: CompetitiveAnalysisState, platform: str) -> str:
-    dimensions = state.get("focus_dimensions") or ["内容生态", "会员体系", "商业模式", "推荐系统"]
+    industry_name = get_state_industry_name(state)
+    dimensions = get_state_dimensions(state)
+    data_sources = get_state_data_sources(state)
+    source_types = [source_type for source_type in data_sources if source_type in VALID_SOURCE_TYPES]
+    source_text = "\n".join(
+        f"- {source_type}: {data_sources[source_type]}" for source_type in source_types
+    )
     return f"""
-你是 ResearchAgent，正在为长视频平台竞品战略分析做公开信息采集模拟。
+你是 ResearchAgent，正在为{industry_name}赛道竞品战略分析做公开信息采集模拟。
 
 重要约束：
-- 当前没有接入真实搜索 API，请模拟从官网、财报、新闻、App Store 四类来源采集。
-- 只分析一个平台：{platform}
+- 当前没有接入真实搜索 API，请围绕以下公开来源类型模拟采集：
+{source_text}
+- 只分析一个品牌或产品线：{platform}
 - 时间范围：{state.get("time_range", "")}
 - 分析场景：{state.get("analysis_scene", "")}
 - 目标用户：{state.get("target_user", "")}
@@ -109,8 +91,8 @@ def _build_prompt(state: CompetitiveAnalysisState, platform: str) -> str:
 - platform: 平台名称，固定为 "{platform}"
 - dimension: 维度，必须来自关注维度
 - content: 80-160 字中文采集摘要，写清楚观察到的竞争动作或趋势
-- source_type: 只能是 official、financial_report、news、app_store 之一
-- source_url: 对应来源 URL，可以使用平台官网、投资者关系、新闻中心或 App Store 页面
+- source_type: 只能是 {", ".join(source_types)}
+- source_url: 对应来源 URL，可以使用品牌官网、产品页、新闻、评测、报告或用户口碑页面
 - publish_time: 发布时间；如果模拟来源无法精确到日期，可写 "{state.get("time_range", "")}"
 
 每个关注维度至少返回 1 条，总条数控制在 {max(len(dimensions), 3)} 到 {max(len(dimensions) + 2, 5)} 条。
@@ -286,20 +268,29 @@ def _infer_source_type(record: Dict[str, Any]) -> str:
     source_url = _as_text(record.get("source_url") or record.get("url") or record.get("link")).lower()
     combined = f"{source_type} {source_name} {source_url}"
 
-    if "app" in combined or "itunes.apple" in combined or "apps.apple" in combined:
-        return "app_store"
-    if "财报" in combined or "financial" in combined or "investor" in combined or "ir." in combined:
-        return "financial_report"
+    if "survey" in combined or "调研" in combined or "论坛" in combined or "社区" in combined:
+        return "user_survey"
+    if "review" in combined or "评测" in combined or "评论" in combined or "app" in combined:
+        return "review"
+    if "财报" in combined or "financial" in combined or "investor" in combined or "ir." in combined or "report" in combined:
+        return "report"
     if "新闻" in combined or "news" in combined or "press" in combined:
         return "news"
-    if source_type in {"official", "financial_report", "news", "app_store"}:
+    if source_type in VALID_SOURCE_TYPES:
         return source_type
     return "official"
 
 
-def _source_url_for(platform: str, source_type: str) -> str:
-    platform_sources = SOURCE_URLS.get(platform, {})
-    return platform_sources.get(source_type) or platform_sources.get("official") or ""
+def _source_url_for(
+    platform: str,
+    source_type: str,
+    state: CompetitiveAnalysisState | None = None,
+) -> str:
+    industry_name = get_state_industry_name(state or {})
+    data_sources = get_state_data_sources(state or {})
+    source_label = data_sources.get(source_type, source_type)
+    query = quote_plus(f"{platform} {industry_name} {source_label}")
+    return f"https://www.google.com/search?q={query}"
 
 
 def _normalize_record(
@@ -307,6 +298,7 @@ def _normalize_record(
     platform: str,
     dimensions: List[str],
     time_range: str,
+    state: CompetitiveAnalysisState,
 ) -> Dict[str, str] | None:
     if not isinstance(item, dict):
         content = _as_text(item)
@@ -317,7 +309,7 @@ def _normalize_record(
             "dimension": dimensions[0] if dimensions else "综合竞争情报",
             "content": content,
             "source_type": "news",
-            "source_url": _source_url_for(platform, "news"),
+            "source_url": _source_url_for(platform, "news", state),
             "publish_time": time_range,
         }
 
@@ -354,7 +346,7 @@ def _normalize_record(
             or item.get("link")
             or item.get("source_link")
         )
-        or _source_url_for(platform, source_type),
+        or _source_url_for(platform, source_type, state),
         "publish_time": _as_text(
             item.get("publish_time")
             or item.get("publishTime")
@@ -372,11 +364,11 @@ def _normalize_records(
     platform: str,
     state: CompetitiveAnalysisState,
 ) -> List[Dict[str, str]]:
-    dimensions = state.get("focus_dimensions") or ["综合竞争情报"]
+    dimensions = get_state_dimensions(state)
     time_range = state.get("time_range", "")
     normalized = []
     for item in records:
-        record = _normalize_record(item, platform, dimensions, time_range)
+        record = _normalize_record(item, platform, dimensions, time_range, state)
         if record:
             normalized.append(record)
     return normalized
@@ -387,8 +379,23 @@ def _fallback_records(
     state: CompetitiveAnalysisState,
     reason: str = "LLM 输出解析失败",
 ) -> List[Dict[str, str]]:
-    dimensions = state.get("focus_dimensions") or ["内容生态", "会员体系", "商业模式", "推荐系统"]
-    source_cycle = ["official", "financial_report", "news", "app_store"]
+    industry_name = get_state_industry_name(state)
+    dimensions = get_state_dimensions(state)
+    data_sources = get_state_data_sources(state)
+    source_cycle = [source_type for source_type in data_sources if source_type in VALID_SOURCE_TYPES]
+    if not source_cycle:
+        source_cycle = ["official", "news", "review", "report"]
+    source_labels = {
+        "official": "官网",
+        "news": "新闻",
+        "review": "评测与用户评论",
+        "report": "报告",
+        "user_survey": "用户调研",
+    }
+    source_summary = "、".join(
+        source_labels.get(source_type, data_sources.get(source_type, source_type))
+        for source_type in source_cycle[:4]
+    )
     records = []
 
     for index, dimension in enumerate(dimensions):
@@ -399,12 +406,12 @@ def _fallback_records(
                 "dimension": dimension,
                 "content": (
                     f"{platform}在“{dimension}”维度的模拟公开信息：围绕"
-                    f"{state.get('analysis_scene', '长视频平台竞品分析')}，结合"
-                    f"{state.get('time_range', '近期')}内官网、财报、新闻与 App Store 口径，"
-                    f"重点观察内容供给、会员转化、商业化效率和用户体验变化。兜底原因：{reason}。"
+                    f"{state.get('analysis_scene') or industry_name + '竞品分析'}，结合"
+                    f"{state.get('time_range', '近期')}内{source_summary}等公开口径，"
+                    f"重点观察产品能力、用户反馈、价格策略和市场表现变化。兜底原因：{reason}。"
                 ),
                 "source_type": source_type,
-                "source_url": _source_url_for(platform, source_type),
+                "source_url": _source_url_for(platform, source_type, state),
                 "publish_time": state.get("time_range", ""),
             }
         )

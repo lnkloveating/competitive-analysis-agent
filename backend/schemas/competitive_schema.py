@@ -1,38 +1,26 @@
-from pydantic import BaseModel
-from typing import Optional, List, Literal
+from typing import Any, Dict, List, Optional, Union
 
-class MembershipSchema(BaseModel):
-    tiers: List[str]
-    monthly_price_cny: Optional[float]
-    annual_price_cny: Optional[float]
-    free_tier_available: bool
-    family_plan: bool
-    student_discount: bool
+from pydantic import BaseModel, Field
 
-class ContentSchema(BaseModel):
-    original_content: bool
-    licensed_content: bool
-    content_categories: List[str]
-    international_content: bool
-    content_update_frequency: str
 
-class TechCapabilitySchema(BaseModel):
-    recommendation_system: Literal["basic", "advanced", "ai_powered"]
-    max_resolution: str
-    offline_download: bool
-    multi_device: bool
-    max_concurrent_streams: int
+class ConsumerElectronicsProductSchema(BaseModel):
+    product_name: str
+    brand: str
+    category: str
+    price: Optional[Union[float, str]] = None
+    release_date: Optional[str] = None
+    specs: Dict[str, Any] = Field(default_factory=dict)
+    software_info: Dict[str, Any] = Field(default_factory=dict)
+    rating: Optional[float] = None
+    review_count: Optional[int] = None
+    common_pros: List[str] = Field(default_factory=list)
+    common_cons: List[str] = Field(default_factory=list)
+    market_share: Optional[Union[float, str]] = None
+    growth_trend: Optional[str] = None
+    analysis_date: Optional[str] = None
+    evidence_ids: List[str] = Field(default_factory=list)
+    confidence_score: Optional[float] = None
 
-class CompetitiveProfileSchema(BaseModel):
-    platform_name: str
-    platform_type: Literal["domestic", "international"]
-    membership: MembershipSchema
-    content: ContentSchema
-    tech_capability: TechCapabilitySchema
-    strengths: List[str]
-    weaknesses: List[str]
-    opportunities: List[str]
-    threats: List[str]
-    analysis_date: str
-    evidence_ids: List[str]
-    confidence_score: float
+
+class CompetitiveProfileSchema(ConsumerElectronicsProductSchema):
+    pass

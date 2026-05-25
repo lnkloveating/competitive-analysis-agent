@@ -13,19 +13,11 @@ from typing import Any, Dict, Iterable, List
 from dotenv import load_dotenv
 from langchain_openai import ChatOpenAI
 
+from .industry_config import get_state_dimensions, get_state_industry_name
 from .state import CompetitiveAnalysisState
 
 
 BASE_URL = "https://ark.cn-beijing.volces.com/api/v3"
-PRODUCT_DIMENSIONS = ["内容生态", "推荐系统", "用户体验", "社区功能", "技术能力"]
-
-DIMENSION_ALIASES = {
-    "内容生态": {"内容生态", "内容", "内容供给", "content", "content_ecosystem"},
-    "推荐系统": {"推荐系统", "推荐", "算法推荐", "recommendation", "recommendation_system"},
-    "用户体验": {"用户体验", "体验", "会员体系", "会员", "user_experience", "experience"},
-    "社区功能": {"社区功能", "社区", "互动", "community", "social"},
-    "技术能力": {"技术能力", "技术", "清晰度", "多端", "离线下载", "technical", "tech_capability"},
-}
 
 
 def _load_env() -> None:
@@ -164,16 +156,19 @@ def _get_platforms(state: CompetitiveAnalysisState) -> List[str]:
     return platforms
 
 
-def _canonical_dimension(value: Any) -> str | None:
-    text = _as_text(value).lower()
+def _dimension_key(value: Any) -> str:
+    return re.sub(r"[\s_\-]+", "", _as_text(value).lower())
+
+
+def _canonical_dimension(value: Any, dimensions: List[str]) -> str | None:
+    text = _dimension_key(value)
     if not text:
         return None
 
-    for dimension, aliases in DIMENSION_ALIASES.items():
-        for alias in aliases:
-            alias_text = alias.lower()
-            if text == alias_text or alias_text in text or text in alias_text:
-                return dimension
+    for dimension in dimensions:
+        dimension_text = _dimension_key(dimension)
+        if text == dimension_text or dimension_text in text or text in dimension_text:
+            return dimension
     return None
 
 
@@ -222,6 +217,7 @@ def _related_evidence(
     evidence_list: List[Dict[str, Any]],
     platform: str,
     dimension: str,
+    dimensions: List[str],
 ) -> List[Dict[str, Any]]:
     related = []
     for evidence in evidence_list:
@@ -231,10 +227,11 @@ def _related_evidence(
         evidence_dimension = _canonical_dimension(
             evidence.get("related_dimension")
             or evidence.get("dimension")
-            or evidence.get("topic")
+            or evidence.get("topic"),
+            dimensions,
         )
         raw_content = _as_text(evidence.get("raw_content") or evidence.get("claim"))
-        content_dimension = _canonical_dimension(raw_content)
+        content_dimension = _canonical_dimension(raw_content, dimensions)
         if evidence_dimension == dimension or content_dimension == dimension:
             related.append(evidence)
     return related
@@ -244,8 +241,9 @@ def _fallback_cell(
     evidence_list: List[Dict[str, Any]],
     platform: str,
     dimension: str,
+    dimensions: List[str],
 ) -> Dict[str, Any]:
-    related = _related_evidence(evidence_list, platform, dimension)
+    related = _related_evidence(evidence_list, platform, dimension, dimensions)
     evidence_ids = [_as_text(item.get("evidence_id")) for item in related if item.get("evidence_id")]
     evidence_ids = list(dict.fromkeys(evidence_ids))
 
@@ -268,12 +266,18 @@ def _fallback_matrix(state: CompetitiveAnalysisState) -> Dict[str, Any]:
         item for item in state.get("evidence_list", [])
         if isinstance(item, dict)
     ]
+    analysis_dimensions = get_state_dimensions(state)
     dimensions = {}
 
-    for dimension in PRODUCT_DIMENSIONS:
+    for dimension in analysis_dimensions:
         dimensions[dimension] = {}
         for platform in platforms:
-            dimensions[dimension][platform] = _fallback_cell(evidence_list, platform, dimension)
+            dimensions[dimension][platform] = _fallback_cell(
+                evidence_list,
+                platform,
+                dimension,
+                analysis_dimensions,
+            )
 
     return {
         "dimensions": dimensions,
@@ -284,25 +288,34 @@ def _fallback_matrix(state: CompetitiveAnalysisState) -> Dict[str, Any]:
 def _build_prompt(state: CompetitiveAnalysisState) -> str:
     platforms = _get_platforms(state)
     evidence_list = state.get("evidence_list", [])
+    dimensions = get_state_dimensions(state)
+    industry_name = get_state_industry_name(state)
+    example_platform = platforms[0] if platforms else "目标品牌"
+    format_example = {
+        "dimensions": {
+            dimension: (
+                {
+                    example_platform: {
+                        "score": 4,
+                        "summary": "说明",
+                        "evidence_ids": ["EV001"],
+                    }
+                }
+                if index == 0
+                else {}
+            )
+            for index, dimension in enumerate(dimensions)
+        },
+        "generated_at": "时间戳",
+    }
     return f"""
-你是 ProductAgent，负责基于证据列表生成长视频平台产品维度对比矩阵。
+你是 ProductAgent，负责基于证据列表生成{industry_name}产品维度对比矩阵。
 
 分析对象：{", ".join(platforms)}
-分析维度：{", ".join(PRODUCT_DIMENSIONS)}
+分析维度：{", ".join(dimensions)}
 
 请只输出 JSON，不要输出 Markdown 或解释文字。输出格式必须为：
-{{
-  "dimensions": {{
-    "内容生态": {{
-      "腾讯视频": {{"score": 4, "summary": "说明", "evidence_ids": ["EV001"]}}
-    }},
-    "推荐系统": {{}},
-    "用户体验": {{}},
-    "社区功能": {{}},
-    "技术能力": {{}}
-  }},
-  "generated_at": "时间戳"
-}}
+{json.dumps(format_example, ensure_ascii=False, indent=2)}
 
 规则：
 - 每个平台在每个维度都要有 score、summary、evidence_ids。
@@ -330,22 +343,29 @@ def _extract_matrix_payload(payload: Any) -> Any:
     return None
 
 
-def _rows_to_dimensions(rows: List[Any]) -> Dict[str, Dict[str, Dict[str, Any]]]:
-    dimensions: Dict[str, Dict[str, Dict[str, Any]]] = {}
+def _rows_to_dimensions(
+    rows: List[Any],
+    dimensions: List[str],
+) -> Dict[str, Dict[str, Dict[str, Any]]]:
+    dimension_rows: Dict[str, Dict[str, Dict[str, Any]]] = {}
     for row in rows:
         if not isinstance(row, dict):
             continue
-        dimension = _canonical_dimension(row.get("dimension") or row.get("related_dimension"))
+        dimension = _canonical_dimension(row.get("dimension") or row.get("related_dimension"), dimensions)
         platform = _as_text(row.get("platform"))
         if not dimension or not platform:
             continue
-        dimensions.setdefault(dimension, {})[platform] = row
-    return dimensions
+        dimension_rows.setdefault(dimension, {})[platform] = row
+    return dimension_rows
 
 
-def _find_dimension_block(dimensions_payload: Dict[str, Any], dimension: str) -> Dict[str, Any]:
+def _find_dimension_block(
+    dimensions_payload: Dict[str, Any],
+    dimension: str,
+    dimensions: List[str],
+) -> Dict[str, Any]:
     for key, value in dimensions_payload.items():
-        if _canonical_dimension(key) == dimension and isinstance(value, dict):
+        if _canonical_dimension(key, dimensions) == dimension and isinstance(value, dict):
             return value
     return {}
 
@@ -388,8 +408,9 @@ def _normalize_matrix(
     if matrix_payload is None:
         return fallback
 
+    dimensions = get_state_dimensions(state)
     if isinstance(matrix_payload, list):
-        dimensions_payload = _rows_to_dimensions(matrix_payload)
+        dimensions_payload = _rows_to_dimensions(matrix_payload, dimensions)
     elif isinstance(matrix_payload, dict):
         raw_dimensions = matrix_payload.get("dimensions") if isinstance(matrix_payload.get("dimensions"), dict) else matrix_payload
         dimensions_payload = raw_dimensions if isinstance(raw_dimensions, dict) else {}
@@ -401,8 +422,8 @@ def _normalize_matrix(
     platforms = _get_platforms(state)
     normalized_dimensions = {}
 
-    for dimension in PRODUCT_DIMENSIONS:
-        dimension_block = _find_dimension_block(dimensions_payload, dimension)
+    for dimension in dimensions:
+        dimension_block = _find_dimension_block(dimensions_payload, dimension, dimensions)
         normalized_dimensions[dimension] = {}
         for platform in platforms:
             fallback_cell = fallback["dimensions"][dimension][platform]
