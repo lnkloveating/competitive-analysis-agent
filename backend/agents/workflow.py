@@ -36,6 +36,8 @@ def business_agent_node(state: CompetitiveAnalysisState) -> dict:
     return {
         "current_agent": result.get("current_agent", "BusinessAgent"),
         "business_matrix": result.get("business_matrix", {}),
+        "claims": result.get("claims", []),
+        "trace_log": result.get("trace_log", []),
     }
 
 
