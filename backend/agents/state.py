@@ -70,5 +70,7 @@ class CompetitiveAnalysisState(TypedDict):
     iteration_count: int
     rejected_agents: List[str]
     is_approved: bool
+    needs_human_review: bool
+    quality_status: str
     error_log: List[str]
     trace_log: Annotated[List[Dict], merge_trace_log]

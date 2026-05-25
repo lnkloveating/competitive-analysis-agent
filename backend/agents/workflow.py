@@ -19,6 +19,39 @@ from .state import CompetitiveAnalysisState
 from .strategy_agent import strategy_agent
 
 
+def human_review_node(state: CompetitiveAnalysisState) -> dict:
+    """Stop automatic routing after repeated quality rejection."""
+    quality_result = state.get("quality_result", {})
+    risk_flags = state.get("risk_flags", [])
+
+    return {
+        **state,
+        "current_agent": "HumanReviewRequired",
+        "is_approved": False,
+        "needs_human_review": True,
+        "quality_status": "rejected_after_max_iterations",
+        "final_report": {
+            "quality_status": "rejected_after_max_iterations",
+            "needs_human_review": True,
+            "auto_approved": False,
+            "executive_summary": [
+                "系统已完成自动分析流程，但质量检查在 3 次自动修复后仍未通过。",
+                "当前报告仅作为低置信草稿，不建议直接用于正式业务决策。",
+                "请人工根据 required_actions 补充或修正证据后重新运行分析。",
+            ],
+            "quality_result": quality_result,
+            "risk_flags": risk_flags,
+            "missing_dimensions": quality_result.get("missing_dimensions", []),
+            "missing_platforms": quality_result.get("missing_platforms", []),
+            "required_actions": quality_result.get("required_actions", []),
+            "draft_product_matrix": state.get("product_matrix", {}),
+            "draft_business_matrix": state.get("business_matrix", {}),
+            "draft_claims": state.get("claims", []),
+            "disclaimer": "This report requires human review before use.",
+        },
+    }
+
+
 def product_agent_node(state: CompetitiveAnalysisState) -> dict:
     """Run ProductAgent in a parallel branch and return only its owned updates."""
     result = product_agent(state)
@@ -51,6 +84,7 @@ def build_workflow():
     workflow.add_node("risk_agent", risk_agent)
     workflow.add_node("quality_agent", quality_agent)
     workflow.add_node("strategy_agent", strategy_agent)
+    workflow.add_node("human_review", human_review_node)
 
     workflow.set_entry_point("research_agent")
 
@@ -69,9 +103,12 @@ def build_workflow():
             "business_agent": "business_agent",
             "research_agent": "research_agent",
             "strategy_agent": "strategy_agent",
+            "risk_agent": "risk_agent",
+            "human_review": "human_review",
         },
     )
     workflow.add_edge("strategy_agent", END)
+    workflow.add_edge("human_review", END)
 
     return workflow
 
