@@ -302,6 +302,7 @@ def _draft_report(
     business_matrix: Dict[str, Any],
     risk_flags: List[Dict[str, Any]],
     quality_result: Dict[str, Any],
+    metrics: Dict[str, Any],
 ) -> Dict[str, Any]:
     return {
         "quality_status": "requires_human_review",
@@ -320,6 +321,9 @@ def _draft_report(
         "risk_disclosure": _risk_disclosure(risk_flags),
         "quality_result": quality_result,
         "risk_flags": risk_flags,
+        "used_claim_ids": [],
+        "used_evidence_ids": [],
+        "metrics": metrics,
         "draft_product_matrix": product_matrix,
         "draft_business_matrix": business_matrix,
         "draft_claims": claims,
@@ -459,6 +463,7 @@ def strategy_agent(state: dict) -> Dict[str, Any]:
             business_matrix=business_matrix if isinstance(business_matrix, dict) else {},
             risk_flags=risk_flags,
             quality_result=quality_result if isinstance(quality_result, dict) else {},
+            metrics=metrics if isinstance(metrics, dict) else {},
         )
         used_claim_ids: List[str] = []
         used_evidence_ids: List[str] = []
@@ -486,6 +491,7 @@ def strategy_agent(state: dict) -> Dict[str, Any]:
         "final_report": output.final_report,
         "used_claim_ids": output.used_claim_ids,
         "used_evidence_ids": output.used_evidence_ids,
+        "metrics": metrics if isinstance(metrics, dict) else {},
     }
     _append_trace(next_state, output.used_claim_ids, output.used_evidence_ids)
 

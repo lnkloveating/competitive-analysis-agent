@@ -1,6 +1,6 @@
 """Backward compatibility wrapper for the existing workflow.
 
-New QualityAgent implementation lives in app/agents/quality_agent.py.
+New implementation lives in app/agents/quality_agent.py.
 """
 
 from __future__ import annotations

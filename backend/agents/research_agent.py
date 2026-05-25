@@ -1,7 +1,6 @@
-"""Compatibility wrapper for the existing LangGraph workflow.
+"""Backward compatibility wrapper for the existing workflow.
 
-The ResearchAgent implementation lives in app.agents.research_agent.
-This module keeps the old import path stable for backend/agents/workflow.py.
+New implementation lives in app/agents/research_agent.py.
 """
 
 from __future__ import annotations

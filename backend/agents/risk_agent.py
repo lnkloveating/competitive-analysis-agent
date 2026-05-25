@@ -1,6 +1,6 @@
 """Backward compatibility wrapper for the existing workflow.
 
-New RiskAgent implementation lives in app/agents/risk_agent.py.
+New implementation lives in app/agents/risk_agent.py.
 """
 
 from __future__ import annotations

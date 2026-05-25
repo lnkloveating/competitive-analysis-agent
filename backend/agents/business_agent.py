@@ -1,6 +1,6 @@
 """Backward compatibility wrapper for the existing workflow.
 
-New BusinessAgent implementation lives in app/agents/business_agent.py.
+New implementation lives in app/agents/business_agent.py.
 """
 
 from __future__ import annotations

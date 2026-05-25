@@ -23,6 +23,16 @@ def human_review_node(state: CompetitiveAnalysisState) -> dict:
     """Stop automatic routing after repeated quality rejection."""
     quality_result = state.get("quality_result", {})
     risk_flags = state.get("risk_flags", [])
+    trace_log = list(state.get("trace_log", []))
+    trace_log.append(
+        {
+            "step_id": len(trace_log) + 1,
+            "agent_name": "HumanReviewRequired",
+            "status": "rejected",
+            "output_summary": "automatic retries exhausted; human review required",
+            "error": None,
+        }
+    )
 
     return {
         **state,
@@ -30,6 +40,10 @@ def human_review_node(state: CompetitiveAnalysisState) -> dict:
         "is_approved": False,
         "needs_human_review": True,
         "quality_status": "rejected_after_max_iterations",
+        "metrics": state.get("metrics", {}),
+        "used_claim_ids": state.get("used_claim_ids", []),
+        "used_evidence_ids": state.get("used_evidence_ids", []),
+        "trace_log": trace_log,
         "final_report": {
             "quality_status": "rejected_after_max_iterations",
             "needs_human_review": True,
@@ -44,6 +58,9 @@ def human_review_node(state: CompetitiveAnalysisState) -> dict:
             "missing_dimensions": quality_result.get("missing_dimensions", []),
             "missing_platforms": quality_result.get("missing_platforms", []),
             "required_actions": quality_result.get("required_actions", []),
+            "used_claim_ids": state.get("used_claim_ids", []),
+            "used_evidence_ids": state.get("used_evidence_ids", []),
+            "metrics": state.get("metrics", {}),
             "draft_product_matrix": state.get("product_matrix", {}),
             "draft_business_matrix": state.get("business_matrix", {}),
             "draft_claims": state.get("claims", []),

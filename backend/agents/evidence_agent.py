@@ -1,6 +1,6 @@
 """Backward compatibility wrapper for the existing workflow.
 
-New EvidenceAgent implementation lives in app/agents/evidence_agent.py.
+New implementation lives in app/agents/evidence_agent.py.
 """
 
 from __future__ import annotations

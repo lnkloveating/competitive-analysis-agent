@@ -371,6 +371,19 @@ def _normalize_evidence(
     return evidence
 
 
+def _append_trace(state: dict, evidence_count: int) -> None:
+    trace_log = state.setdefault("trace_log", [])
+    trace_log.append(
+        {
+            "step_id": len(trace_log) + 1,
+            "agent_name": "EvidenceAgent",
+            "status": "success",
+            "output_summary": f"structured {evidence_count} evidence items",
+            "error": None,
+        }
+    )
+
+
 def evidence_agent(state: dict) -> Dict[str, Any]:
     """Convert raw_research into EvidenceItem-compatible records."""
     _load_env()
@@ -407,9 +420,12 @@ def evidence_agent(state: dict) -> Dict[str, Any]:
             )
         )
 
-    print(f"[EvidenceAgent] 处理完成，共 {len(evidence_list)} 条证据")
-    return {
+    next_state = {
         **state,
         "current_agent": "EvidenceAgent",
         "evidence_list": evidence_list,
     }
+    _append_trace(next_state, len(evidence_list))
+
+    print(f"[EvidenceAgent] 处理完成，共 {len(evidence_list)} 条证据")
+    return next_state

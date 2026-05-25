@@ -1,6 +1,6 @@
 """Backward compatibility wrapper for the existing workflow.
 
-New ProductAgent implementation lives in app/agents/product_agent.py.
+New implementation lives in app/agents/product_agent.py.
 """
 
 from __future__ import annotations

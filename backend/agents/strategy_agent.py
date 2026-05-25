@@ -1,6 +1,6 @@
 """Backward compatibility wrapper for the existing workflow.
 
-New StrategyAgent implementation lives in app/agents/strategy_agent.py.
+New implementation lives in app/agents/strategy_agent.py.
 """
 
 from __future__ import annotations
