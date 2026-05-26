@@ -47,15 +47,22 @@ def _build_initial_state(request: AnalysisRequest) -> Dict[str, Any]:
         {
             "raw_research": [],
             "evidence_list": [],
+            "claims": [],
             "product_matrix": {},
             "business_matrix": {},
             "risk_flags": [],
             "quality_result": {},
             "final_report": {},
+            "trace_log": [],
+            "metrics": {},
+            "used_claim_ids": [],
+            "used_evidence_ids": [],
             "current_agent": "",
             "iteration_count": 0,
             "rejected_agents": [],
             "is_approved": False,
+            "needs_human_review": False,
+            "quality_status": "",
             "error_log": [],
         }
     )
@@ -67,6 +74,13 @@ def _get_task(task_id: str) -> Dict[str, Any]:
     if task is None:
         raise HTTPException(status_code=404, detail="task_id 不存在")
     return task
+
+
+def _get_task_state(task_id: str) -> Dict[str, Any]:
+    with TASK_LOCK:
+        task = _get_task(task_id).copy()
+        return dict(task.get("state", {}))
+
 
 def _task_progress(task: Dict[str, Any]) -> int:
     if task.get("status") == "completed":
@@ -130,9 +144,12 @@ async def get_industries():
     industries = [
         {
             "key": key,
+            "industry_key": key,
             "name": config.get("name", ""),
             "competitors": config.get("competitors", []),
+            "representative_products": config.get("representative_products", {}),
             "dimensions": config.get("dimensions", []),
+            "description": config.get("description", ""),
             "data_sources": config.get("data_sources", {}),
             "schema_fields": config.get("schema_fields", []),
         }
@@ -187,4 +204,85 @@ async def get_report(task_id: str):
         "quality_result": state.get("quality_result", {}),
         "evidence_list": state.get("evidence_list", []),
         "error": task.get("error", ""),
+    }
+
+
+@app.get("/api/analysis/{task_id}/evidence")
+async def get_evidence(task_id: str):
+    state = _get_task_state(task_id)
+    return {
+        "task_id": task_id,
+        "evidence_list": state.get("evidence_list", []),
+    }
+
+
+@app.get("/api/analysis/{task_id}/claims")
+async def get_claims(task_id: str):
+    state = _get_task_state(task_id)
+    return {
+        "task_id": task_id,
+        "claims": state.get("claims", []),
+    }
+
+
+@app.get("/api/analysis/{task_id}/trace")
+async def get_trace(task_id: str):
+    state = _get_task_state(task_id)
+    return {
+        "task_id": task_id,
+        "trace_log": state.get("trace_log", []),
+    }
+
+
+@app.get("/api/analysis/{task_id}/quality")
+async def get_quality(task_id: str):
+    state = _get_task_state(task_id)
+    return {
+        "task_id": task_id,
+        "quality_result": state.get("quality_result", {}),
+        "is_approved": state.get("is_approved", False),
+        "iteration_count": state.get("iteration_count", 0),
+        "rejected_agents": state.get("rejected_agents", []),
+        "needs_human_review": state.get("needs_human_review", False),
+        "quality_status": state.get("quality_status", ""),
+    }
+
+
+@app.get("/api/analysis/{task_id}/metrics")
+async def get_metrics(task_id: str):
+    state = _get_task_state(task_id)
+    return {
+        "task_id": task_id,
+        "metrics": state.get("metrics", {}),
+    }
+
+
+@app.get("/api/analysis/{task_id}/risks")
+async def get_risks(task_id: str):
+    state = _get_task_state(task_id)
+    return {
+        "task_id": task_id,
+        "risk_flags": state.get("risk_flags", []),
+    }
+
+
+@app.get("/api/analysis/{task_id}/artifacts")
+async def get_artifacts(task_id: str):
+    state = _get_task_state(task_id)
+    raw_research = state.get("raw_research", [])
+    evidence_list = state.get("evidence_list", [])
+    claims = state.get("claims", [])
+    risk_flags = state.get("risk_flags", [])
+    trace_log = state.get("trace_log", [])
+
+    return {
+        "task_id": task_id,
+        "raw_research_count": len(raw_research) if isinstance(raw_research, list) else 0,
+        "evidence_count": len(evidence_list) if isinstance(evidence_list, list) else 0,
+        "claim_count": len(claims) if isinstance(claims, list) else 0,
+        "risk_count": len(risk_flags) if isinstance(risk_flags, list) else 0,
+        "trace_count": len(trace_log) if isinstance(trace_log, list) else 0,
+        "has_product_matrix": bool(state.get("product_matrix", {})),
+        "has_business_matrix": bool(state.get("business_matrix", {})),
+        "has_final_report": bool(state.get("final_report", {})),
     }
