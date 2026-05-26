@@ -1,6 +1,6 @@
 # FastAPI 接口文档
 
-本文档面向前端联调，描述当前后端已暴露的分析任务接口和 Agent 工作台只读接口。
+本文档面向前端同学，描述当前后端已经暴露的分析任务接口、行业配置接口和 Agent 工作台只读接口。
 
 默认服务地址：
 
@@ -8,19 +8,19 @@
 http://localhost:8000
 ```
 
-典型调用流程：
+典型联调流程：
 
 1. 调用 `POST /api/analysis/start` 创建分析任务，拿到 `task_id`。
 2. 轮询 `GET /api/analysis/{task_id}/status`，直到 `status` 为 `completed` 或 `failed`。
-3. 读取报告和中间产物：
-   `report`、`evidence`、`claims`、`trace`、`quality`、`metrics`、`risks`、`artifacts`。
+3. 读取报告和中间产物：`report`、`evidence`、`claims`、`trace`、`quality`、`metrics`、`risks`、`artifacts`。
 
 通用约定：
 
-- 所有 `{task_id}` 均为 `POST /api/analysis/start` 返回的任务 ID。
+- 所有 `{task_id}` 都来自 `POST /api/analysis/start` 的返回值。
 - 如果 `task_id` 不存在，任务相关接口返回 `404`。
 - 如果某个中间字段尚未生成或不存在，接口返回空数组 `[]` 或空对象 `{}`，不会因为字段缺失返回 `500`。
-- `POST /api/analysis/start` 是异步启动 workflow，接口会立即返回，不等待分析完成。
+- `POST /api/analysis/start` 会异步启动 LangGraph workflow，接口立即返回，不等待分析完成。
+- 当前 Demo 推荐使用 `industry_key = "gaming_mouse"`。`gaming_peripherals` 仍然保留，用于后续泛电竞外设扩展。
 
 ## POST /api/analysis/start
 
@@ -32,21 +32,33 @@ http://localhost:8000
 | 请求参数 | JSON body，见下方示例 |
 | 404 行为 | 不涉及 `task_id` 查询，正常不会返回 404 |
 
-请求示例：
+### Gaming Mouse Demo 请求示例
+
+前端做 Demo 时，建议默认使用以下电竞鼠标场景：
 
 ```json
 {
-  "industry_key": "gaming_peripherals",
   "target_platform": "罗技",
-  "competitors": ["雷蛇", "海盗船"],
-  "analysis_scene": "电竞外设竞品分析",
+  "competitors": ["罗技", "雷蛇", "海盗船"],
+  "analysis_scene": "电竞鼠标竞品分析",
   "target_user": "产品经理",
-  "time_range": "近12个月",
-  "focus_dimensions": ["硬件性能", "软件驱动", "用户口碑", "定价策略"]
+  "time_range": "近两年",
+  "focus_dimensions": [
+    "性能参数",
+    "轻量化设计",
+    "无线与续航",
+    "软件生态",
+    "用户口碑",
+    "价格定位",
+    "电竞品牌影响力"
+  ],
+  "industry_key": "gaming_mouse"
 }
 ```
 
-返回示例：
+后续仍然可以通过 `industry_key` 切换到其他行业，例如 `gaming_peripherals`、`smartphones`、`headphones`、`cameras`。
+
+### 返回示例
 
 ```json
 {
@@ -55,17 +67,17 @@ http://localhost:8000
 }
 ```
 
-字段说明：
+### 字段说明
 
 | 字段 | 类型 | 说明 |
 |---|---|---|
-| `industry_key` | string | 行业配置 key，例如 `gaming_peripherals` |
+| `industry_key` | string | 行业配置 key，Demo 推荐 `gaming_mouse` |
 | `target_platform` | string | 目标品牌或平台 |
-| `competitors` | string[] | 竞品列表 |
+| `competitors` | string[] | 参与对比的品牌列表 |
 | `analysis_scene` | string | 分析场景 |
 | `target_user` | string | 报告目标用户 |
 | `time_range` | string | 时间范围 |
-| `focus_dimensions` | string[] | 前端传入关注维度；后端会结合行业配置生成实际分析维度 |
+| `focus_dimensions` | string[] | 前端传入的关注维度，后端会结合行业配置生成分析产物 |
 
 ## GET /api/analysis/{task_id}/status
 
@@ -117,29 +129,33 @@ http://localhost:8000
   "final_report": {
     "quality_status": "approved",
     "needs_human_review": false,
-    "executive_summary": "本次报告基于 24 条结构化 claims 和 12 条 evidence 生成...",
+    "executive_summary": [
+      "本报告基于结构化 evidence 和 claims 生成，聚焦电竞鼠标竞品对比。"
+    ],
     "competitive_ranking": [
       {
         "platform": "罗技",
-        "score": 7.4,
+        "score": 8.4,
         "rank": 1,
-        "summary": "罗技优势主要集中在硬件性能、软件驱动（证据：EV001、EV002）"
+        "summary": "罗技在轻量化设计和电竞品牌影响力上有较多证据支持（证据：EV001、EV005）"
       }
     ],
     "swot_analysis": {
-      "strengths": ["罗技在综合矩阵中处于领先位置（证据：EV001）"],
-      "weaknesses": ["当前风险水位未触发 high severity，但仍需保留证据复核机制。"],
-      "opportunities": ["把高置信 claims 转化为可持续跟踪的产品与商业指标。"],
-      "threats": ["竞品定价、渠道和产品迭代可能改变当前排名。"]
+      "strengths": ["罗技在高端无线电竞鼠标中有较强品牌认知（证据：EV005）"],
+      "weaknesses": ["部分价格定位仍需结合更多电商数据复核（证据：EV006）"],
+      "opportunities": ["围绕轻量化和低延迟体验强化产品叙事。"],
+      "threats": ["雷蛇和海盗船在新品节奏上可能改变当前对比格局。"]
     },
     "strategic_recommendations": [
       {
-        "recommendation": "围绕硬件性能优先推进可验证改进（证据：EV001）",
+        "recommendation": "优先围绕轻量化设计和无线性能形成差异化卖点。",
         "supporting_claim_ids": ["PCL001"],
         "supporting_evidence_ids": ["EV001"],
         "confidence_score": 0.85
       }
-    ]
+    ],
+    "used_claim_ids": ["PCL001"],
+    "used_evidence_ids": ["EV001"]
   },
   "quality_result": {
     "approved": true,
@@ -162,18 +178,40 @@ http://localhost:8000
 | 请求参数 | 无 |
 | 404 行为 | 不涉及 `task_id` 查询，正常不会返回 404 |
 
+当前 Demo 推荐使用 `gaming_mouse`。`gaming_peripherals` 仍然保留，用于后续扩展到更宽泛的电竞外设场景。
+
 返回示例：
 
 ```json
 {
   "industries": [
     {
+      "key": "gaming_mouse",
+      "industry_key": "gaming_mouse",
+      "name": "电竞鼠标",
+      "competitors": ["罗技", "雷蛇", "海盗船"],
+      "dimensions": [
+        "性能参数",
+        "轻量化设计",
+        "无线与续航",
+        "软件生态",
+        "用户口碑",
+        "价格定位",
+        "电竞品牌影响力"
+      ],
+      "representative_products": {
+        "罗技": ["G Pro X Superlight 2", "G502 X Plus"],
+        "雷蛇": ["Viper V3 Pro", "DeathAdder V3 Pro"],
+        "海盗船": ["M75 Air", "SABRE RGB PRO Wireless"]
+      },
+      "description": "聚焦电竞鼠标产品的性能、手感、软件、口碑、价格和电竞品牌影响力分析。"
+    },
+    {
       "key": "gaming_peripherals",
+      "industry_key": "gaming_peripherals",
       "name": "电竞外设",
       "competitors": ["罗技", "雷蛇", "海盗船", "SteelSeries"],
-      "dimensions": ["硬件性能", "软件驱动", "用户口碑", "定价策略", "产品线广度"],
-      "data_sources": {},
-      "schema_fields": []
+      "dimensions": ["硬件性能", "软件驱动", "用户口碑", "定价策略", "产品线广度"]
     }
   ]
 }
@@ -207,6 +245,8 @@ http://localhost:8000
 | 请求参数 | Path 参数：`task_id` |
 | 404 行为 | `task_id` 不存在时返回 `404 {"detail": "task_id 不存在"}` |
 
+在 `gaming_mouse` 场景下，`evidence_list` 会围绕电竞鼠标代表型号、产品参数、软件生态、用户口碑、价格定位和电竞影响力生成。
+
 返回示例：
 
 ```json
@@ -216,14 +256,14 @@ http://localhost:8000
     {
       "evidence_id": "EV001",
       "platform": "罗技",
-      "claim": "罗技在硬件性能维度有公开材料支撑。",
+      "claim": "罗技 G Pro X Superlight 2 在性能参数维度有公开材料支撑。",
       "source_type": "official",
-      "source_title": "罗技硬件性能模拟公开材料",
-      "source_url": "mock://logitech/001",
-      "publish_time": "近12个月",
+      "source_title": "罗技 G Pro X Superlight 2 官方性能参数资料",
+      "source_url": "mock://gaming_mouse/logitech/g-pro-x-superlight-2/official",
+      "publish_time": "2025-03-01",
       "collected_time": "2026-05-26T10:00:00",
       "credibility": "high",
-      "related_dimension": "硬件性能",
+      "related_dimension": "性能参数",
       "raw_content": "原始材料摘要...",
       "confidence_score": 0.85
     }
@@ -231,7 +271,7 @@ http://localhost:8000
 }
 ```
 
-字段缺失时：
+字段缺失时返回：
 
 ```json
 {
@@ -250,6 +290,8 @@ http://localhost:8000
 | 请求参数 | Path 参数：`task_id` |
 | 404 行为 | `task_id` 不存在时返回 `404 {"detail": "task_id 不存在"}` |
 
+在 `gaming_mouse` 场景下，`claims` 会围绕电竞鼠标代表型号、产品参数、软件生态、用户口碑、价格定位和电竞影响力生成。
+
 返回示例：
 
 ```json
@@ -258,8 +300,8 @@ http://localhost:8000
   "claims": [
     {
       "claim_id": "PCL001",
-      "content": "罗技在硬件性能维度有证据支持。",
-      "dimension": "硬件性能",
+      "content": "罗技在性能参数维度有证据支持，主要体现为高端传感器和无线低延迟体验。",
+      "dimension": "性能参数",
       "related_platforms": ["罗技"],
       "evidence_ids": ["EV001"],
       "confidence_score": 0.85,
@@ -267,10 +309,10 @@ http://localhost:8000
     },
     {
       "claim_id": "BCL001",
-      "content": "雷蛇在定价策略维度有商业判断证据。",
-      "dimension": "定价策略",
+      "content": "雷蛇在价格定位上更偏向高端电竞用户。",
+      "dimension": "价格定位",
       "related_platforms": ["雷蛇"],
-      "evidence_ids": ["EV008"],
+      "evidence_ids": ["EV013"],
       "confidence_score": 0.7,
       "generated_by": "BusinessAgent"
     }
@@ -307,14 +349,14 @@ http://localhost:8000
       "step_id": 1,
       "agent_name": "ResearchAgent",
       "status": "success",
-      "output_summary": "collected 12 raw research items",
+      "output_summary": "collected 21 raw research items",
       "error": null
     },
     {
       "step_id": 7,
       "agent_name": "StrategyAgent",
       "status": "success",
-      "output_summary": "generated final_report using 5 claims and 12 evidence items",
+      "output_summary": "generated final_report using 42 claims and 21 evidence items",
       "error": null
     }
   ]
@@ -393,7 +435,7 @@ http://localhost:8000
 }
 ```
 
-字段缺失时会返回：
+字段缺失时返回：
 
 ```json
 {
@@ -423,8 +465,8 @@ http://localhost:8000
 {
   "task_id": "0f7d9b63-7c80-4c08-9f38-0f841d8d4075",
   "metrics": {
-    "evidence_count": 12,
-    "claim_count": 24,
+    "evidence_count": 21,
+    "claim_count": 42,
     "citation_rate": 1.0,
     "coverage_rate": 1.0,
     "quality_score": 90
@@ -460,10 +502,10 @@ http://localhost:8000
     {
       "risk_id": "R001",
       "risk_type": "evidence_gap",
-      "description": "雷蛇在定价策略维度缺少可用证据。",
+      "description": "雷蛇在价格定位维度缺少可用证据。",
       "severity": "medium",
       "related_platforms": ["雷蛇"],
-      "related_dimensions": ["定价策略"],
+      "related_dimensions": ["价格定位"],
       "related_evidence_ids": []
     }
   ]
@@ -489,14 +531,16 @@ http://localhost:8000
 | 请求参数 | Path 参数：`task_id` |
 | 404 行为 | `task_id` 不存在时返回 `404 {"detail": "task_id 不存在"}` |
 
+在 `gaming_mouse` 场景下，`artifacts` 的统计结果可用于展示电竞鼠标代表型号、产品参数、软件生态、用户口碑、价格定位和电竞影响力相关 evidence / claims 的生成进度。
+
 返回示例：
 
 ```json
 {
   "task_id": "0f7d9b63-7c80-4c08-9f38-0f841d8d4075",
-  "raw_research_count": 12,
-  "evidence_count": 12,
-  "claim_count": 24,
+  "raw_research_count": 21,
+  "evidence_count": 21,
+  "claim_count": 42,
   "risk_count": 0,
   "trace_count": 7,
   "has_product_matrix": true,
@@ -505,7 +549,7 @@ http://localhost:8000
 }
 ```
 
-字段缺失时返回示例：
+字段缺失时返回：
 
 ```json
 {
@@ -535,9 +579,9 @@ HTTP 状态码为 `404`。
 
 ## 前端联调建议
 
+- Demo 默认行业使用 `gaming_mouse`，默认品牌使用罗技、雷蛇、海盗船。
 - 创建任务后立即展示 `task_id` 和 `running` 状态。
 - 每 1-2 秒轮询 `/status`，`completed` 后停止轮询。
-- 工作台页面可以并行请求：
-  `/evidence`、`/claims`、`/trace`、`/quality`、`/risks`、`/artifacts`。
+- 工作台页面可以并行请求：`/evidence`、`/claims`、`/trace`、`/quality`、`/risks`、`/artifacts`。
 - 如果 `/quality` 返回 `needs_human_review: true`，前端应展示“待人工审核”状态，并避免把 `final_report` 当作正式报告展示。
-- 如果某个只读接口返回空数组或空对象，表示对应 Agent 还没产出或当前任务没有该类数据。
+- 如果某个只读接口返回空数组或空对象，表示对应 Agent 还没有产出或当前任务没有该类数据。
