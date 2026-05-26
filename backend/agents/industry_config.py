@@ -39,6 +39,27 @@ INDUSTRY_CONFIGS = {
         "data_sources": DEFAULT_DATA_SOURCES.copy(),
         "schema_fields": COMMON_SCHEMA_FIELDS.copy(),
     },
+    "gaming_mouse": {
+        "name": "电竞鼠标",
+        "competitors": ["罗技", "雷蛇", "海盗船"],
+        "representative_products": {
+            "罗技": ["G Pro X Superlight 2", "G502 X Plus"],
+            "雷蛇": ["Viper V3 Pro", "DeathAdder V3 Pro"],
+            "海盗船": ["M75 Air", "SABRE RGB PRO Wireless"],
+        },
+        "dimensions": [
+            "性能参数",
+            "轻量化设计",
+            "无线与续航",
+            "软件生态",
+            "用户口碑",
+            "价格定位",
+            "电竞品牌影响力",
+        ],
+        "description": "聚焦电竞鼠标产品的性能、手感、软件、口碑、价格和电竞品牌影响力分析。",
+        "data_sources": DEFAULT_DATA_SOURCES.copy(),
+        "schema_fields": COMMON_SCHEMA_FIELDS.copy(),
+    },
     "smartphones": {
         "name": "智能手机",
         "competitors": ["iPhone", "三星", "华为", "小米"],

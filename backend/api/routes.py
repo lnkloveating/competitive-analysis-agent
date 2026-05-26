@@ -144,9 +144,12 @@ async def get_industries():
     industries = [
         {
             "key": key,
+            "industry_key": key,
             "name": config.get("name", ""),
             "competitors": config.get("competitors", []),
+            "representative_products": config.get("representative_products", {}),
             "dimensions": config.get("dimensions", []),
+            "description": config.get("description", ""),
             "data_sources": config.get("data_sources", {}),
             "schema_fields": config.get("schema_fields", []),
         }

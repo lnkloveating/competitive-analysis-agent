@@ -24,13 +24,13 @@ from api.routes import app
 
 
 REQUEST_BODY = {
-    "industry_key": "gaming_peripherals",
+    "industry_key": "gaming_mouse",
     "target_platform": "罗技",
     "competitors": ["雷蛇", "海盗船"],
-    "analysis_scene": "电竞外设竞品分析",
+    "analysis_scene": "电竞鼠标竞品分析",
     "target_user": "产品经理",
     "time_range": "近12个月",
-    "focus_dimensions": ["硬件性能", "软件驱动", "用户口碑", "定价策略"],
+    "focus_dimensions": ["性能参数", "轻量化设计", "无线与续航", "软件生态", "用户口碑", "价格定位", "电竞品牌影响力"],
 }
 
 

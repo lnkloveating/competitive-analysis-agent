@@ -22,14 +22,14 @@ from agents.state import CompetitiveAnalysisState
 
 
 initial_state: CompetitiveAnalysisState = {
-    "industry_key": "gaming_peripherals",
-    "industry_name": "电竞外设",
+    "industry_key": "gaming_mouse",
+    "industry_name": "电竞鼠标",
     "target_platform": "罗技",
     "competitors": ["雷蛇", "海盗船"],
-    "analysis_scene": "电竞外设产品竞争格局与增长策略分析",
-    "target_user": "电竞外设产品经理",
+    "analysis_scene": "电竞鼠标产品竞争格局与增长策略分析",
+    "target_user": "电竞鼠标产品经理",
     "time_range": "近 12 个月",
-    "focus_dimensions": ["硬件性能", "软件驱动", "用户口碑", "定价策略"],
+    "focus_dimensions": ["性能参数", "轻量化设计", "无线与续航", "软件生态", "用户口碑", "价格定位", "电竞品牌影响力"],
     "raw_research": [],
     "evidence_list": [],
     "product_matrix": {},
