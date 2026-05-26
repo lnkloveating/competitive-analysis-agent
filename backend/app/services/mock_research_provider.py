@@ -316,19 +316,19 @@ def _fallback_records(
     return records
 
 
-def _gaming_mouse_product(platform: str, state: dict) -> str:
+def _gaming_mouse_products(platform: str, state: dict) -> List[str]:
     config = get_industry_config("gaming_mouse")
     products = config.get("representative_products", {})
     if isinstance(products, dict):
         platform_products = products.get(platform)
         if isinstance(platform_products, list) and platform_products:
-            return str(platform_products[0])
+            return [str(product) for product in platform_products if product]
     fallback_products = {
-        "罗技": "G Pro X Superlight 2",
-        "雷蛇": "Viper V3 Pro",
-        "海盗船": "M75 Air",
+        "罗技": ["G Pro X Superlight 2", "G502 X Plus"],
+        "雷蛇": ["Viper V3 Pro", "DeathAdder V3 Pro"],
+        "海盗船": ["M75 Air", "SABRE RGB PRO Wireless"],
     }
-    return fallback_products.get(platform, f"{platform}电竞鼠标")
+    return fallback_products.get(platform, [f"{platform}电竞鼠标"])
 
 
 def _gaming_mouse_product_slug(product_name: str) -> str:
@@ -412,12 +412,13 @@ def _gaming_mouse_records(
     collected_time: str,
 ) -> List[dict[str, Any]]:
     dimensions = get_state_dimensions(state)
-    product_name = _gaming_mouse_product(platform, state)
+    product_names = _gaming_mouse_products(platform, state)
     source_cycle = ["official", "review", "ecommerce", "user_review", "news", "report", "review"]
     time_range = state.get("time_range") or "近12个月"
     records: List[dict[str, Any]] = []
 
     for index, dimension in enumerate(dimensions, start=1):
+        product_name = product_names[(index - 1) % len(product_names)]
         source_type = source_cycle[(index - 1) % len(source_cycle)]
         records.append(
             {

@@ -29,6 +29,15 @@ EXPECTED_DIMENSIONS = {
     "价格定位",
     "电竞品牌影响力",
 }
+EXPECTED_PRODUCTS = {
+    "G Pro X Superlight 2",
+    "G502 X Plus",
+    "Viper V3 Pro",
+    "DeathAdder V3 Pro",
+    "M75 Air",
+    "SABRE RGB PRO Wireless",
+}
+EXPECTED_SOURCE_TYPES = {"official", "review", "ecommerce", "user_review", "news", "report"}
 
 
 if __name__ == "__main__":
@@ -73,15 +82,22 @@ if __name__ == "__main__":
     platforms = {item.get("platform") for item in dumped_items}
     dimensions = {item.get("dimension") or item.get("related_dimension") for item in dumped_items}
     source_types = {item.get("source_type") for item in dumped_items}
-    content = "\n".join(item.get("raw_content", "") for item in dumped_items)
+    searchable_text = "\n".join(
+        " ".join(
+            str(item.get(field, ""))
+            for field in ["raw_content", "source_title", "product_name"]
+        )
+        for item in dumped_items
+    )
 
     assert EXPECTED_COMPETITORS.issubset(platforms)
     assert EXPECTED_DIMENSIONS.issubset(dimensions)
-    assert {"official", "review", "ecommerce", "user_review"}.issubset(source_types)
-    assert source_types & {"news", "report"}
-    assert "G Pro X Superlight 2" in content
-    assert "Viper V3 Pro" in content
-    assert "M75 Air" in content
+    assert EXPECTED_SOURCE_TYPES.issubset(source_types)
+    assert all(product in searchable_text for product in EXPECTED_PRODUCTS)
+    assert all(item.get("dimension") for item in dumped_items)
+    assert all(item.get("related_dimension") for item in dumped_items)
+    assert all(item.get("product_name") for item in dumped_items)
+    assert all(item.get("category") == "电竞鼠标" for item in dumped_items)
     assert all(item.get("crawl_method") == "llm_mock" for item in dumped_items)
     assert all(str(item.get("source_url", "")).startswith("mock://gaming_mouse/") for item in dumped_items)
 

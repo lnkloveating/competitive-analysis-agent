@@ -9,6 +9,8 @@ Quality approved -> Strategy -> END
 
 from langgraph.graph import END, StateGraph
 
+from app.services.metrics_service import calculate_report_metrics
+
 from .business_agent import business_agent
 from .evidence_agent import evidence_agent
 from .product_agent import product_agent
@@ -23,6 +25,7 @@ def human_review_node(state: CompetitiveAnalysisState) -> dict:
     """Stop automatic routing after repeated quality rejection."""
     quality_result = state.get("quality_result", {})
     risk_flags = state.get("risk_flags", [])
+    metrics = calculate_report_metrics(state)
     trace_log = list(state.get("trace_log", []))
     trace_log.append(
         {
@@ -40,7 +43,7 @@ def human_review_node(state: CompetitiveAnalysisState) -> dict:
         "is_approved": False,
         "needs_human_review": True,
         "quality_status": "rejected_after_max_iterations",
-        "metrics": state.get("metrics", {}),
+        "metrics": metrics,
         "used_claim_ids": state.get("used_claim_ids", []),
         "used_evidence_ids": state.get("used_evidence_ids", []),
         "trace_log": trace_log,
@@ -60,7 +63,7 @@ def human_review_node(state: CompetitiveAnalysisState) -> dict:
             "required_actions": quality_result.get("required_actions", []),
             "used_claim_ids": state.get("used_claim_ids", []),
             "used_evidence_ids": state.get("used_evidence_ids", []),
-            "metrics": state.get("metrics", {}),
+            "metrics": metrics,
             "draft_product_matrix": state.get("product_matrix", {}),
             "draft_business_matrix": state.get("business_matrix", {}),
             "draft_claims": state.get("claims", []),

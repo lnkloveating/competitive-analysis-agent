@@ -6,6 +6,7 @@ from datetime import datetime
 from typing import Any, Dict, Iterable, List
 
 from app.schemas.report import StrategyAgentOutput
+from app.services.metrics_service import calculate_report_metrics
 
 
 SWOT_KEYS = ("strengths", "weaknesses", "opportunities", "threats")
@@ -440,7 +441,7 @@ def strategy_agent(state: dict) -> Dict[str, Any]:
         item for item in state.get("evidence_list", [])
         if isinstance(item, dict)
     ]
-    metrics = state.get("metrics", {})
+    metrics = calculate_report_metrics(state)
     needs_human_review = bool(state.get("needs_human_review", False))
 
     existing_evidence_ids = {
@@ -463,7 +464,7 @@ def strategy_agent(state: dict) -> Dict[str, Any]:
             business_matrix=business_matrix if isinstance(business_matrix, dict) else {},
             risk_flags=risk_flags,
             quality_result=quality_result if isinstance(quality_result, dict) else {},
-            metrics=metrics if isinstance(metrics, dict) else {},
+            metrics=metrics,
         )
         used_claim_ids: List[str] = []
         used_evidence_ids: List[str] = []
@@ -475,7 +476,7 @@ def strategy_agent(state: dict) -> Dict[str, Any]:
             risk_flags=risk_flags,
             quality_result=quality_result if isinstance(quality_result, dict) else {},
             evidence_list=evidence_list,
-            metrics=metrics if isinstance(metrics, dict) else {},
+            metrics=metrics,
             existing_evidence_ids=existing_evidence_ids,
         )
 
@@ -491,7 +492,7 @@ def strategy_agent(state: dict) -> Dict[str, Any]:
         "final_report": output.final_report,
         "used_claim_ids": output.used_claim_ids,
         "used_evidence_ids": output.used_evidence_ids,
-        "metrics": metrics if isinstance(metrics, dict) else {},
+        "metrics": metrics,
     }
     _append_trace(next_state, output.used_claim_ids, output.used_evidence_ids)
 
