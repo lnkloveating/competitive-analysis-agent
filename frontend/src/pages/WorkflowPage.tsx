@@ -279,7 +279,7 @@ function AgentCard({
 }) {
   return (
     <button
-      className={`workflow-node-enter min-h-32 rounded-lg border p-4 text-left transition duration-200 hover:-translate-y-0.5 hover:border-cyan-300/70 ${nodeClasses[status]} ${
+      className={`workflow-node-enter min-h-32 w-full rounded-lg border p-4 text-left transition duration-200 hover:-translate-y-0.5 hover:border-cyan-300/70 ${nodeClasses[status]} ${
         isSelected ? "ring-2 ring-cyan-300/60" : ""
       } ${status === "running" ? "workflow-node-pulse" : ""}`}
       onClick={onSelect}
@@ -322,7 +322,7 @@ function AgentCard({
 
 function FlowConnector() {
   return (
-    <div className="hidden items-center justify-center xl:flex">
+    <div className="flex w-12 shrink-0 items-center justify-center">
       <span className="workflow-flow-line h-px w-full min-w-10" />
     </div>
   );
@@ -596,8 +596,8 @@ export function WorkflowPage({ taskId, onNavigate }: WorkflowPageProps) {
         </div>
       ) : null}
 
-      <div className="grid gap-5 xl:grid-cols-[minmax(0,1fr)_360px]">
-        <div className="rounded-lg border border-slate-800 bg-slate-950/70 p-5 shadow-[0_0_40px_rgba(15,23,42,0.45)]">
+      <div className="space-y-5">
+        <section className="w-full max-w-full overflow-hidden rounded-lg border border-slate-800 bg-slate-950/70 p-5 shadow-[0_0_40px_rgba(15,23,42,0.45)]">
           <div className="mb-5 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
             <div>
               <h3 className="text-lg font-semibold text-white">Agent Execution Path</h3>
@@ -612,101 +612,194 @@ export function WorkflowPage({ taskId, onNavigate }: WorkflowPageProps) {
             ) : null}
           </div>
 
-          <div className="grid gap-4 xl:grid-cols-[1fr_48px_1fr_48px_1.2fr_48px_1fr_48px_1fr_48px_1fr] xl:items-center">
-            <AgentCard
-              agent={agentNodes[0]}
-              badges={getNodeBadges(agentNodes[0].name)}
-              index={0}
-              isSelected={selectedAgentName === agentNodes[0].name}
-              onSelect={() => setSelectedAgentName(agentNodes[0].name)}
-              status={derivedStatuses[agentNodes[0].name] ?? "pending"}
-            />
-            <FlowConnector />
-            <AgentCard
-              agent={agentNodes[1]}
-              badges={getNodeBadges(agentNodes[1].name)}
-              index={1}
-              isSelected={selectedAgentName === agentNodes[1].name}
-              onSelect={() => setSelectedAgentName(agentNodes[1].name)}
-              status={derivedStatuses[agentNodes[1].name] ?? "pending"}
-            />
-            <FlowConnector />
-            <div className="grid gap-3">
-              <AgentCard
-                agent={agentNodes[2]}
-                badges={getNodeBadges(agentNodes[2].name)}
-                index={2}
-                isSelected={selectedAgentName === agentNodes[2].name}
-                onSelect={() => setSelectedAgentName(agentNodes[2].name)}
-                status={derivedStatuses[agentNodes[2].name] ?? "pending"}
-              />
-              <AgentCard
-                agent={agentNodes[3]}
-                badges={getNodeBadges(agentNodes[3].name)}
-                index={3}
-                isSelected={selectedAgentName === agentNodes[3].name}
-                onSelect={() => setSelectedAgentName(agentNodes[3].name)}
-                status={derivedStatuses[agentNodes[3].name] ?? "pending"}
-              />
+          <div className="-mx-1 w-full max-w-full overflow-x-auto overflow-y-hidden px-1 pb-2">
+            <div className="flex min-w-max items-center gap-4">
+              <div className="w-[210px] shrink-0">
+                <AgentCard
+                  agent={agentNodes[0]}
+                  badges={getNodeBadges(agentNodes[0].name)}
+                  index={0}
+                  isSelected={selectedAgentName === agentNodes[0].name}
+                  onSelect={() => setSelectedAgentName(agentNodes[0].name)}
+                  status={derivedStatuses[agentNodes[0].name] ?? "pending"}
+                />
+              </div>
+              <FlowConnector />
+              <div className="w-[210px] shrink-0">
+                <AgentCard
+                  agent={agentNodes[1]}
+                  badges={getNodeBadges(agentNodes[1].name)}
+                  index={1}
+                  isSelected={selectedAgentName === agentNodes[1].name}
+                  onSelect={() => setSelectedAgentName(agentNodes[1].name)}
+                  status={derivedStatuses[agentNodes[1].name] ?? "pending"}
+                />
+              </div>
+              <FlowConnector />
+              <div className="grid w-[230px] shrink-0 gap-3">
+                <AgentCard
+                  agent={agentNodes[2]}
+                  badges={getNodeBadges(agentNodes[2].name)}
+                  index={2}
+                  isSelected={selectedAgentName === agentNodes[2].name}
+                  onSelect={() => setSelectedAgentName(agentNodes[2].name)}
+                  status={derivedStatuses[agentNodes[2].name] ?? "pending"}
+                />
+                <AgentCard
+                  agent={agentNodes[3]}
+                  badges={getNodeBadges(agentNodes[3].name)}
+                  index={3}
+                  isSelected={selectedAgentName === agentNodes[3].name}
+                  onSelect={() => setSelectedAgentName(agentNodes[3].name)}
+                  status={derivedStatuses[agentNodes[3].name] ?? "pending"}
+                />
+              </div>
+              <FlowConnector />
+              <div className="w-[210px] shrink-0">
+                <AgentCard
+                  agent={agentNodes[4]}
+                  badges={getNodeBadges(agentNodes[4].name)}
+                  index={4}
+                  isSelected={selectedAgentName === agentNodes[4].name}
+                  onSelect={() => setSelectedAgentName(agentNodes[4].name)}
+                  status={derivedStatuses[agentNodes[4].name] ?? "pending"}
+                />
+              </div>
+              <FlowConnector />
+              <div className="w-[210px] shrink-0">
+                <AgentCard
+                  agent={agentNodes[5]}
+                  badges={getNodeBadges(agentNodes[5].name)}
+                  index={5}
+                  isSelected={selectedAgentName === agentNodes[5].name}
+                  onSelect={() => setSelectedAgentName(agentNodes[5].name)}
+                  status={derivedStatuses[agentNodes[5].name] ?? "pending"}
+                />
+              </div>
+              {isHumanReviewRequired ? (
+                <>
+                  <FlowConnector />
+                  <div className="w-[210px] shrink-0">
+                    <AgentCard
+                      agent={humanReviewNode}
+                      badges={[{ label: "manual gate", tone: "warning" }]}
+                      index={6}
+                      isSelected={selectedAgentName === humanReviewNode.name}
+                      onSelect={() => setSelectedAgentName(humanReviewNode.name)}
+                      status="required"
+                    />
+                  </div>
+                </>
+              ) : null}
+              <FlowConnector />
+              <div className="w-[210px] shrink-0">
+                <AgentCard
+                  agent={agentNodes[6]}
+                  badges={getNodeBadges(agentNodes[6].name)}
+                  index={isHumanReviewRequired ? 7 : 6}
+                  isSelected={selectedAgentName === agentNodes[6].name}
+                  onSelect={() => setSelectedAgentName(agentNodes[6].name)}
+                  status={derivedStatuses[agentNodes[6].name] ?? "pending"}
+                />
+              </div>
             </div>
-            <FlowConnector />
-            <AgentCard
-              agent={agentNodes[4]}
-              badges={getNodeBadges(agentNodes[4].name)}
-              index={4}
-              isSelected={selectedAgentName === agentNodes[4].name}
-              onSelect={() => setSelectedAgentName(agentNodes[4].name)}
-              status={derivedStatuses[agentNodes[4].name] ?? "pending"}
-            />
-            <FlowConnector />
-            <AgentCard
-              agent={agentNodes[5]}
-              badges={getNodeBadges(agentNodes[5].name)}
-              index={5}
-              isSelected={selectedAgentName === agentNodes[5].name}
-              onSelect={() => setSelectedAgentName(agentNodes[5].name)}
-              status={derivedStatuses[agentNodes[5].name] ?? "pending"}
-            />
-            <FlowConnector />
-            <AgentCard
-              agent={agentNodes[6]}
-              badges={getNodeBadges(agentNodes[6].name)}
-              index={6}
-              isSelected={selectedAgentName === agentNodes[6].name}
-              onSelect={() => setSelectedAgentName(agentNodes[6].name)}
-              status={derivedStatuses[agentNodes[6].name] ?? "pending"}
-            />
           </div>
+        </section>
 
-          <div className="mt-6 grid gap-3 sm:grid-cols-3">
-            <div className="rounded-lg border border-slate-800 bg-slate-900/45 p-4">
-              <p className="text-xs uppercase tracking-[0.18em] text-slate-500">
-                Current Agent
-              </p>
-              <p className="mt-2 text-sm font-medium text-slate-100">
-                {status?.current_agent || "Waiting"}
-              </p>
-            </div>
-            <div className="rounded-lg border border-slate-800 bg-slate-900/45 p-4">
-              <p className="text-xs uppercase tracking-[0.18em] text-slate-500">
-                Trace Entries
-              </p>
-              <p className="mt-2 text-sm font-medium text-slate-100">
-                {traceLog.length}
-              </p>
-            </div>
-            <div className="rounded-lg border border-slate-800 bg-slate-900/45 p-4">
-              <p className="text-xs uppercase tracking-[0.18em] text-slate-500">
-                Quality Status
-              </p>
-              <p className="mt-2 text-sm font-medium text-slate-100">
-                {qualityPayload?.quality_status || qualityResult?.status || "Pending"}
-              </p>
-            </div>
+        <section className="grid min-w-0 gap-3 sm:grid-cols-3">
+          <div className="min-w-0 rounded-lg border border-slate-800 bg-slate-900/45 p-4">
+            <p className="text-xs uppercase tracking-[0.18em] text-slate-500">
+              Current Agent
+            </p>
+            <p className="mt-2 break-words text-sm font-medium text-slate-100">
+              {status?.current_agent || "Waiting"}
+            </p>
           </div>
+          <div className="min-w-0 rounded-lg border border-slate-800 bg-slate-900/45 p-4">
+            <p className="text-xs uppercase tracking-[0.18em] text-slate-500">
+              Trace Entries
+            </p>
+            <p className="mt-2 text-sm font-medium text-slate-100">
+              {traceLog.length}
+            </p>
+          </div>
+          <div className="min-w-0 rounded-lg border border-slate-800 bg-slate-900/45 p-4">
+            <p className="text-xs uppercase tracking-[0.18em] text-slate-500">
+              Quality Status
+            </p>
+            <p className="mt-2 break-words text-sm font-medium text-slate-100">
+              {qualityPayload?.quality_status || qualityResult?.status || "Pending"}
+            </p>
+          </div>
+        </section>
+
+        <section className="grid min-w-0 gap-5 xl:grid-cols-[minmax(0,1fr)_minmax(320px,420px)]">
+          <div className="min-w-0 space-y-4">
+            <div className="rounded-lg border border-slate-800 bg-slate-900/45 p-4">
+              <div className="mb-4 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+                <div>
+                  <h3 className="text-sm font-semibold text-white">
+                    Retry Summary
+                  </h3>
+                  <p className="mt-1 text-xs text-slate-500">
+                    Populated from the quality endpoint when available.
+                  </p>
+                </div>
+                <StatusBadge
+                  label={isHumanReviewRequired ? "human review" : "automatic"}
+                  tone={isHumanReviewRequired ? "warning" : "neutral"}
+                />
+              </div>
+              <div className="grid min-w-0 gap-3 md:grid-cols-2 2xl:grid-cols-4">
+                <div className="min-w-0 rounded-md border border-slate-800 bg-slate-950/60 p-3">
+                  <p className="text-xs uppercase tracking-[0.16em] text-slate-500">
+                    Retry Round
+                  </p>
+                  <p className="mt-2 text-sm font-semibold text-slate-100">
+                    {typeof qualityPayload?.iteration_count === "number"
+                      ? `${qualityPayload.iteration_count} / 3`
+                      : "None"}
+                  </p>
+                </div>
+                <div className="min-w-0 rounded-md border border-slate-800 bg-slate-950/60 p-3">
+                  <p className="text-xs uppercase tracking-[0.16em] text-slate-500">
+                    Rejected To
+                  </p>
+                  <p className="mt-2 break-words text-sm font-semibold text-slate-100">
+                    {rejectTo || "None"}
+                  </p>
+                </div>
+                <div className="min-w-0 rounded-md border border-slate-800 bg-slate-950/60 p-3">
+                  <p className="text-xs uppercase tracking-[0.16em] text-slate-500">
+                    Rejected Agents
+                  </p>
+                  <div className="mt-2 flex flex-wrap gap-2">
+                    {uniqueRejectedAgents.length > 0 ? (
+                      uniqueRejectedAgents.map((agentName) => (
+                        <StatusBadge
+                          key={agentName}
+                          label={agentName}
+                          tone="warning"
+                        />
+                      ))
+                    ) : (
+                      <span className="text-sm text-slate-400">None</span>
+                    )}
+                  </div>
+                </div>
+                <div className="min-w-0 rounded-md border border-slate-800 bg-slate-950/60 p-3">
+                  <p className="text-xs uppercase tracking-[0.16em] text-slate-500">
+                    Human Review Required
+                  </p>
+                  <p className="mt-2 text-sm font-semibold text-slate-100">
+                    {isHumanReviewRequired ? "Yes" : "No"}
+                  </p>
+                </div>
+              </div>
+            </div>
 
           {isHumanReviewRequired ? (
-            <div className="mt-6 rounded-lg border border-amber-400/35 bg-amber-400/10 p-4">
+            <div className="rounded-lg border border-amber-400/35 bg-amber-400/10 p-4">
               <div className="mb-4 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
                 <div>
                   <p className="text-xs uppercase tracking-[0.18em] text-amber-200/80">
@@ -718,84 +811,11 @@ export function WorkflowPage({ taskId, onNavigate }: WorkflowPageProps) {
                 </div>
                 <StatusBadge label="manual gate required" tone="warning" />
               </div>
-              <div className="max-w-sm">
-                <AgentCard
-                  agent={humanReviewNode}
-                  badges={[{ label: "manual gate", tone: "warning" }]}
-                  index={7}
-                  isSelected={selectedAgentName === humanReviewNode.name}
-                  onSelect={() => setSelectedAgentName(humanReviewNode.name)}
-                  status="required"
-                />
-              </div>
             </div>
           ) : null}
 
-          <div className="mt-6 rounded-lg border border-slate-800 bg-slate-900/45 p-4">
-            <div className="mb-4 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
-              <div>
-                <h3 className="text-sm font-semibold text-white">
-                  Retry Summary
-                </h3>
-                <p className="mt-1 text-xs text-slate-500">
-                  Populated from the quality endpoint when available.
-                </p>
-              </div>
-              <StatusBadge
-                label={isHumanReviewRequired ? "human review" : "automatic"}
-                tone={isHumanReviewRequired ? "warning" : "neutral"}
-              />
-            </div>
-            <div className="grid gap-3 md:grid-cols-4">
-              <div className="rounded-md border border-slate-800 bg-slate-950/60 p-3">
-                <p className="text-xs uppercase tracking-[0.16em] text-slate-500">
-                  Retry Round
-                </p>
-                <p className="mt-2 text-sm font-semibold text-slate-100">
-                  {typeof qualityPayload?.iteration_count === "number"
-                    ? `${qualityPayload.iteration_count} / 3`
-                    : "None"}
-                </p>
-              </div>
-              <div className="rounded-md border border-slate-800 bg-slate-950/60 p-3">
-                <p className="text-xs uppercase tracking-[0.16em] text-slate-500">
-                  Rejected To
-                </p>
-                <p className="mt-2 text-sm font-semibold text-slate-100">
-                  {rejectTo || "None"}
-                </p>
-              </div>
-              <div className="rounded-md border border-slate-800 bg-slate-950/60 p-3">
-                <p className="text-xs uppercase tracking-[0.16em] text-slate-500">
-                  Rejected Agents
-                </p>
-                <div className="mt-2 flex flex-wrap gap-2">
-                  {uniqueRejectedAgents.length > 0 ? (
-                    uniqueRejectedAgents.map((agentName) => (
-                      <StatusBadge
-                        key={agentName}
-                        label={agentName}
-                        tone="warning"
-                      />
-                    ))
-                  ) : (
-                    <span className="text-sm text-slate-400">None</span>
-                  )}
-                </div>
-              </div>
-              <div className="rounded-md border border-slate-800 bg-slate-950/60 p-3">
-                <p className="text-xs uppercase tracking-[0.16em] text-slate-500">
-                  Human Review Required
-                </p>
-                <p className="mt-2 text-sm font-semibold text-slate-100">
-                  {isHumanReviewRequired ? "Yes" : "No"}
-                </p>
-              </div>
-            </div>
-          </div>
-
           {rejectTo ? (
-            <div className="mt-4 rounded-lg border border-amber-400/35 bg-amber-400/10 p-4">
+            <div className="rounded-lg border border-amber-400/35 bg-amber-400/10 p-4">
               <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
                 <div>
                   <p className="text-xs uppercase tracking-[0.18em] text-amber-200/80">
@@ -821,217 +841,220 @@ export function WorkflowPage({ taskId, onNavigate }: WorkflowPageProps) {
               ) : null}
             </div>
           ) : null}
-
-          <section className="mt-6 rounded-lg border border-slate-800 bg-slate-950/70 p-5">
-            <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
-              <div>
-                <h3 className="text-lg font-semibold text-white">
-                  Trace Timeline
-                </h3>
-                <p className="mt-1 text-sm text-slate-400">
-                  Chronological backend trace entries for this task.
-                </p>
-              </div>
-              <StatusBadge label={`${traceLog.length} entries`} tone="neutral" />
-            </div>
-
-            {traceLog.length === 0 ? (
-              <p className="mt-4 rounded-md border border-slate-800 bg-slate-900/45 px-4 py-3 text-sm text-slate-400">
-                No trace entries returned yet.
-              </p>
-            ) : (
-              <div className="mt-4 space-y-3">
-                {traceLog.map((trace, index) => {
-                  const traceRejectTo =
-                    trace.reject_to ??
-                    trace.target_agent ??
-                    (trace.agent_name === "QualityAgent" ? rejectTo : null);
-                  const traceReason =
-                    trace.reject_reason ??
-                    trace.reason ??
-                    (trace.agent_name === "QualityAgent" ? rejectReason : null);
-                  const traceTime = getTraceTime(trace);
-                  const isLatestTraceForAgent =
-                    trace ===
-                    traceHistoryByAgent[trace.agent_name]?.[
-                      traceHistoryByAgent[trace.agent_name].length - 1
-                    ];
-                  const isRerunSuccess =
-                    normalizeStatus(trace.status) === "success" &&
-                    (latestStatusIsSuccessAfterReject(
-                      traceHistoryByAgent[trace.agent_name],
-                    ) ||
-                      uniqueRejectedAgents.includes(trace.agent_name));
-
-                  return (
-                    <article
-                      className="rounded-lg border border-slate-800 bg-slate-900/45 p-4"
-                      key={`${trace.agent_name}-${trace.step_id ?? index}`}
-                    >
-                      <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
-                        <div>
-                          <div className="flex flex-wrap items-center gap-2">
-                            <span className="font-mono text-xs text-slate-500">
-                              {traceTime || `Step ${trace.step_id ?? index + 1}`}
-                            </span>
-                            <span className="text-sm font-semibold text-white">
-                              {trace.agent_name}
-                            </span>
-                            <StatusBadge
-                              label={trace.status}
-                              tone={traceTone(trace.status)}
-                            />
-                            {isLatestTraceForAgent && isRerunSuccess ? (
-                              <StatusBadge label="rerun" tone="warning" />
-                            ) : null}
-                          </div>
-                          {trace.output_summary ? (
-                            <p className="mt-3 text-sm leading-6 text-slate-300">
-                              {trace.output_summary}
-                            </p>
-                          ) : null}
-                          {traceRejectTo || traceReason ? (
-                            <p className="mt-2 text-sm leading-6 text-amber-100">
-                              {traceRejectTo ? `reject_to: ${traceRejectTo}` : ""}
-                              {traceRejectTo && traceReason ? " | " : ""}
-                              {traceReason ? `reason: ${traceReason}` : ""}
-                            </p>
-                          ) : null}
-                        </div>
-                        {typeof trace.duration_ms === "number" ? (
-                          <span className="shrink-0 rounded-md border border-slate-700 bg-slate-950 px-3 py-2 text-xs text-slate-300">
-                            {trace.duration_ms} ms
-                          </span>
-                        ) : null}
-                      </div>
-                    </article>
-                  );
-                })}
-              </div>
-            )}
-          </section>
-        </div>
-
-        <aside className="rounded-lg border border-slate-800 bg-slate-950/80 p-5">
-          <div className="flex items-start justify-between gap-3">
-            <div>
-              <p className="text-xs uppercase tracking-[0.18em] text-slate-500">
-                Agent Detail
-              </p>
-              <h3 className="mt-2 text-xl font-semibold text-white">
-                {selectedAgent.name}
-              </h3>
-            </div>
-            <StatusBadge label={selectedStatus} tone={statusTone[selectedStatus]} />
           </div>
 
-          <dl className="mt-5 space-y-4 text-sm">
-            <div>
-              <dt className="text-slate-500">status</dt>
-              <dd className="mt-1 text-slate-100">
-                {selectedTrace?.status ?? selectedStatus}
-              </dd>
-            </div>
-            <div>
-              <dt className="text-slate-500">output_summary</dt>
-              <dd className="mt-1 leading-6 text-slate-200">
-                {selectedTrace?.output_summary || "No output summary from trace yet."}
-              </dd>
-            </div>
-            <div>
-              <dt className="text-slate-500">duration_ms</dt>
-              <dd className="mt-1 text-slate-100">
-                {typeof selectedTrace?.duration_ms === "number"
-                  ? selectedTrace.duration_ms
-                  : "Not reported"}
-              </dd>
-            </div>
-            <div>
-              <dt className="text-slate-500">error</dt>
-              <dd className="mt-1 leading-6 text-slate-200">
-                {selectedTrace?.error || "None"}
-              </dd>
-            </div>
-          </dl>
-
-          {selectedAgent.name === "QualityAgent" ? (
-            <div className="mt-6 border-t border-slate-800 pt-5">
-              <h4 className="text-sm font-semibold text-white">Quality Gate</h4>
-              <dl className="mt-4 space-y-4 text-sm">
-                <div>
-                  <dt className="text-slate-500">approved</dt>
-                  <dd className="mt-1 text-slate-100">
-                    {typeof qualityApproved === "boolean"
-                      ? String(qualityApproved)
-                      : "Not reported"}
-                  </dd>
-                </div>
-                <div>
-                  <dt className="text-slate-500">score</dt>
-                  <dd className="mt-1 text-slate-100">
-                    {typeof qualityScore === "number" ? qualityScore : "Not reported"}
-                  </dd>
-                </div>
-                <div>
-                  <dt className="text-slate-500">reject_to</dt>
-                  <dd className="mt-1 text-slate-100">{rejectTo || "None"}</dd>
-                </div>
-                <div>
-                  <dt className="text-slate-500">reject_reason</dt>
-                  <dd className="mt-1 leading-6 text-slate-200">
-                    {rejectReason || "None"}
-                  </dd>
-                </div>
-              </dl>
-
-              <div className="mt-5">
+          <aside className="min-w-0 overflow-hidden rounded-lg border border-slate-800 bg-slate-950/80 p-5">
+            <div className="flex items-start justify-between gap-3">
+              <div>
                 <p className="text-xs uppercase tracking-[0.18em] text-slate-500">
-                  required_actions
+                  Agent Detail
                 </p>
-                {requiredActions.length > 0 ? (
-                  <ul className="mt-3 space-y-2">
-                    {requiredActions.map((action) => (
-                      <li
-                        className="rounded-md border border-amber-400/25 bg-amber-400/10 px-3 py-2 text-sm text-amber-100"
-                        key={action}
-                      >
-                        {action}
-                      </li>
-                    ))}
-                  </ul>
-                ) : (
-                  <p className="mt-2 text-sm text-slate-400">No required actions.</p>
-                )}
+                <h3 className="mt-2 break-words text-xl font-semibold text-white">
+                  {selectedAgent.name}
+                </h3>
               </div>
+              <StatusBadge label={selectedStatus} tone={statusTone[selectedStatus]} />
+            </div>
 
-              <div className="mt-5">
-                <p className="text-xs uppercase tracking-[0.18em] text-slate-500">
-                  checked_items
-                </p>
-                {Object.keys(checkedItems).length > 0 ? (
-                  <div className="mt-3 space-y-2">
-                    {Object.entries(checkedItems).map(([name, passed]) => (
-                      <div
-                        className="flex items-center justify-between gap-3 rounded-md border border-slate-800 bg-slate-900/55 px-3 py-2 text-sm"
-                        key={name}
-                      >
-                        <span className="text-slate-200">{name}</span>
-                        <StatusBadge
-                          label={passed ? "passed" : "failed"}
-                          tone={passed ? "success" : "danger"}
-                        />
-                      </div>
-                    ))}
+            <dl className="mt-5 space-y-4 text-sm">
+              <div>
+                <dt className="text-slate-500">status</dt>
+                <dd className="mt-1 break-words text-slate-100">
+                  {selectedTrace?.status ?? selectedStatus}
+                </dd>
+              </div>
+              <div>
+                <dt className="text-slate-500">output_summary</dt>
+                <dd className="mt-1 break-words leading-6 text-slate-200">
+                  {selectedTrace?.output_summary || "No output summary from trace yet."}
+                </dd>
+              </div>
+              <div>
+                <dt className="text-slate-500">duration_ms</dt>
+                <dd className="mt-1 text-slate-100">
+                  {typeof selectedTrace?.duration_ms === "number"
+                    ? selectedTrace.duration_ms
+                    : "Not reported"}
+                </dd>
+              </div>
+              <div>
+                <dt className="text-slate-500">error</dt>
+                <dd className="mt-1 break-words leading-6 text-slate-200">
+                  {selectedTrace?.error || "None"}
+                </dd>
+              </div>
+            </dl>
+
+            {selectedAgent.name === "QualityAgent" ? (
+              <div className="mt-6 border-t border-slate-800 pt-5">
+                <h4 className="text-sm font-semibold text-white">Quality Gate</h4>
+                <dl className="mt-4 space-y-4 text-sm">
+                  <div>
+                    <dt className="text-slate-500">approved</dt>
+                    <dd className="mt-1 text-slate-100">
+                      {typeof qualityApproved === "boolean"
+                        ? String(qualityApproved)
+                        : "Not reported"}
+                    </dd>
                   </div>
-                ) : (
-                  <p className="mt-2 text-sm text-slate-400">
-                    No checked_items returned yet.
+                  <div>
+                    <dt className="text-slate-500">score</dt>
+                    <dd className="mt-1 text-slate-100">
+                      {typeof qualityScore === "number" ? qualityScore : "Not reported"}
+                    </dd>
+                  </div>
+                  <div>
+                    <dt className="text-slate-500">reject_to</dt>
+                    <dd className="mt-1 break-words text-slate-100">
+                      {rejectTo || "None"}
+                    </dd>
+                  </div>
+                  <div>
+                    <dt className="text-slate-500">reject_reason</dt>
+                    <dd className="mt-1 break-words leading-6 text-slate-200">
+                      {rejectReason || "None"}
+                    </dd>
+                  </div>
+                </dl>
+
+                <div className="mt-5">
+                  <p className="text-xs uppercase tracking-[0.18em] text-slate-500">
+                    required_actions
                   </p>
-                )}
+                  {requiredActions.length > 0 ? (
+                    <ul className="mt-3 space-y-2">
+                      {requiredActions.map((action) => (
+                        <li
+                          className="break-words rounded-md border border-amber-400/25 bg-amber-400/10 px-3 py-2 text-sm text-amber-100"
+                          key={action}
+                        >
+                          {action}
+                        </li>
+                      ))}
+                    </ul>
+                  ) : (
+                    <p className="mt-2 text-sm text-slate-400">No required actions.</p>
+                  )}
+                </div>
+
+                <div className="mt-5">
+                  <p className="text-xs uppercase tracking-[0.18em] text-slate-500">
+                    checked_items
+                  </p>
+                  {Object.keys(checkedItems).length > 0 ? (
+                    <div className="mt-3 space-y-2">
+                      {Object.entries(checkedItems).map(([name, passed]) => (
+                        <div
+                          className="flex min-w-0 items-center justify-between gap-3 rounded-md border border-slate-800 bg-slate-900/55 px-3 py-2 text-sm"
+                          key={name}
+                        >
+                          <span className="min-w-0 break-words text-slate-200">{name}</span>
+                          <StatusBadge
+                            label={passed ? "passed" : "failed"}
+                            tone={passed ? "success" : "danger"}
+                          />
+                        </div>
+                      ))}
+                    </div>
+                  ) : (
+                    <p className="mt-2 text-sm text-slate-400">
+                      No checked_items returned yet.
+                    </p>
+                  )}
+                </div>
               </div>
+            ) : null}
+          </aside>
+        </section>
+
+        <section className="w-full max-w-full overflow-hidden rounded-lg border border-slate-800 bg-slate-950/70 p-5">
+          <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+            <div>
+              <h3 className="text-lg font-semibold text-white">
+                Trace Timeline
+              </h3>
+              <p className="mt-1 text-sm text-slate-400">
+                Chronological backend trace entries for this task.
+              </p>
             </div>
-          ) : null}
-        </aside>
+            <StatusBadge label={`${traceLog.length} entries`} tone="neutral" />
+          </div>
+
+          {traceLog.length === 0 ? (
+            <p className="mt-4 rounded-md border border-slate-800 bg-slate-900/45 px-4 py-3 text-sm text-slate-400">
+              No trace entries returned yet.
+            </p>
+          ) : (
+            <div className="mt-4 space-y-3">
+              {traceLog.map((trace, index) => {
+                const traceRejectTo =
+                  trace.reject_to ??
+                  trace.target_agent ??
+                  (trace.agent_name === "QualityAgent" ? rejectTo : null);
+                const traceReason =
+                  trace.reject_reason ??
+                  trace.reason ??
+                  (trace.agent_name === "QualityAgent" ? rejectReason : null);
+                const traceTime = getTraceTime(trace);
+                const isLatestTraceForAgent =
+                  trace ===
+                  traceHistoryByAgent[trace.agent_name]?.[
+                    traceHistoryByAgent[trace.agent_name].length - 1
+                  ];
+                const isRerunSuccess =
+                  normalizeStatus(trace.status) === "success" &&
+                  (latestStatusIsSuccessAfterReject(
+                    traceHistoryByAgent[trace.agent_name],
+                  ) ||
+                    uniqueRejectedAgents.includes(trace.agent_name));
+
+                return (
+                  <article
+                    className="min-w-0 rounded-lg border border-slate-800 bg-slate-900/45 p-4"
+                    key={`${trace.agent_name}-${trace.step_id ?? index}`}
+                  >
+                    <div className="flex min-w-0 flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
+                      <div className="min-w-0">
+                        <div className="flex flex-wrap items-center gap-2">
+                          <span className="font-mono text-xs text-slate-500">
+                            {traceTime || `Step ${trace.step_id ?? index + 1}`}
+                          </span>
+                          <span className="break-words text-sm font-semibold text-white">
+                            {trace.agent_name}
+                          </span>
+                          <StatusBadge
+                            label={trace.status}
+                            tone={traceTone(trace.status)}
+                          />
+                          {isLatestTraceForAgent && isRerunSuccess ? (
+                            <StatusBadge label="rerun" tone="warning" />
+                          ) : null}
+                        </div>
+                        {trace.output_summary ? (
+                          <p className="mt-3 break-words text-sm leading-6 text-slate-300">
+                            {trace.output_summary}
+                          </p>
+                        ) : null}
+                        {traceRejectTo || traceReason ? (
+                          <p className="mt-2 break-words text-sm leading-6 text-amber-100">
+                            {traceRejectTo ? `reject_to: ${traceRejectTo}` : ""}
+                            {traceRejectTo && traceReason ? " | " : ""}
+                            {traceReason ? `reason: ${traceReason}` : ""}
+                          </p>
+                        ) : null}
+                      </div>
+                      {typeof trace.duration_ms === "number" ? (
+                        <span className="shrink-0 rounded-md border border-slate-700 bg-slate-950 px-3 py-2 text-xs text-slate-300">
+                          {trace.duration_ms} ms
+                        </span>
+                      ) : null}
+                    </div>
+                  </article>
+                );
+              })}
+            </div>
+          )}
+        </section>
       </div>
     </section>
   );
