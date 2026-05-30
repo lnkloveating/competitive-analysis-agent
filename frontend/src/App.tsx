@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { AppLayout } from "./components/layout/AppLayout";
 import type { NavItem } from "./components/layout/Sidebar";
 import { ClaimsPage } from "./pages/ClaimsPage";
@@ -35,18 +35,61 @@ function isPageKey(key: string): key is PageKey {
   return navItems.some((item) => item.key === key);
 }
 
+function getPageKeyFromHash(): PageKey {
+  if (typeof window === "undefined") {
+    return "overview";
+  }
+
+  const pageKey = window.location.hash.replace(/^#\/?/, "");
+  return isPageKey(pageKey) ? pageKey : "overview";
+}
+
+function getStoredTaskId(): string | null {
+  if (typeof window === "undefined") {
+    return null;
+  }
+
+  return window.sessionStorage.getItem("activeTaskId");
+}
+
 export default function App() {
-  const [activePage, setActivePage] = useState<PageKey>("overview");
-  const [taskId, setTaskId] = useState<string | null>(null);
+  const [activePage, setActivePage] = useState<PageKey>(getPageKeyFromHash);
+  const [taskId, setTaskId] = useState<string | null>(getStoredTaskId);
   const [selectedDomain, setSelectedDomain] = useState<string | null>(null);
   const [selectedCategory, setSelectedCategory] = useState<string | null>(null);
   const [selectedIndustryKey, setSelectedIndustryKey] = useState<string | null>(
     null,
   );
 
+  useEffect(() => {
+    function handleHashChange() {
+      setActivePage(getPageKeyFromHash());
+    }
+
+    window.addEventListener("hashchange", handleHashChange);
+    window.addEventListener("popstate", handleHashChange);
+
+    return () => {
+      window.removeEventListener("hashchange", handleHashChange);
+      window.removeEventListener("popstate", handleHashChange);
+    };
+  }, []);
+
   function handleNavigate(key: string) {
     if (isPageKey(key)) {
       setActivePage(key);
+
+      if (typeof window !== "undefined" && window.location.hash !== `#${key}`) {
+        window.history.pushState(null, "", `#${key}`);
+      }
+    }
+  }
+
+  function handleTaskCreated(nextTaskId: string) {
+    setTaskId(nextTaskId);
+
+    if (typeof window !== "undefined") {
+      window.sessionStorage.setItem("activeTaskId", nextTaskId);
     }
   }
 
@@ -85,7 +128,7 @@ export default function App() {
         return (
           <NewAnalysisPage
             onNavigate={handleNavigate}
-            onTaskCreated={setTaskId}
+            onTaskCreated={handleTaskCreated}
             selectedIndustryKey={selectedIndustryKey}
           />
         );

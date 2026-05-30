@@ -93,6 +93,7 @@ export function EvidencePage({ taskId, onNavigate }: EvidencePageProps) {
       return;
     }
 
+    const activeTaskId = taskId;
     let cancelled = false;
 
     async function loadEvidence() {
@@ -100,7 +101,7 @@ export function EvidencePage({ taskId, onNavigate }: EvidencePageProps) {
       setError(null);
 
       try {
-        const response = await analysisApi.getEvidence(taskId);
+        const response = await analysisApi.getEvidence(activeTaskId);
         const nextEvidence = Array.isArray(response?.evidence_list)
           ? response.evidence_list
           : [];

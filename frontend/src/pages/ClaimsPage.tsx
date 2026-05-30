@@ -72,6 +72,7 @@ export function ClaimsPage({ taskId, onNavigate }: ClaimsPageProps) {
       return;
     }
 
+    const activeTaskId = taskId;
     let cancelled = false;
 
     async function loadClaimsGraph() {
@@ -80,8 +81,8 @@ export function ClaimsPage({ taskId, onNavigate }: ClaimsPageProps) {
 
       try {
         const [claimsResponse, evidenceResponse] = await Promise.all([
-          analysisApi.getClaims(taskId),
-          analysisApi.getEvidence(taskId),
+          analysisApi.getClaims(activeTaskId),
+          analysisApi.getEvidence(activeTaskId),
         ]);
 
         const nextClaims = Array.isArray(claimsResponse?.claims)

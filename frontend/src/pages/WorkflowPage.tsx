@@ -10,7 +10,13 @@ type WorkflowPageProps = {
   onNavigate: (key: string) => void;
 };
 
-type AgentStatus = "pending" | "running" | "success" | "rejected" | "failed";
+type AgentStatus =
+  | "pending"
+  | "running"
+  | "success"
+  | "rejected"
+  | "failed"
+  | "required";
 
 type AgentNode = {
   name: string;
@@ -26,6 +32,18 @@ type QualityPayload = {
   rejected_agents?: string[];
   needs_human_review?: boolean;
   quality_status?: string;
+};
+
+type WorkflowTrace = AgentTrace & {
+  timestamp?: string;
+  time?: string;
+  created_at?: string;
+  current_agent?: string;
+  reject_to?: string | null;
+  target_agent?: string | null;
+  reject_reason?: string | null;
+  reason?: string | null;
+  required_actions?: string[];
 };
 
 const agentNodes: AgentNode[] = [
@@ -66,12 +84,19 @@ const agentNodes: AgentNode[] = [
   },
 ];
 
+const humanReviewNode: AgentNode = {
+  name: "HumanReviewRequired",
+  label: "Human Review",
+  subtitle: "Manual review gate",
+};
+
 const statusTone: Record<AgentStatus, "neutral" | "success" | "warning" | "danger" | "info"> = {
   pending: "neutral",
   running: "info",
   success: "success",
   rejected: "warning",
   failed: "danger",
+  required: "warning",
 };
 
 const nodeClasses: Record<AgentStatus, string> = {
@@ -84,9 +109,11 @@ const nodeClasses: Record<AgentStatus, string> = {
     "border-amber-400/65 bg-amber-400/10 text-amber-100 shadow-[0_0_24px_rgba(251,191,36,0.14)]",
   failed:
     "border-rose-400/70 bg-rose-500/10 text-rose-100 shadow-[0_0_24px_rgba(244,63,94,0.18)]",
+  required:
+    "border-amber-300/80 bg-amber-400/10 text-amber-100 shadow-[0_0_26px_rgba(251,191,36,0.2)]",
 };
 
-function normalizeTrace(traceLog: unknown): AgentTrace[] {
+function normalizeTrace(traceLog: unknown): WorkflowTrace[] {
   if (!Array.isArray(traceLog)) {
     return [];
   }
@@ -104,6 +131,32 @@ function normalizeTrace(traceLog: unknown): AgentTrace[] {
         typeof item.error === "string" || item.error === null
           ? item.error
           : undefined,
+      timestamp: typeof item.timestamp === "string" ? item.timestamp : undefined,
+      time: typeof item.time === "string" ? item.time : undefined,
+      created_at: typeof item.created_at === "string" ? item.created_at : undefined,
+      current_agent:
+        typeof item.current_agent === "string" ? item.current_agent : undefined,
+      reject_to:
+        typeof item.reject_to === "string" || item.reject_to === null
+          ? item.reject_to
+          : undefined,
+      target_agent:
+        typeof item.target_agent === "string" || item.target_agent === null
+          ? item.target_agent
+          : undefined,
+      reject_reason:
+        typeof item.reject_reason === "string" || item.reject_reason === null
+          ? item.reject_reason
+          : undefined,
+      reason:
+        typeof item.reason === "string" || item.reason === null
+          ? item.reason
+          : undefined,
+      required_actions: Array.isArray(item.required_actions)
+        ? item.required_actions.filter(
+            (action): action is string => typeof action === "string",
+          )
+        : undefined,
     }));
 }
 
@@ -111,8 +164,8 @@ function normalizeStatus(value?: string): string {
   return (value || "").toLowerCase();
 }
 
-function buildLatestTraceMap(traceLog: AgentTrace[]) {
-  return traceLog.reduce<Record<string, AgentTrace>>((acc, trace) => {
+function buildLatestTraceMap(traceLog: WorkflowTrace[]) {
+  return traceLog.reduce<Record<string, WorkflowTrace>>((acc, trace) => {
     if (trace.agent_name) {
       acc[trace.agent_name] = trace;
     }
@@ -120,9 +173,19 @@ function buildLatestTraceMap(traceLog: AgentTrace[]) {
   }, {});
 }
 
+function buildTraceHistoryMap(traceLog: WorkflowTrace[]) {
+  return traceLog.reduce<Record<string, WorkflowTrace[]>>((acc, trace) => {
+    if (trace.agent_name) {
+      acc[trace.agent_name] = [...(acc[trace.agent_name] ?? []), trace];
+    }
+
+    return acc;
+  }, {});
+}
+
 function deriveAgentStatus(
   agentName: string,
-  latestTrace: AgentTrace | undefined,
+  latestTrace: WorkflowTrace | undefined,
   status: AnalysisStatus | null,
 ): AgentStatus {
   const traceStatus = normalizeStatus(latestTrace?.status);
@@ -181,7 +244,7 @@ function statusIcon(status: AgentStatus) {
     return "✓";
   }
 
-  if (status === "rejected") {
+  if (status === "rejected" || status === "required") {
     return "!";
   }
 
@@ -197,12 +260,17 @@ function statusIcon(status: AgentStatus) {
 }
 
 function AgentCard({
+  badges = [],
   agent,
   index,
   isSelected,
   onSelect,
   status,
 }: {
+  badges?: Array<{
+    label: string;
+    tone?: "neutral" | "success" | "warning" | "danger" | "info";
+  }>;
   agent: AgentNode;
   index: number;
   isSelected: boolean;
@@ -236,6 +304,17 @@ function AgentCard({
       </div>
       <div className="mt-4">
         <StatusBadge label={status} tone={statusTone[status]} />
+        {badges.length > 0 ? (
+          <span className="ml-2 inline-flex flex-wrap gap-2">
+            {badges.map((badge) => (
+              <StatusBadge
+                key={badge.label}
+                label={badge.label}
+                tone={badge.tone ?? "neutral"}
+              />
+            ))}
+          </span>
+        ) : null}
       </div>
     </button>
   );
@@ -249,9 +328,51 @@ function FlowConnector() {
   );
 }
 
+function includesHumanReview(value?: string | null): boolean {
+  return normalizeStatus(value ?? "").includes("human");
+}
+
+function traceTone(status?: string): "neutral" | "success" | "warning" | "danger" | "info" {
+  const normalized = normalizeStatus(status);
+
+  if (normalized === "success" || normalized === "approved") {
+    return "success";
+  }
+
+  if (normalized === "rejected" || normalized.includes("human")) {
+    return "warning";
+  }
+
+  if (normalized === "failed" || normalized === "schema_failed") {
+    return "danger";
+  }
+
+  if (normalized === "started" || normalized === "running") {
+    return "info";
+  }
+
+  return "neutral";
+}
+
+function getTraceTime(trace: WorkflowTrace): string | null {
+  return trace.timestamp ?? trace.time ?? trace.created_at ?? null;
+}
+
+function latestStatusIsSuccessAfterReject(entries?: WorkflowTrace[]): boolean {
+  if (!entries || entries.length < 2) {
+    return false;
+  }
+
+  const latestStatus = normalizeStatus(entries[entries.length - 1]?.status);
+  return (
+    latestStatus === "success" &&
+    entries.some((entry) => normalizeStatus(entry.status) === "rejected")
+  );
+}
+
 export function WorkflowPage({ taskId, onNavigate }: WorkflowPageProps) {
   const [status, setStatus] = useState<AnalysisStatus | null>(null);
-  const [traceLog, setTraceLog] = useState<AgentTrace[]>([]);
+  const [traceLog, setTraceLog] = useState<WorkflowTrace[]>([]);
   const [qualityPayload, setQualityPayload] = useState<QualityPayload | null>(null);
   const [selectedAgentName, setSelectedAgentName] = useState("ResearchAgent");
   const [isInitialLoading, setIsInitialLoading] = useState(false);
@@ -273,6 +394,7 @@ export function WorkflowPage({ taskId, onNavigate }: WorkflowPageProps) {
       return;
     }
 
+    const activeTaskId = taskId;
     let cancelled = false;
     let timerId: number | undefined;
     let inFlight = false;
@@ -286,9 +408,9 @@ export function WorkflowPage({ taskId, onNavigate }: WorkflowPageProps) {
       setIsRefreshing(true);
 
       const [statusResult, traceResult, qualityResult] = await Promise.allSettled([
-        analysisApi.getStatus(taskId),
-        analysisApi.getTrace(taskId),
-        analysisApi.getQuality(taskId),
+        analysisApi.getStatus(activeTaskId),
+        analysisApi.getTrace(activeTaskId),
+        analysisApi.getQuality(activeTaskId),
       ]);
 
       if (cancelled) {
@@ -347,25 +469,6 @@ export function WorkflowPage({ taskId, onNavigate }: WorkflowPageProps) {
     };
   }, [taskId]);
 
-  const latestTraceByAgent = useMemo(() => buildLatestTraceMap(traceLog), [traceLog]);
-
-  const derivedStatuses = useMemo(
-    () =>
-      agentNodes.reduce<Record<string, AgentStatus>>((acc, agent) => {
-        acc[agent.name] = deriveAgentStatus(
-          agent.name,
-          latestTraceByAgent[agent.name],
-          status,
-        );
-        return acc;
-      }, {}),
-    [latestTraceByAgent, status],
-  );
-
-  const selectedAgent =
-    agentNodes.find((agent) => agent.name === selectedAgentName) ?? agentNodes[0];
-  const selectedTrace = latestTraceByAgent[selectedAgent.name];
-  const selectedStatus = derivedStatuses[selectedAgent.name] ?? "pending";
   const qualityResult = qualityPayload?.quality_result;
   const qualityScore = getQualityScore(qualityResult);
   const qualityApproved = getQualityApproved(qualityPayload);
@@ -377,6 +480,69 @@ export function WorkflowPage({ taskId, onNavigate }: WorkflowPageProps) {
   const rejectTo = qualityResult?.reject_to ?? qualityResult?.target_agent ?? null;
   const rejectReason =
     qualityResult?.reject_reason ?? qualityResult?.reason ?? qualityResult?.status ?? null;
+  const rejectedAgents = qualityPayload?.rejected_agents ?? [];
+  const uniqueRejectedAgents = Array.from(new Set(rejectedAgents));
+  const hasHumanReviewTrace = traceLog.some((trace) => {
+    return (
+      includesHumanReview(trace.agent_name) ||
+      includesHumanReview(trace.current_agent)
+    );
+  });
+  const isHumanReviewRequired = Boolean(
+    qualityPayload?.needs_human_review ||
+      includesHumanReview(qualityPayload?.quality_status) ||
+      includesHumanReview(qualityResult?.status) ||
+      includesHumanReview(status?.current_agent) ||
+      hasHumanReviewTrace,
+  );
+  const latestTraceByAgent = useMemo(() => buildLatestTraceMap(traceLog), [traceLog]);
+  const traceHistoryByAgent = useMemo(
+    () => buildTraceHistoryMap(traceLog),
+    [traceLog],
+  );
+  const visibleAgentNodes = isHumanReviewRequired
+    ? [...agentNodes, humanReviewNode]
+    : agentNodes;
+  const derivedStatuses = visibleAgentNodes.reduce<Record<string, AgentStatus>>(
+    (acc, agent) => {
+      acc[agent.name] =
+        agent.name === humanReviewNode.name
+          ? "required"
+          : deriveAgentStatus(
+              agent.name,
+              latestTraceByAgent[agent.name],
+              status,
+            );
+      return acc;
+    },
+    {},
+  );
+  const rerunAgents = useMemo(() => {
+    return new Set(
+      Object.entries(traceHistoryByAgent)
+        .filter(([, entries]) => latestStatusIsSuccessAfterReject(entries))
+        .map(([agentName]) => agentName),
+    );
+  }, [traceHistoryByAgent]);
+
+  const selectedAgent =
+    visibleAgentNodes.find((agent) => agent.name === selectedAgentName) ??
+    visibleAgentNodes[0];
+  const selectedTrace =
+    latestTraceByAgent[selectedAgent.name] ??
+    (selectedAgent.name === humanReviewNode.name
+      ? latestTraceByAgent.HumanReviewAgent
+      : undefined);
+  const selectedStatus = derivedStatuses[selectedAgent.name] ?? "pending";
+  function getNodeBadges(agentName: string) {
+    const latestStatus = normalizeStatus(latestTraceByAgent[agentName]?.status);
+    const wasRejectedByQuality = uniqueRejectedAgents.includes(agentName);
+
+    return rerunAgents.has(agentName) ||
+      (wasRejectedByQuality && latestStatus === "success")
+      ? [{ label: "rerun", tone: "warning" as const }]
+      : [];
+  }
 
   if (!taskId) {
     return (
@@ -449,6 +615,7 @@ export function WorkflowPage({ taskId, onNavigate }: WorkflowPageProps) {
           <div className="grid gap-4 xl:grid-cols-[1fr_48px_1fr_48px_1.2fr_48px_1fr_48px_1fr_48px_1fr] xl:items-center">
             <AgentCard
               agent={agentNodes[0]}
+              badges={getNodeBadges(agentNodes[0].name)}
               index={0}
               isSelected={selectedAgentName === agentNodes[0].name}
               onSelect={() => setSelectedAgentName(agentNodes[0].name)}
@@ -457,6 +624,7 @@ export function WorkflowPage({ taskId, onNavigate }: WorkflowPageProps) {
             <FlowConnector />
             <AgentCard
               agent={agentNodes[1]}
+              badges={getNodeBadges(agentNodes[1].name)}
               index={1}
               isSelected={selectedAgentName === agentNodes[1].name}
               onSelect={() => setSelectedAgentName(agentNodes[1].name)}
@@ -466,6 +634,7 @@ export function WorkflowPage({ taskId, onNavigate }: WorkflowPageProps) {
             <div className="grid gap-3">
               <AgentCard
                 agent={agentNodes[2]}
+                badges={getNodeBadges(agentNodes[2].name)}
                 index={2}
                 isSelected={selectedAgentName === agentNodes[2].name}
                 onSelect={() => setSelectedAgentName(agentNodes[2].name)}
@@ -473,6 +642,7 @@ export function WorkflowPage({ taskId, onNavigate }: WorkflowPageProps) {
               />
               <AgentCard
                 agent={agentNodes[3]}
+                badges={getNodeBadges(agentNodes[3].name)}
                 index={3}
                 isSelected={selectedAgentName === agentNodes[3].name}
                 onSelect={() => setSelectedAgentName(agentNodes[3].name)}
@@ -482,6 +652,7 @@ export function WorkflowPage({ taskId, onNavigate }: WorkflowPageProps) {
             <FlowConnector />
             <AgentCard
               agent={agentNodes[4]}
+              badges={getNodeBadges(agentNodes[4].name)}
               index={4}
               isSelected={selectedAgentName === agentNodes[4].name}
               onSelect={() => setSelectedAgentName(agentNodes[4].name)}
@@ -490,6 +661,7 @@ export function WorkflowPage({ taskId, onNavigate }: WorkflowPageProps) {
             <FlowConnector />
             <AgentCard
               agent={agentNodes[5]}
+              badges={getNodeBadges(agentNodes[5].name)}
               index={5}
               isSelected={selectedAgentName === agentNodes[5].name}
               onSelect={() => setSelectedAgentName(agentNodes[5].name)}
@@ -498,6 +670,7 @@ export function WorkflowPage({ taskId, onNavigate }: WorkflowPageProps) {
             <FlowConnector />
             <AgentCard
               agent={agentNodes[6]}
+              badges={getNodeBadges(agentNodes[6].name)}
               index={6}
               isSelected={selectedAgentName === agentNodes[6].name}
               onSelect={() => setSelectedAgentName(agentNodes[6].name)}
@@ -531,6 +704,212 @@ export function WorkflowPage({ taskId, onNavigate }: WorkflowPageProps) {
               </p>
             </div>
           </div>
+
+          {isHumanReviewRequired ? (
+            <div className="mt-6 rounded-lg border border-amber-400/35 bg-amber-400/10 p-4">
+              <div className="mb-4 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+                <div>
+                  <p className="text-xs uppercase tracking-[0.18em] text-amber-200/80">
+                    Escalation Branch
+                  </p>
+                  <p className="mt-1 font-mono text-sm text-amber-100">
+                    QualityAgent {" -> "} Human Review
+                  </p>
+                </div>
+                <StatusBadge label="manual gate required" tone="warning" />
+              </div>
+              <div className="max-w-sm">
+                <AgentCard
+                  agent={humanReviewNode}
+                  badges={[{ label: "manual gate", tone: "warning" }]}
+                  index={7}
+                  isSelected={selectedAgentName === humanReviewNode.name}
+                  onSelect={() => setSelectedAgentName(humanReviewNode.name)}
+                  status="required"
+                />
+              </div>
+            </div>
+          ) : null}
+
+          <div className="mt-6 rounded-lg border border-slate-800 bg-slate-900/45 p-4">
+            <div className="mb-4 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+              <div>
+                <h3 className="text-sm font-semibold text-white">
+                  Retry Summary
+                </h3>
+                <p className="mt-1 text-xs text-slate-500">
+                  Populated from the quality endpoint when available.
+                </p>
+              </div>
+              <StatusBadge
+                label={isHumanReviewRequired ? "human review" : "automatic"}
+                tone={isHumanReviewRequired ? "warning" : "neutral"}
+              />
+            </div>
+            <div className="grid gap-3 md:grid-cols-4">
+              <div className="rounded-md border border-slate-800 bg-slate-950/60 p-3">
+                <p className="text-xs uppercase tracking-[0.16em] text-slate-500">
+                  Retry Round
+                </p>
+                <p className="mt-2 text-sm font-semibold text-slate-100">
+                  {typeof qualityPayload?.iteration_count === "number"
+                    ? `${qualityPayload.iteration_count} / 3`
+                    : "None"}
+                </p>
+              </div>
+              <div className="rounded-md border border-slate-800 bg-slate-950/60 p-3">
+                <p className="text-xs uppercase tracking-[0.16em] text-slate-500">
+                  Rejected To
+                </p>
+                <p className="mt-2 text-sm font-semibold text-slate-100">
+                  {rejectTo || "None"}
+                </p>
+              </div>
+              <div className="rounded-md border border-slate-800 bg-slate-950/60 p-3">
+                <p className="text-xs uppercase tracking-[0.16em] text-slate-500">
+                  Rejected Agents
+                </p>
+                <div className="mt-2 flex flex-wrap gap-2">
+                  {uniqueRejectedAgents.length > 0 ? (
+                    uniqueRejectedAgents.map((agentName) => (
+                      <StatusBadge
+                        key={agentName}
+                        label={agentName}
+                        tone="warning"
+                      />
+                    ))
+                  ) : (
+                    <span className="text-sm text-slate-400">None</span>
+                  )}
+                </div>
+              </div>
+              <div className="rounded-md border border-slate-800 bg-slate-950/60 p-3">
+                <p className="text-xs uppercase tracking-[0.16em] text-slate-500">
+                  Human Review Required
+                </p>
+                <p className="mt-2 text-sm font-semibold text-slate-100">
+                  {isHumanReviewRequired ? "Yes" : "No"}
+                </p>
+              </div>
+            </div>
+          </div>
+
+          {rejectTo ? (
+            <div className="mt-4 rounded-lg border border-amber-400/35 bg-amber-400/10 p-4">
+              <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
+                <div>
+                  <p className="text-xs uppercase tracking-[0.18em] text-amber-200/80">
+                    Rejected Route
+                  </p>
+                  <p className="mt-2 font-mono text-sm text-amber-100">
+                    QualityAgent {" -> "} {rejectTo}
+                  </p>
+                  {rejectReason ? (
+                    <p className="mt-2 text-sm leading-6 text-amber-100/85">
+                      {rejectReason}
+                    </p>
+                  ) : null}
+                </div>
+                <StatusBadge label="quality rejected" tone="warning" />
+              </div>
+              {requiredActions.length > 0 ? (
+                <div className="mt-4 flex flex-wrap gap-2">
+                  {requiredActions.map((action) => (
+                    <StatusBadge key={action} label={action} tone="warning" />
+                  ))}
+                </div>
+              ) : null}
+            </div>
+          ) : null}
+
+          <section className="mt-6 rounded-lg border border-slate-800 bg-slate-950/70 p-5">
+            <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+              <div>
+                <h3 className="text-lg font-semibold text-white">
+                  Trace Timeline
+                </h3>
+                <p className="mt-1 text-sm text-slate-400">
+                  Chronological backend trace entries for this task.
+                </p>
+              </div>
+              <StatusBadge label={`${traceLog.length} entries`} tone="neutral" />
+            </div>
+
+            {traceLog.length === 0 ? (
+              <p className="mt-4 rounded-md border border-slate-800 bg-slate-900/45 px-4 py-3 text-sm text-slate-400">
+                No trace entries returned yet.
+              </p>
+            ) : (
+              <div className="mt-4 space-y-3">
+                {traceLog.map((trace, index) => {
+                  const traceRejectTo =
+                    trace.reject_to ??
+                    trace.target_agent ??
+                    (trace.agent_name === "QualityAgent" ? rejectTo : null);
+                  const traceReason =
+                    trace.reject_reason ??
+                    trace.reason ??
+                    (trace.agent_name === "QualityAgent" ? rejectReason : null);
+                  const traceTime = getTraceTime(trace);
+                  const isLatestTraceForAgent =
+                    trace ===
+                    traceHistoryByAgent[trace.agent_name]?.[
+                      traceHistoryByAgent[trace.agent_name].length - 1
+                    ];
+                  const isRerunSuccess =
+                    normalizeStatus(trace.status) === "success" &&
+                    (latestStatusIsSuccessAfterReject(
+                      traceHistoryByAgent[trace.agent_name],
+                    ) ||
+                      uniqueRejectedAgents.includes(trace.agent_name));
+
+                  return (
+                    <article
+                      className="rounded-lg border border-slate-800 bg-slate-900/45 p-4"
+                      key={`${trace.agent_name}-${trace.step_id ?? index}`}
+                    >
+                      <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
+                        <div>
+                          <div className="flex flex-wrap items-center gap-2">
+                            <span className="font-mono text-xs text-slate-500">
+                              {traceTime || `Step ${trace.step_id ?? index + 1}`}
+                            </span>
+                            <span className="text-sm font-semibold text-white">
+                              {trace.agent_name}
+                            </span>
+                            <StatusBadge
+                              label={trace.status}
+                              tone={traceTone(trace.status)}
+                            />
+                            {isLatestTraceForAgent && isRerunSuccess ? (
+                              <StatusBadge label="rerun" tone="warning" />
+                            ) : null}
+                          </div>
+                          {trace.output_summary ? (
+                            <p className="mt-3 text-sm leading-6 text-slate-300">
+                              {trace.output_summary}
+                            </p>
+                          ) : null}
+                          {traceRejectTo || traceReason ? (
+                            <p className="mt-2 text-sm leading-6 text-amber-100">
+                              {traceRejectTo ? `reject_to: ${traceRejectTo}` : ""}
+                              {traceRejectTo && traceReason ? " | " : ""}
+                              {traceReason ? `reason: ${traceReason}` : ""}
+                            </p>
+                          ) : null}
+                        </div>
+                        {typeof trace.duration_ms === "number" ? (
+                          <span className="shrink-0 rounded-md border border-slate-700 bg-slate-950 px-3 py-2 text-xs text-slate-300">
+                            {trace.duration_ms} ms
+                          </span>
+                        ) : null}
+                      </div>
+                    </article>
+                  );
+                })}
+              </div>
+            )}
+          </section>
         </div>
 
         <aside className="rounded-lg border border-slate-800 bg-slate-950/80 p-5">

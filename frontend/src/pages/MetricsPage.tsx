@@ -127,6 +127,7 @@ export function MetricsPage({ taskId, onNavigate }: MetricsPageProps) {
       return;
     }
 
+    const activeTaskId = taskId;
     let cancelled = false;
 
     async function loadMetrics() {
@@ -135,9 +136,9 @@ export function MetricsPage({ taskId, onNavigate }: MetricsPageProps) {
 
       try {
         const [metricsResult, artifactsResult, risksResult] = await Promise.all([
-          analysisApi.getMetrics(taskId),
-          analysisApi.getArtifacts(taskId),
-          analysisApi.getRisks(taskId),
+          analysisApi.getMetrics(activeTaskId),
+          analysisApi.getArtifacts(activeTaskId),
+          analysisApi.getRisks(activeTaskId),
         ]);
 
         if (cancelled) {

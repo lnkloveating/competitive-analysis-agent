@@ -211,6 +211,7 @@ export function ReportPage({ taskId, onNavigate }: ReportPageProps) {
       return;
     }
 
+    const activeTaskId = taskId;
     let cancelled = false;
 
     async function loadReport() {
@@ -219,8 +220,8 @@ export function ReportPage({ taskId, onNavigate }: ReportPageProps) {
 
       try {
         const [reportResult, risksResult] = await Promise.all([
-          analysisApi.getReport(taskId),
-          analysisApi.getRisks(taskId),
+          analysisApi.getReport(activeTaskId),
+          analysisApi.getRisks(activeTaskId),
         ]);
 
         if (cancelled) {
