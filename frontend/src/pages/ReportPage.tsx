@@ -52,7 +52,7 @@ function asRecord(value: unknown): Record<string, unknown> {
     : {};
 }
 
-function asString(value: unknown, fallback = "Not reported") {
+function asString(value: unknown, fallback = "未返回") {
   return typeof value === "string" && value.trim().length > 0 ? value : fallback;
 }
 
@@ -104,7 +104,7 @@ function normalizeRanking(report: FinalReport): RankingItem[] {
   return ranking.map((item) => {
     const itemRecord = asRecord(item);
     return {
-      platform: asString(itemRecord.platform, "Unknown platform"),
+      platform: asString(itemRecord.platform, "未知平台"),
       rank: asNumber(itemRecord.rank),
       score: asNumber(itemRecord.score),
       summary: asString(itemRecord.summary, ""),
@@ -134,7 +134,7 @@ function normalizeRecommendations(report: FinalReport): RecommendationItem[] {
   return recommendations.map((item) => {
     const itemRecord = asRecord(item);
     return {
-      recommendation: asString(itemRecord.recommendation, "Not reported"),
+      recommendation: asString(itemRecord.recommendation, "未返回"),
       supporting_claim_ids: asStringList(itemRecord.supporting_claim_ids),
       supporting_evidence_ids: asStringList(itemRecord.supporting_evidence_ids),
       confidence_score: asNumber(itemRecord.confidence_score),
@@ -157,7 +157,7 @@ function normalizeRisks(report: FinalReport, riskFlags: RiskFlag[]): RiskFlag[] 
     return {
       risk_type: asString(itemRecord.risk_type, "unknown"),
       severity: asString(itemRecord.severity, "unknown"),
-      description: asString(itemRecord.description, "No description returned."),
+      description: asString(itemRecord.description, "后端未返回风险描述。"),
       related_platforms: asStringList(itemRecord.related_platforms),
       related_dimensions: asStringList(itemRecord.related_dimensions),
     };
@@ -185,7 +185,7 @@ function isHumanReviewRequired(
 
 function IdTags({ ids, tone = "neutral" }: { ids: string[]; tone?: "neutral" | "info" }) {
   if (ids.length === 0) {
-    return <span className="text-sm text-slate-500">None</span>;
+    return <span className="text-sm text-slate-500">无</span>;
   }
 
   return (
@@ -232,7 +232,7 @@ export function ReportPage({ taskId, onNavigate }: ReportPageProps) {
         setRiskFlags(Array.isArray(risksResult?.risk_flags) ? risksResult.risk_flags : []);
       } catch (err) {
         if (!cancelled) {
-          setError(err instanceof Error ? err.message : "Failed to load report.");
+          setError(err instanceof Error ? err.message : "报告加载失败。");
           setReportResponse(null);
           setRiskFlags([]);
         }
@@ -265,15 +265,15 @@ export function ReportPage({ taskId, onNavigate }: ReportPageProps) {
     return (
       <section className="mx-auto max-w-6xl">
         <EmptyState
-          title="No active task"
-          description="Start a gaming_mouse analysis task before opening the final report."
+          title="暂无任务"
+          description="请先启动 gaming_mouse 分析任务，再打开最终报告。"
           action={
             <button
               className="rounded-md bg-cyan-300 px-4 py-2 text-sm font-semibold text-slate-950 transition hover:bg-cyan-200"
               onClick={() => onNavigate("new-analysis")}
               type="button"
             >
-              New Analysis
+              新建分析
             </button>
           }
         />
@@ -285,21 +285,21 @@ export function ReportPage({ taskId, onNavigate }: ReportPageProps) {
     <section className="mx-auto max-w-7xl">
       <div className="mb-6 flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
         <div>
-          <p className="text-sm font-medium text-cyan-300">Final Report</p>
+          <p className="text-sm font-medium text-cyan-300">最终报告</p>
           <h2 className="mt-2 text-3xl font-semibold text-white">
-            Competitive Strategy Report
+            竞品策略报告
           </h2>
           <p className="mt-3 max-w-3xl break-all text-sm leading-6 text-slate-400">
-            Task ID: {taskId}
+            当前任务: {taskId}
           </p>
         </div>
         <StatusBadge
-          label={humanReviewRequired ? "human review" : reportStatus}
+          label={humanReviewRequired ? "人工审核" : reportStatus}
           tone={humanReviewRequired ? "warning" : "success"}
         />
       </div>
 
-      {isLoading ? <LoadingState label="Loading final report from FastAPI..." /> : null}
+      {isLoading ? <LoadingState label="正在从 FastAPI 加载最终报告..." /> : null}
 
       {error ? (
         <div className="mb-5 rounded-md border border-rose-500/35 bg-rose-500/10 px-4 py-3 text-sm text-rose-100">
@@ -310,15 +310,15 @@ export function ReportPage({ taskId, onNavigate }: ReportPageProps) {
       {!isLoading && !error ? (
         Object.keys(report).length === 0 ? (
           <EmptyState
-            title="No report returned yet"
-            description="Wait for StrategyAgent to complete, then reopen this page."
+            title="暂无报告"
+            description="请等待 StrategyAgent 完成后再查看。"
           />
         ) : (
           <div className="space-y-5">
             {humanReviewRequired ? (
               <div className="rounded-lg border border-amber-400/40 bg-amber-400/10 p-5 text-amber-100">
                 <h3 className="text-base font-semibold">
-                  This report requires human review.
+                  当前报告需要人工审核。
                 </h3>
                 <p className="mt-2 text-sm leading-6">
                   当前报告未通过自动质检，仅作为低置信草稿。
@@ -327,7 +327,7 @@ export function ReportPage({ taskId, onNavigate }: ReportPageProps) {
             ) : null}
 
             <div className="rounded-lg border border-slate-800 bg-slate-950/70 p-5">
-              <h3 className="text-lg font-semibold text-white">Executive Summary</h3>
+              <h3 className="text-lg font-semibold text-white">执行摘要</h3>
               {executiveSummary.length > 0 ? (
                 <div className="mt-4 space-y-3">
                   {executiveSummary.map((item) => (
@@ -337,14 +337,14 @@ export function ReportPage({ taskId, onNavigate }: ReportPageProps) {
                   ))}
                 </div>
               ) : (
-                <p className="mt-3 text-sm text-slate-400">No executive summary returned.</p>
+                <p className="mt-3 text-sm text-slate-400">暂无执行摘要。</p>
               )}
             </div>
 
             <div className="grid gap-5 xl:grid-cols-[minmax(0,1fr)_380px]">
               <div className="space-y-5">
                 <section className="rounded-lg border border-slate-800 bg-slate-950/70 p-5">
-                  <h3 className="text-lg font-semibold text-white">Competitor Ranking</h3>
+                  <h3 className="text-lg font-semibold text-white">竞品排名</h3>
                   {ranking.length > 0 ? (
                     <div className="mt-4 space-y-3">
                       {ranking.map((item, index) => (
@@ -364,11 +364,11 @@ export function ReportPage({ taskId, onNavigate }: ReportPageProps) {
                                 </h4>
                               </div>
                               <p className="mt-3 text-sm leading-6 text-slate-300">
-                                {item.summary || "No ranking summary returned."}
+                                {item.summary || "暂无排名摘要。"}
                               </p>
                             </div>
                             <p className="text-sm text-slate-300">
-                              score{" "}
+                              分数{" "}
                               <span className="font-semibold text-cyan-200">
                                 {typeof item.score === "number" ? item.score.toFixed(2) : "N/A"}
                               </span>
@@ -384,12 +384,12 @@ export function ReportPage({ taskId, onNavigate }: ReportPageProps) {
                       ))}
                     </div>
                   ) : (
-                    <p className="mt-3 text-sm text-slate-400">No ranking returned.</p>
+                    <p className="mt-3 text-sm text-slate-400">暂无竞品排名。</p>
                   )}
                 </section>
 
                 <section className="rounded-lg border border-slate-800 bg-slate-950/70 p-5">
-                  <h3 className="text-lg font-semibold text-white">Strategic Recommendations</h3>
+                  <h3 className="text-lg font-semibold text-white">策略建议</h3>
                   {recommendations.length > 0 ? (
                     <div className="mt-4 space-y-3">
                       {recommendations.map((item, index) => (
@@ -402,7 +402,7 @@ export function ReportPage({ taskId, onNavigate }: ReportPageProps) {
                               {item.recommendation}
                             </p>
                             <p className="shrink-0 text-sm text-cyan-100">
-                              confidence{" "}
+                              置信度{" "}
                               {typeof item.confidence_score === "number"
                                 ? item.confidence_score.toFixed(2)
                                 : "N/A"}
@@ -427,7 +427,7 @@ export function ReportPage({ taskId, onNavigate }: ReportPageProps) {
                     </div>
                   ) : (
                     <p className="mt-3 text-sm text-slate-400">
-                      No strategic recommendations returned.
+                      暂无策略建议。
                     </p>
                   )}
                 </section>
@@ -435,7 +435,7 @@ export function ReportPage({ taskId, onNavigate }: ReportPageProps) {
 
               <aside className="space-y-5">
                 <section className="rounded-lg border border-slate-800 bg-slate-950/80 p-5">
-                  <h3 className="text-lg font-semibold text-white">SWOT</h3>
+                  <h3 className="text-lg font-semibold text-white">SWOT 分析</h3>
                   <div className="mt-4 space-y-4">
                     {swotKeys.map((key) => (
                       <div key={key}>
@@ -454,7 +454,7 @@ export function ReportPage({ taskId, onNavigate }: ReportPageProps) {
                             ))}
                           </div>
                         ) : (
-                          <p className="mt-2 text-sm text-slate-500">None</p>
+                          <p className="mt-2 text-sm text-slate-500">无</p>
                         )}
                       </div>
                     ))}
@@ -462,7 +462,7 @@ export function ReportPage({ taskId, onNavigate }: ReportPageProps) {
                 </section>
 
                 <section className="rounded-lg border border-slate-800 bg-slate-950/80 p-5">
-                  <h3 className="text-lg font-semibold text-white">Trace IDs</h3>
+                  <h3 className="text-lg font-semibold text-white">引用链路</h3>
                   <div className="mt-4">
                     <p className="mb-2 text-xs uppercase tracking-[0.16em] text-slate-500">
                       used_claim_ids
@@ -480,7 +480,7 @@ export function ReportPage({ taskId, onNavigate }: ReportPageProps) {
             </div>
 
             <section className="rounded-lg border border-slate-800 bg-slate-950/70 p-5">
-              <h3 className="text-lg font-semibold text-white">Risk Disclosure</h3>
+              <h3 className="text-lg font-semibold text-white">风险披露</h3>
               {risks.length > 0 ? (
                 <div className="mt-4 grid gap-3 lg:grid-cols-2">
                   {risks.map((risk, index) => (
@@ -518,7 +518,7 @@ export function ReportPage({ taskId, onNavigate }: ReportPageProps) {
                   ))}
                 </div>
               ) : (
-                <p className="mt-3 text-sm text-slate-400">No risk flags detected.</p>
+                <p className="mt-3 text-sm text-slate-400">暂无风险标记。</p>
               )}
             </section>
           </div>

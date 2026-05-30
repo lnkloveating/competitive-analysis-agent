@@ -25,7 +25,7 @@ const claimCardClasses: Record<ClaimKind, string> = {
   Other: "border-slate-800 bg-slate-900/45",
 };
 
-function normalizeText(value: string | undefined, fallback = "Unknown") {
+function normalizeText(value: string | undefined, fallback = "未知") {
   return value && value.trim().length > 0 ? value : fallback;
 }
 
@@ -102,7 +102,7 @@ export function ClaimsPage({ taskId, onNavigate }: ClaimsPageProps) {
       } catch (err) {
         if (!cancelled) {
           setError(
-            err instanceof Error ? err.message : "Failed to load claims graph.",
+            err instanceof Error ? err.message : "结论追踪数据加载失败。",
           );
           setClaims([]);
           setEvidenceList([]);
@@ -139,15 +139,15 @@ export function ClaimsPage({ taskId, onNavigate }: ClaimsPageProps) {
     return (
       <section className="mx-auto max-w-6xl">
         <EmptyState
-          title="No active task"
-          description="Start a gaming_mouse analysis task before opening the claims graph."
+          title="暂无任务"
+          description="请先启动 gaming_mouse 分析任务，再打开结论追踪。"
           action={
             <button
               className="rounded-md bg-cyan-300 px-4 py-2 text-sm font-semibold text-slate-950 transition hover:bg-cyan-200"
               onClick={() => onNavigate("new-analysis")}
               type="button"
             >
-              New Analysis
+              新建分析
             </button>
           }
         />
@@ -158,23 +158,23 @@ export function ClaimsPage({ taskId, onNavigate }: ClaimsPageProps) {
   return (
     <section className="mx-auto max-w-7xl">
       <div className="mb-6">
-        <p className="text-sm font-medium text-cyan-300">Claims Graph</p>
+        <p className="text-sm font-medium text-cyan-300">结论追踪</p>
         <h2 className="mt-2 text-3xl font-semibold text-white">
-          Claim to Evidence Traceability
+          结论与证据追踪
         </h2>
         <p className="mt-3 max-w-3xl break-all text-sm leading-6 text-slate-400">
-          Task ID: {taskId}
+          当前任务: {taskId}
         </p>
       </div>
 
       <div className="mb-5 grid gap-3 md:grid-cols-4">
-        <MetricCard label="Claims" value={claims.length} helper="from backend" />
-        <MetricCard label="Evidence" value={evidenceList.length} helper="loaded for trace links" />
-        <MetricCard label="PCL" value={pclCount} helper="ProductAgent claims" />
-        <MetricCard label="BCL" value={bclCount} helper="BusinessAgent claims" />
+        <MetricCard label="结论总数" value={claims.length} helper="来自后端" />
+        <MetricCard label="证据总数" value={evidenceList.length} helper="用于反查证据链" />
+        <MetricCard label="PCL" value={pclCount} helper="ProductAgent 结论" />
+        <MetricCard label="BCL" value={bclCount} helper="BusinessAgent 结论" />
       </div>
 
-      {isLoading ? <LoadingState label="Loading claims and evidence links..." /> : null}
+      {isLoading ? <LoadingState label="正在加载结论与证据链接..." /> : null}
 
       {error ? (
         <div className="mb-5 rounded-md border border-rose-500/35 bg-rose-500/10 px-4 py-3 text-sm text-rose-100">
@@ -187,8 +187,8 @@ export function ClaimsPage({ taskId, onNavigate }: ClaimsPageProps) {
           <div className="rounded-lg border border-slate-800 bg-slate-950/70 p-5">
             {claims.length === 0 ? (
               <EmptyState
-                title="No claims returned yet"
-                description="Wait for ProductAgent and BusinessAgent to complete, then reopen this page."
+                title="暂无结论"
+                description="请等待 ProductAgent 与 BusinessAgent 完成后再查看。"
               />
             ) : (
               <div className="space-y-3">
@@ -219,7 +219,7 @@ export function ClaimsPage({ taskId, onNavigate }: ClaimsPageProps) {
                             />
                           </div>
                           <p className="mt-3 text-sm leading-6 text-slate-100">
-                            {normalizeText(claim.content, "No claim content returned.")}
+                            {normalizeText(claim.content, "后端未返回结论内容。")}
                           </p>
                         </div>
                         <div className="lg:min-w-72">
@@ -239,13 +239,13 @@ export function ClaimsPage({ taskId, onNavigate }: ClaimsPageProps) {
                       </div>
 
                       <div className="mt-4 rounded-md border border-slate-700/70 bg-slate-950/55 px-3 py-2">
-                        <p className="text-xs text-slate-500">Trace path</p>
+                        <p className="text-xs text-slate-500">证据链路</p>
                         <p className="mt-1 break-words font-mono text-sm text-cyan-100">
                           {evidenceIds.length > 0
                             ? `${evidenceIds.join(" + ")} -> ${normalizeText(
                                 claim.claim_id,
                               )}`
-                            : `No evidence_ids -> ${normalizeText(claim.claim_id)}`}
+                            : `暂无 evidence_ids -> ${normalizeText(claim.claim_id)}`}
                         </p>
                       </div>
                     </button>
@@ -257,7 +257,7 @@ export function ClaimsPage({ taskId, onNavigate }: ClaimsPageProps) {
 
           <aside className="rounded-lg border border-slate-800 bg-slate-950/80 p-5">
             <p className="text-xs uppercase tracking-[0.18em] text-slate-500">
-              Claim Detail
+              结论详情
             </p>
             {selectedClaim ? (
               <div className="mt-4">
@@ -273,9 +273,9 @@ export function ClaimsPage({ taskId, onNavigate }: ClaimsPageProps) {
 
                 <dl className="mt-5 space-y-4 text-sm">
                   <div>
-                    <dt className="text-slate-500">content</dt>
+                    <dt className="text-slate-500">结论内容</dt>
                     <dd className="mt-1 leading-6 text-slate-200">
-                      {normalizeText(selectedClaim.content, "No claim content returned.")}
+                      {normalizeText(selectedClaim.content, "后端未返回结论内容。")}
                     </dd>
                   </div>
                   <div>
@@ -286,7 +286,7 @@ export function ClaimsPage({ taskId, onNavigate }: ClaimsPageProps) {
                           <StatusBadge key={platform} label={platform} tone="neutral" />
                         ))
                       ) : (
-                        <span className="text-slate-400">Not reported</span>
+                        <span className="text-slate-400">未返回</span>
                       )}
                     </dd>
                   </div>
@@ -302,7 +302,7 @@ export function ClaimsPage({ taskId, onNavigate }: ClaimsPageProps) {
                           />
                         ))
                       ) : (
-                        <span className="text-slate-400">No evidence_ids returned.</span>
+                        <span className="text-slate-400">暂无 evidence_ids。</span>
                       )}
                     </dd>
                   </div>
@@ -310,7 +310,7 @@ export function ClaimsPage({ taskId, onNavigate }: ClaimsPageProps) {
 
                 <div className="mt-6 border-t border-slate-800 pt-5">
                   <h3 className="text-sm font-semibold text-white">
-                    Referenced Evidence
+                    引用证据
                   </h3>
                   {linkedEvidence.length > 0 ? (
                     <div className="mt-3 space-y-3">
@@ -341,30 +341,30 @@ export function ClaimsPage({ taskId, onNavigate }: ClaimsPageProps) {
                             />
                           </div>
                           <h4 className="mt-3 text-sm font-semibold text-white">
-                            {normalizeText(evidence.source_title, "Untitled source")}
+                            {normalizeText(evidence.source_title, "未命名来源")}
                           </h4>
                           <p className="mt-2 text-sm leading-6 text-slate-400">
-                            {normalizeText(evidence.claim, "No evidence claim returned.")}
+                            {normalizeText(evidence.claim, "后端未返回证据摘要。")}
                           </p>
                         </article>
                       ))}
                     </div>
                   ) : (
                     <p className="mt-3 text-sm text-slate-400">
-                      No matching evidence found for this claim yet.
+                      当前结论暂未匹配到证据详情。
                     </p>
                   )}
 
                   {missingEvidenceIds.length > 0 ? (
                     <div className="mt-4 rounded-md border border-rose-500/35 bg-rose-500/10 px-3 py-2 text-sm text-rose-100">
-                      Missing evidence in evidence_list: {missingEvidenceIds.join(", ")}
+                      evidence_list 中缺少这些证据: {missingEvidenceIds.join(", ")}
                     </div>
                   ) : null}
                 </div>
               </div>
             ) : (
               <p className="mt-4 text-sm text-slate-400">
-                Select a claim to inspect its source evidence.
+                请选择一条结论查看证据来源。
               </p>
             )}
           </aside>

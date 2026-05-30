@@ -42,21 +42,21 @@ export function TopBar({ taskId }: TopBarProps) {
 
   const statusLabel =
     apiStatus === "online"
-      ? "API Online"
+      ? "API 在线"
       : apiStatus === "offline"
-        ? "API Offline"
-        : "Checking API";
+        ? "API 离线"
+        : "检查 API";
 
   return (
-    <header className="flex flex-col gap-3 border-b border-slate-800 bg-surface-900/85 px-5 py-4 backdrop-blur md:flex-row md:items-center md:justify-between">
+    <header className="flex flex-col gap-3 border-b border-white/10 bg-surface-900/75 px-5 py-4 backdrop-blur-xl md:flex-row md:items-center md:justify-between lg:px-8">
       <div>
-        <p className="text-sm text-slate-400">AI driven competitor analysis</p>
+        <p className="text-sm text-slate-300">AI 驱动的竞品分析系统</p>
         <p className="mt-1 text-xs text-slate-500">{API_BASE_URL}</p>
       </div>
       <div className="flex flex-wrap items-center gap-2">
         <StatusBadge label={statusLabel} tone={statusTone} />
         <StatusBadge
-          label={taskId ? `Task ${taskId}` : "No Active Task"}
+          label={taskId ? `当前任务: ${taskId}` : "暂无任务"}
           tone={taskId ? "info" : "neutral"}
         />
       </div>

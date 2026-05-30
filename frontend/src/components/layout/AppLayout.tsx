@@ -18,9 +18,8 @@ export function AppLayout({
   onNavigate,
 }: AppLayoutProps) {
   return (
-    <div className="min-h-screen bg-surface-950 text-slate-100">
-      <div className="absolute inset-0 -z-10 bg-[radial-gradient(circle_at_top_left,rgba(34,211,238,0.16),transparent_34%),radial-gradient(circle_at_bottom_right,rgba(16,185,129,0.1),transparent_30%)]" />
-      <div className="flex min-h-screen flex-col md:flex-row">
+    <div className="app-background min-h-screen bg-surface-950 text-slate-100">
+      <div className="relative z-10 flex min-h-screen flex-col md:flex-row">
         <Sidebar
           items={navItems}
           activeKey={activePage}
@@ -29,7 +28,7 @@ export function AppLayout({
         />
         <div className="flex min-h-screen flex-1 flex-col">
           <TopBar taskId={taskId} />
-          <main className="flex-1 overflow-y-auto px-5 py-6 md:px-8">
+          <main className="flex-1 overflow-y-auto px-5 py-6 md:px-8 lg:px-10">
             {children}
           </main>
         </div>

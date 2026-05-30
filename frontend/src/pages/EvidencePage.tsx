@@ -37,7 +37,7 @@ function uniqueValues(items: EvidenceItem[], selector: (item: EvidenceItem) => s
   ).sort((a, b) => a.localeCompare(b));
 }
 
-function normalizeText(value: string | undefined, fallback = "Unknown") {
+function normalizeText(value: string | undefined, fallback = "未知") {
   return value && value.trim().length > 0 ? value : fallback;
 }
 
@@ -66,7 +66,7 @@ function EvidenceSelect({
         onChange={(event) => onChange(event.target.value)}
         value={value}
       >
-        <option value="all">All</option>
+        <option value="all">全部</option>
         {options.map((option) => (
           <option key={option} value={option}>
             {option}
@@ -115,7 +115,7 @@ export function EvidencePage({ taskId, onNavigate }: EvidencePageProps) {
       } catch (err) {
         if (!cancelled) {
           setError(
-            err instanceof Error ? err.message : "Failed to load evidence data.",
+            err instanceof Error ? err.message : "证据数据加载失败。",
           );
           setEvidenceList([]);
           setSelectedEvidenceId(null);
@@ -181,15 +181,15 @@ export function EvidencePage({ taskId, onNavigate }: EvidencePageProps) {
     return (
       <section className="mx-auto max-w-6xl">
         <EmptyState
-          title="No active task"
-          description="Start a gaming_mouse analysis task before opening the evidence hub."
+          title="暂无任务"
+          description="请先启动 gaming_mouse 分析任务，再打开证据中心。"
           action={
             <button
               className="rounded-md bg-cyan-300 px-4 py-2 text-sm font-semibold text-slate-950 transition hover:bg-cyan-200"
               onClick={() => onNavigate("new-analysis")}
               type="button"
             >
-              New Analysis
+              新建分析
             </button>
           }
         />
@@ -200,35 +200,35 @@ export function EvidencePage({ taskId, onNavigate }: EvidencePageProps) {
   return (
     <section className="mx-auto max-w-7xl">
       <div className="mb-6">
-        <p className="text-sm font-medium text-cyan-300">Evidence Hub</p>
+        <p className="text-sm font-medium text-cyan-300">证据中心</p>
         <h2 className="mt-2 text-3xl font-semibold text-white">
-          Evidence Source Ledger
+          证据来源台账
         </h2>
         <p className="mt-3 max-w-3xl break-all text-sm leading-6 text-slate-400">
-          Task ID: {taskId}
+          当前任务: {taskId}
         </p>
       </div>
 
       <div className="mb-5 grid gap-3 md:grid-cols-4">
-        <MetricCard label="Evidence" value={evidenceList.length} helper="from backend" />
+        <MetricCard label="证据总数" value={evidenceList.length} helper="来自后端" />
         <MetricCard
-          label="Filtered"
+          label="筛选结果"
           value={filteredEvidence.length}
-          helper="after active filters"
+          helper="当前筛选条件下"
         />
         <MetricCard
-          label="Platforms"
+          label="平台数"
           value={filterOptions.platforms.length}
-          helper="observed in evidence"
+          helper="证据中出现的平台"
         />
         <MetricCard
-          label="High Credibility"
+          label="高可信证据"
           value={evidenceList.filter((item) => item.credibility === "high").length}
           helper="credibility = high"
         />
       </div>
 
-      {isLoading ? <LoadingState label="Loading evidence from FastAPI..." /> : null}
+      {isLoading ? <LoadingState label="正在从 FastAPI 加载证据..." /> : null}
 
       {error ? (
         <div className="mb-5 rounded-md border border-rose-500/35 bg-rose-500/10 px-4 py-3 text-sm text-rose-100">
@@ -241,7 +241,7 @@ export function EvidencePage({ taskId, onNavigate }: EvidencePageProps) {
           <div className="rounded-lg border border-slate-800 bg-slate-950/70 p-5">
             <div className="grid gap-3 md:grid-cols-4">
               <EvidenceSelect
-                label="platform"
+                label="平台"
                 onChange={(value) =>
                   setFilters((current) => ({ ...current, platform: value }))
                 }
@@ -249,7 +249,7 @@ export function EvidencePage({ taskId, onNavigate }: EvidencePageProps) {
                 value={filters.platform}
               />
               <EvidenceSelect
-                label="dimension"
+                label="维度"
                 onChange={(value) =>
                   setFilters((current) => ({
                     ...current,
@@ -260,7 +260,7 @@ export function EvidencePage({ taskId, onNavigate }: EvidencePageProps) {
                 value={filters.relatedDimension}
               />
               <EvidenceSelect
-                label="credibility"
+                label="可信度"
                 onChange={(value) =>
                   setFilters((current) => ({ ...current, credibility: value }))
                 }
@@ -268,7 +268,7 @@ export function EvidencePage({ taskId, onNavigate }: EvidencePageProps) {
                 value={filters.credibility}
               />
               <EvidenceSelect
-                label="source type"
+                label="来源类型"
                 onChange={(value) =>
                   setFilters((current) => ({ ...current, sourceType: value }))
                 }
@@ -283,15 +283,15 @@ export function EvidencePage({ taskId, onNavigate }: EvidencePageProps) {
                 onClick={() => setFilters(defaultFilters)}
                 type="button"
               >
-                Reset Filters
+                重置筛选
               </button>
             </div>
 
             {filteredEvidence.length === 0 ? (
               <div className="mt-5">
                 <EmptyState
-                  title="No evidence matched"
-                  description="Try loosening the active filters."
+                  title="暂无匹配证据"
+                  description="请放宽当前筛选条件。"
                 />
               </div>
             ) : (
@@ -325,10 +325,10 @@ export function EvidencePage({ taskId, onNavigate }: EvidencePageProps) {
                             />
                           </div>
                           <h3 className="mt-3 text-base font-semibold text-white">
-                            {normalizeText(item.source_title, "Untitled source")}
+                            {normalizeText(item.source_title, "未命名来源")}
                           </h3>
                           <p className="mt-2 line-clamp-2 text-sm leading-6 text-slate-400">
-                            {normalizeText(item.claim, "No claim text returned.")}
+                            {normalizeText(item.claim, "后端未返回证据摘要。")}
                           </p>
                         </div>
                         <div className="grid gap-2 text-xs text-slate-400 sm:grid-cols-3 lg:min-w-72">
@@ -346,7 +346,7 @@ export function EvidencePage({ taskId, onNavigate }: EvidencePageProps) {
 
           <aside className="rounded-lg border border-slate-800 bg-slate-950/80 p-5">
             <p className="text-xs uppercase tracking-[0.18em] text-slate-500">
-              Evidence Detail
+              证据详情
             </p>
             {selectedEvidence ? (
               <div className="mt-4">
@@ -366,9 +366,9 @@ export function EvidencePage({ taskId, onNavigate }: EvidencePageProps) {
 
                 <dl className="mt-5 space-y-4 text-sm">
                   <div>
-                    <dt className="text-slate-500">raw_content</dt>
+                    <dt className="text-slate-500">原文内容</dt>
                     <dd className="mt-1 max-h-60 overflow-auto rounded-md border border-slate-800 bg-slate-900/45 p-3 leading-6 text-slate-200">
-                      {normalizeText(selectedEvidence.raw_content, "No raw content returned.")}
+                      {normalizeText(selectedEvidence.raw_content, "暂无原文内容。")}
                     </dd>
                   </div>
                   <div>
@@ -384,27 +384,27 @@ export function EvidencePage({ taskId, onNavigate }: EvidencePageProps) {
                           {selectedEvidence.source_url}
                         </a>
                       ) : (
-                        "Not reported"
+                        "未返回"
                       )}
                     </dd>
                   </div>
                   <div>
-                    <dt className="text-slate-500">publish_time</dt>
+                    <dt className="text-slate-500">发布时间</dt>
                     <dd className="mt-1 text-slate-200">
-                      {normalizeText(selectedEvidence.publish_time, "Not reported")}
+                      {normalizeText(selectedEvidence.publish_time, "未返回")}
                     </dd>
                   </div>
                   <div>
-                    <dt className="text-slate-500">collected_time</dt>
+                    <dt className="text-slate-500">采集时间</dt>
                     <dd className="mt-1 text-slate-200">
-                      {normalizeText(selectedEvidence.collected_time, "Not reported")}
+                      {normalizeText(selectedEvidence.collected_time, "未返回")}
                     </dd>
                   </div>
                 </dl>
               </div>
             ) : (
               <p className="mt-4 text-sm text-slate-400">
-                Select an evidence item to inspect source details.
+                请选择一条证据查看来源详情。
               </p>
             )}
           </aside>

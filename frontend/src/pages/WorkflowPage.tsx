@@ -49,45 +49,45 @@ type WorkflowTrace = AgentTrace & {
 const agentNodes: AgentNode[] = [
   {
     name: "ResearchAgent",
-    label: "Research",
-    subtitle: "Public research",
+    label: "调研",
+    subtitle: "公开信息采集",
   },
   {
     name: "EvidenceAgent",
-    label: "Evidence",
-    subtitle: "Evidence extraction",
+    label: "证据",
+    subtitle: "证据抽取",
   },
   {
     name: "ProductAgent",
-    label: "Product",
-    subtitle: "Product matrix",
+    label: "产品",
+    subtitle: "产品矩阵",
   },
   {
     name: "BusinessAgent",
-    label: "Business",
-    subtitle: "Business matrix",
+    label: "商业",
+    subtitle: "商业矩阵",
   },
   {
     name: "RiskAgent",
-    label: "Risk",
-    subtitle: "Risk flags",
+    label: "风险",
+    subtitle: "风险识别",
   },
   {
     name: "QualityAgent",
-    label: "Quality",
-    subtitle: "Quality gate",
+    label: "质检",
+    subtitle: "质量门控",
   },
   {
     name: "StrategyAgent",
-    label: "Strategy",
-    subtitle: "Final report",
+    label: "策略",
+    subtitle: "最终报告",
   },
 ];
 
 const humanReviewNode: AgentNode = {
   name: "HumanReviewRequired",
-  label: "Human Review",
-  subtitle: "Manual review gate",
+  label: "人工审核",
+  subtitle: "人工复核节点",
 };
 
 const statusTone: Record<AgentStatus, "neutral" | "success" | "warning" | "danger" | "info"> = {
@@ -100,17 +100,17 @@ const statusTone: Record<AgentStatus, "neutral" | "success" | "warning" | "dange
 };
 
 const nodeClasses: Record<AgentStatus, string> = {
-  pending: "border-slate-700 bg-slate-900/55 text-slate-300",
+  pending: "border-white/10 bg-slate-900/55 text-slate-300",
   running:
-    "border-cyan-300/70 bg-cyan-300/10 text-cyan-100 shadow-[0_0_28px_rgba(34,211,238,0.22)]",
+    "border-cyan-300/55 bg-cyan-300/10 text-cyan-100 shadow-[0_0_28px_rgba(34,211,238,0.18)]",
   success:
-    "border-emerald-400/60 bg-emerald-400/10 text-emerald-100 shadow-[0_0_24px_rgba(52,211,153,0.16)]",
+    "border-emerald-400/45 bg-emerald-400/10 text-emerald-100 shadow-[0_0_24px_rgba(52,211,153,0.12)]",
   rejected:
-    "border-amber-400/65 bg-amber-400/10 text-amber-100 shadow-[0_0_24px_rgba(251,191,36,0.14)]",
+    "border-amber-400/50 bg-amber-400/10 text-amber-100 shadow-[0_0_24px_rgba(251,191,36,0.12)]",
   failed:
-    "border-rose-400/70 bg-rose-500/10 text-rose-100 shadow-[0_0_24px_rgba(244,63,94,0.18)]",
+    "border-rose-400/55 bg-rose-500/10 text-rose-100 shadow-[0_0_24px_rgba(244,63,94,0.14)]",
   required:
-    "border-amber-300/80 bg-amber-400/10 text-amber-100 shadow-[0_0_26px_rgba(251,191,36,0.2)]",
+    "border-amber-300/60 bg-amber-400/10 text-amber-100 shadow-[0_0_26px_rgba(251,191,36,0.16)]",
 };
 
 function normalizeTrace(traceLog: unknown): WorkflowTrace[] {
@@ -122,7 +122,7 @@ function normalizeTrace(traceLog: unknown): WorkflowTrace[] {
     .filter((item): item is Record<string, unknown> => Boolean(item) && typeof item === "object")
     .map((item) => ({
       step_id: typeof item.step_id === "number" ? item.step_id : undefined,
-      agent_name: typeof item.agent_name === "string" ? item.agent_name : "UnknownAgent",
+      agent_name: typeof item.agent_name === "string" ? item.agent_name : "未知Agent",
       status: typeof item.status === "string" ? item.status : "pending",
       input_summary: typeof item.input_summary === "string" ? item.input_summary : undefined,
       output_summary: typeof item.output_summary === "string" ? item.output_summary : undefined,
@@ -548,15 +548,15 @@ export function WorkflowPage({ taskId, onNavigate }: WorkflowPageProps) {
     return (
       <section className="mx-auto max-w-6xl">
         <EmptyState
-          title="No active task"
-          description="Create a gaming_mouse analysis task before viewing the agent workflow."
+          title="暂无任务"
+          description="请先创建 gaming_mouse 分析任务，再查看 Agent 工作流。"
           action={
             <button
               className="rounded-md bg-cyan-300 px-4 py-2 text-sm font-semibold text-slate-950 transition hover:bg-cyan-200"
               onClick={() => onNavigate("new-analysis")}
               type="button"
             >
-              New Analysis
+              新建分析
             </button>
           }
         />
@@ -568,26 +568,26 @@ export function WorkflowPage({ taskId, onNavigate }: WorkflowPageProps) {
     <section className="mx-auto max-w-7xl">
       <div className="mb-6 flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
         <div>
-          <p className="text-sm font-medium text-cyan-300">Agent Workflow</p>
+          <p className="text-sm font-medium text-cyan-300">Agent 工作流</p>
           <h2 className="mt-2 text-3xl font-semibold text-white">
-            Live Multi-Agent DAG
+            多 Agent 执行路径
           </h2>
           <p className="mt-3 max-w-3xl break-all text-sm leading-6 text-slate-400">
-            Task ID: {taskId}
+            当前任务: {taskId}
           </p>
         </div>
         <div className="flex flex-wrap gap-2 lg:justify-end">
-          <StatusBadge label={status?.status ?? "loading"} tone="info" />
+          <StatusBadge label={status?.status ?? "加载中"} tone="info" />
           <StatusBadge
-            label={`progress ${status?.progress ?? 0}%`}
+            label={`进度 ${status?.progress ?? 0}%`}
             tone={status?.progress === 100 ? "success" : "neutral"}
           />
-          {isRefreshing ? <StatusBadge label="polling" tone="info" /> : null}
+          {isRefreshing ? <StatusBadge label="轮询中" tone="info" /> : null}
         </div>
       </div>
 
       {isInitialLoading ? (
-        <LoadingState label="Reading workflow status, trace and quality..." />
+        <LoadingState label="正在读取工作流状态、执行轨迹与质量结果..." />
       ) : null}
 
       {error ? (
@@ -600,14 +600,14 @@ export function WorkflowPage({ taskId, onNavigate }: WorkflowPageProps) {
         <section className="w-full max-w-full overflow-hidden rounded-lg border border-slate-800 bg-slate-950/70 p-5 shadow-[0_0_40px_rgba(15,23,42,0.45)]">
           <div className="mb-5 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
             <div>
-              <h3 className="text-lg font-semibold text-white">Agent Execution Path</h3>
+              <h3 className="text-lg font-semibold text-white">Agent 执行路径</h3>
               <p className="mt-1 text-sm text-slate-400">
-                Node state is derived from backend trace_log and current_agent.
+                节点状态来自后端 trace_log 与 current_agent。
               </p>
             </div>
             {lastUpdated ? (
               <p className="text-xs text-slate-500">
-                Updated {lastUpdated.toLocaleTimeString()}
+                更新于 {lastUpdated.toLocaleTimeString()}
               </p>
             ) : null}
           </div>
@@ -709,15 +709,15 @@ export function WorkflowPage({ taskId, onNavigate }: WorkflowPageProps) {
         <section className="grid min-w-0 gap-3 sm:grid-cols-3">
           <div className="min-w-0 rounded-lg border border-slate-800 bg-slate-900/45 p-4">
             <p className="text-xs uppercase tracking-[0.18em] text-slate-500">
-              Current Agent
+              当前 Agent
             </p>
             <p className="mt-2 break-words text-sm font-medium text-slate-100">
-              {status?.current_agent || "Waiting"}
+                {status?.current_agent || "等待中"}
             </p>
           </div>
           <div className="min-w-0 rounded-lg border border-slate-800 bg-slate-900/45 p-4">
             <p className="text-xs uppercase tracking-[0.18em] text-slate-500">
-              Trace Entries
+              轨迹记录
             </p>
             <p className="mt-2 text-sm font-medium text-slate-100">
               {traceLog.length}
@@ -725,10 +725,10 @@ export function WorkflowPage({ taskId, onNavigate }: WorkflowPageProps) {
           </div>
           <div className="min-w-0 rounded-lg border border-slate-800 bg-slate-900/45 p-4">
             <p className="text-xs uppercase tracking-[0.18em] text-slate-500">
-              Quality Status
+              质量状态
             </p>
             <p className="mt-2 break-words text-sm font-medium text-slate-100">
-              {qualityPayload?.quality_status || qualityResult?.status || "Pending"}
+              {qualityPayload?.quality_status || qualityResult?.status || "待处理"}
             </p>
           </div>
         </section>
@@ -739,39 +739,39 @@ export function WorkflowPage({ taskId, onNavigate }: WorkflowPageProps) {
               <div className="mb-4 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
                 <div>
                   <h3 className="text-sm font-semibold text-white">
-                    Retry Summary
+                    重试摘要
                   </h3>
                   <p className="mt-1 text-xs text-slate-500">
-                    Populated from the quality endpoint when available.
+                    后端返回质量结果后自动填充。
                   </p>
                 </div>
                 <StatusBadge
-                  label={isHumanReviewRequired ? "human review" : "automatic"}
+                  label={isHumanReviewRequired ? "人工审核" : "自动流程"}
                   tone={isHumanReviewRequired ? "warning" : "neutral"}
                 />
               </div>
               <div className="grid min-w-0 gap-3 md:grid-cols-2 2xl:grid-cols-4">
                 <div className="min-w-0 rounded-md border border-slate-800 bg-slate-950/60 p-3">
                   <p className="text-xs uppercase tracking-[0.16em] text-slate-500">
-                    Retry Round
+                    重试轮次
                   </p>
                   <p className="mt-2 text-sm font-semibold text-slate-100">
                     {typeof qualityPayload?.iteration_count === "number"
                       ? `${qualityPayload.iteration_count} / 3`
-                      : "None"}
+                      : "暂无"}
                   </p>
                 </div>
                 <div className="min-w-0 rounded-md border border-slate-800 bg-slate-950/60 p-3">
                   <p className="text-xs uppercase tracking-[0.16em] text-slate-500">
-                    Rejected To
+                    打回目标
                   </p>
                   <p className="mt-2 break-words text-sm font-semibold text-slate-100">
-                    {rejectTo || "None"}
+                    {rejectTo || "暂无"}
                   </p>
                 </div>
                 <div className="min-w-0 rounded-md border border-slate-800 bg-slate-950/60 p-3">
                   <p className="text-xs uppercase tracking-[0.16em] text-slate-500">
-                    Rejected Agents
+                    被打回 Agent
                   </p>
                   <div className="mt-2 flex flex-wrap gap-2">
                     {uniqueRejectedAgents.length > 0 ? (
@@ -783,16 +783,16 @@ export function WorkflowPage({ taskId, onNavigate }: WorkflowPageProps) {
                         />
                       ))
                     ) : (
-                      <span className="text-sm text-slate-400">None</span>
+                      <span className="text-sm text-slate-400">暂无</span>
                     )}
                   </div>
                 </div>
                 <div className="min-w-0 rounded-md border border-slate-800 bg-slate-950/60 p-3">
                   <p className="text-xs uppercase tracking-[0.16em] text-slate-500">
-                    Human Review Required
+                    是否需要人工审核
                   </p>
                   <p className="mt-2 text-sm font-semibold text-slate-100">
-                    {isHumanReviewRequired ? "Yes" : "No"}
+                    {isHumanReviewRequired ? "是" : "否"}
                   </p>
                 </div>
               </div>
@@ -803,13 +803,13 @@ export function WorkflowPage({ taskId, onNavigate }: WorkflowPageProps) {
               <div className="mb-4 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
                 <div>
                   <p className="text-xs uppercase tracking-[0.18em] text-amber-200/80">
-                    Escalation Branch
+                    人工审核分支
                   </p>
                   <p className="mt-1 font-mono text-sm text-amber-100">
-                    QualityAgent {" -> "} Human Review
+                    QualityAgent {" -> "} 人工审核
                   </p>
                 </div>
-                <StatusBadge label="manual gate required" tone="warning" />
+                <StatusBadge label="需要人工审核" tone="warning" />
               </div>
             </div>
           ) : null}
@@ -819,7 +819,7 @@ export function WorkflowPage({ taskId, onNavigate }: WorkflowPageProps) {
               <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
                 <div>
                   <p className="text-xs uppercase tracking-[0.18em] text-amber-200/80">
-                    Rejected Route
+                    打回路径
                   </p>
                   <p className="mt-2 font-mono text-sm text-amber-100">
                     QualityAgent {" -> "} {rejectTo}
@@ -830,7 +830,7 @@ export function WorkflowPage({ taskId, onNavigate }: WorkflowPageProps) {
                     </p>
                   ) : null}
                 </div>
-                <StatusBadge label="quality rejected" tone="warning" />
+                <StatusBadge label="质量审查未通过" tone="warning" />
               </div>
               {requiredActions.length > 0 ? (
                 <div className="mt-4 flex flex-wrap gap-2">
@@ -847,7 +847,7 @@ export function WorkflowPage({ taskId, onNavigate }: WorkflowPageProps) {
             <div className="flex items-start justify-between gap-3">
               <div>
                 <p className="text-xs uppercase tracking-[0.18em] text-slate-500">
-                  Agent Detail
+                  Agent 详情
                 </p>
                 <h3 className="mt-2 break-words text-xl font-semibold text-white">
                   {selectedAgent.name}
@@ -866,7 +866,7 @@ export function WorkflowPage({ taskId, onNavigate }: WorkflowPageProps) {
               <div>
                 <dt className="text-slate-500">output_summary</dt>
                 <dd className="mt-1 break-words leading-6 text-slate-200">
-                  {selectedTrace?.output_summary || "No output summary from trace yet."}
+                  {selectedTrace?.output_summary || "暂无 trace 输出摘要。"}
                 </dd>
               </div>
               <div>
@@ -874,45 +874,45 @@ export function WorkflowPage({ taskId, onNavigate }: WorkflowPageProps) {
                 <dd className="mt-1 text-slate-100">
                   {typeof selectedTrace?.duration_ms === "number"
                     ? selectedTrace.duration_ms
-                    : "Not reported"}
+                    : "未返回"}
                 </dd>
               </div>
               <div>
                 <dt className="text-slate-500">error</dt>
                 <dd className="mt-1 break-words leading-6 text-slate-200">
-                  {selectedTrace?.error || "None"}
+                  {selectedTrace?.error || "无"}
                 </dd>
               </div>
             </dl>
 
             {selectedAgent.name === "QualityAgent" ? (
               <div className="mt-6 border-t border-slate-800 pt-5">
-                <h4 className="text-sm font-semibold text-white">Quality Gate</h4>
+                <h4 className="text-sm font-semibold text-white">质量门控</h4>
                 <dl className="mt-4 space-y-4 text-sm">
                   <div>
                     <dt className="text-slate-500">approved</dt>
                     <dd className="mt-1 text-slate-100">
                       {typeof qualityApproved === "boolean"
                         ? String(qualityApproved)
-                        : "Not reported"}
+                        : "未返回"}
                     </dd>
                   </div>
                   <div>
                     <dt className="text-slate-500">score</dt>
                     <dd className="mt-1 text-slate-100">
-                      {typeof qualityScore === "number" ? qualityScore : "Not reported"}
+                      {typeof qualityScore === "number" ? qualityScore : "未返回"}
                     </dd>
                   </div>
                   <div>
                     <dt className="text-slate-500">reject_to</dt>
                     <dd className="mt-1 break-words text-slate-100">
-                      {rejectTo || "None"}
+                      {rejectTo || "无"}
                     </dd>
                   </div>
                   <div>
                     <dt className="text-slate-500">reject_reason</dt>
                     <dd className="mt-1 break-words leading-6 text-slate-200">
-                      {rejectReason || "None"}
+                      {rejectReason || "无"}
                     </dd>
                   </div>
                 </dl>
@@ -933,7 +933,7 @@ export function WorkflowPage({ taskId, onNavigate }: WorkflowPageProps) {
                       ))}
                     </ul>
                   ) : (
-                    <p className="mt-2 text-sm text-slate-400">No required actions.</p>
+                    <p className="mt-2 text-sm text-slate-400">暂无 required_actions。</p>
                   )}
                 </div>
 
@@ -958,7 +958,7 @@ export function WorkflowPage({ taskId, onNavigate }: WorkflowPageProps) {
                     </div>
                   ) : (
                     <p className="mt-2 text-sm text-slate-400">
-                      No checked_items returned yet.
+                      暂无 checked_items。
                     </p>
                   )}
                 </div>
@@ -971,18 +971,18 @@ export function WorkflowPage({ taskId, onNavigate }: WorkflowPageProps) {
           <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
             <div>
               <h3 className="text-lg font-semibold text-white">
-                Trace Timeline
+                执行轨迹
               </h3>
               <p className="mt-1 text-sm text-slate-400">
-                Chronological backend trace entries for this task.
+                按时间展示后端返回的 trace_log。
               </p>
             </div>
-            <StatusBadge label={`${traceLog.length} entries`} tone="neutral" />
+            <StatusBadge label={`${traceLog.length} 条记录`} tone="neutral" />
           </div>
 
           {traceLog.length === 0 ? (
             <p className="mt-4 rounded-md border border-slate-800 bg-slate-900/45 px-4 py-3 text-sm text-slate-400">
-              No trace entries returned yet.
+              暂无执行轨迹。
             </p>
           ) : (
             <div className="mt-4 space-y-3">
@@ -1027,7 +1027,7 @@ export function WorkflowPage({ taskId, onNavigate }: WorkflowPageProps) {
                             tone={traceTone(trace.status)}
                           />
                           {isLatestTraceForAgent && isRerunSuccess ? (
-                            <StatusBadge label="rerun" tone="warning" />
+                            <StatusBadge label="重新执行" tone="warning" />
                           ) : null}
                         </div>
                         {trace.output_summary ? (

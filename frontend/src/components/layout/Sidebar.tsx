@@ -17,13 +17,13 @@ export function Sidebar({
   onNavigate,
 }: SidebarProps) {
   return (
-    <aside className="flex w-full flex-col border-b border-slate-800 bg-surface-950/95 px-4 py-4 md:h-screen md:w-72 md:border-b-0 md:border-r">
+    <aside className="flex w-full flex-col border-b border-white/10 bg-surface-950/85 px-4 py-4 shadow-[12px_0_40px_rgba(2,6,23,0.25)] backdrop-blur-xl md:h-screen md:w-72 md:border-b-0 md:border-r">
       <div className="mb-6">
-        <p className="text-xs font-semibold uppercase tracking-[0.24em] text-cyan-300">
+        <p className="text-xs font-semibold uppercase tracking-[0.24em] text-cyan-300/90">
           Agent Console
         </p>
         <h1 className="mt-2 text-xl font-semibold text-white">
-          Competitive Analysis
+          竞品分析控制台
         </h1>
       </div>
 
@@ -34,10 +34,10 @@ export function Sidebar({
           return (
             <button
               key={item.key}
-              className={`w-full rounded-md px-3 py-2.5 text-left text-sm transition ${
+              className={`w-full rounded-lg px-3 py-2.5 text-left text-sm transition duration-200 ${
                 isActive
-                  ? "bg-cyan-400/10 text-cyan-100 ring-1 ring-cyan-400/30"
-                  : "text-slate-400 hover:bg-slate-800/80 hover:text-slate-100"
+                  ? "bg-cyan-400/10 text-cyan-100 ring-1 ring-cyan-300/25"
+                  : "text-slate-400 hover:bg-white/[0.04] hover:text-slate-100"
               }`}
               type="button"
               onClick={() => onNavigate(item.key)}
@@ -48,12 +48,12 @@ export function Sidebar({
         })}
       </nav>
 
-      <div className="mt-6 rounded-lg border border-slate-800 bg-slate-900/50 p-3 md:mt-auto">
+      <div className="mt-6 rounded-xl border border-white/10 bg-slate-900/45 p-3 md:mt-auto">
         <p className="text-xs uppercase tracking-[0.18em] text-slate-500">
-          Active Task
+          当前任务
         </p>
         <p className="mt-2 break-all text-sm text-slate-200">
-          {taskId || "No task selected"}
+          {taskId || "暂无任务"}
         </p>
       </div>
     </aside>

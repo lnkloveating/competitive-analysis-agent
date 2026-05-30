@@ -38,7 +38,7 @@ function normalizeTrace(traceLog: unknown): AgentTrace[] {
     .map((item) => ({
       step_id: typeof item.step_id === "number" ? item.step_id : undefined,
       agent_name:
-        typeof item.agent_name === "string" ? item.agent_name : "UnknownAgent",
+        typeof item.agent_name === "string" ? item.agent_name : "未知Agent",
       status: typeof item.status === "string" ? item.status : "pending",
       input_summary:
         typeof item.input_summary === "string" ? item.input_summary : undefined,
@@ -166,7 +166,7 @@ export function QualityPage({ taskId, onNavigate }: QualityPageProps) {
           setError(
             err instanceof Error
               ? err.message
-              : "Failed to load quality result.",
+              : "质量结果加载失败。",
           );
           setQualityPayload(null);
           setTraceLog([]);
@@ -220,15 +220,15 @@ export function QualityPage({ taskId, onNavigate }: QualityPageProps) {
     return (
       <section className="mx-auto max-w-6xl">
         <EmptyState
-          title="No active task"
-          description="Start a gaming_mouse analysis task before opening the quality check."
+          title="暂无任务"
+          description="请先启动 gaming_mouse 分析任务，再打开质量审查。"
           action={
             <button
               className="rounded-md bg-cyan-300 px-4 py-2 text-sm font-semibold text-slate-950 transition hover:bg-cyan-200"
               onClick={() => onNavigate("new-analysis")}
               type="button"
             >
-              New Analysis
+              新建分析
             </button>
           }
         />
@@ -240,23 +240,23 @@ export function QualityPage({ taskId, onNavigate }: QualityPageProps) {
     <section className="mx-auto max-w-7xl">
       <div className="mb-6 flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
         <div>
-          <p className="text-sm font-medium text-cyan-300">Quality Check</p>
+          <p className="text-sm font-medium text-cyan-300">质量审查</p>
           <h2 className="mt-2 text-3xl font-semibold text-white">
-            Quality Gate Review
+            质量门控审查
           </h2>
           <p className="mt-3 max-w-3xl break-all text-sm leading-6 text-slate-400">
-            Task ID: {taskId}
+            当前任务: {taskId}
           </p>
         </div>
         <div className="flex flex-wrap gap-2 lg:justify-end">
           <StatusBadge
-            label={approved === true ? "approved" : approved === false ? "not approved" : "pending"}
+            label={approved === true ? "已通过" : approved === false ? "未通过" : "待处理"}
             tone={approved === true ? "success" : approved === false ? "warning" : "neutral"}
           />
           <StatusBadge
             label={
               qualityPayload?.needs_human_review
-                ? "human review"
+                ? "人工审核"
                 : statusLabel
             }
             tone={qualityPayload?.needs_human_review ? "warning" : "info"}
@@ -264,7 +264,7 @@ export function QualityPage({ taskId, onNavigate }: QualityPageProps) {
         </div>
       </div>
 
-      {isLoading ? <LoadingState label="Loading quality gate result..." /> : null}
+      {isLoading ? <LoadingState label="正在加载质量门控结果..." /> : null}
 
       {error ? (
         <div className="mb-5 rounded-md border border-rose-500/35 bg-rose-500/10 px-4 py-3 text-sm text-rose-100">
@@ -275,8 +275,8 @@ export function QualityPage({ taskId, onNavigate }: QualityPageProps) {
       {!isLoading && !error ? (
         !hasQualityData ? (
           <EmptyState
-            title="No quality result returned yet"
-            description="Wait for QualityAgent to run, then reopen this page."
+            title="暂无质量结果"
+            description="请等待 QualityAgent 执行完成后再查看。"
           />
         ) : (
           <div className="space-y-5">
@@ -284,22 +284,22 @@ export function QualityPage({ taskId, onNavigate }: QualityPageProps) {
               <MetricCard
                 label="quality_score"
                 value={formatValue(qualityScore)}
-                helper="QualityAgent score"
+                helper="QualityAgent 评分"
               />
               <MetricCard
                 label="iteration_count"
                 value={qualityPayload?.iteration_count ?? "N/A"}
-                helper="repair attempts"
+                helper="修复轮次"
               />
               <MetricCard
                 label="checked_items"
                 value={checkedEntries.length}
-                helper="automated checks"
+                helper="自动检查项"
               />
               <MetricCard
                 label="rejected_agents"
                 value={rejectedAgents.length}
-                helper="sent back by quality gate"
+                helper="被质量门控打回"
               />
             </div>
 
@@ -308,14 +308,14 @@ export function QualityPage({ taskId, onNavigate }: QualityPageProps) {
                 <div className="mb-5 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
                   <div>
                     <h3 className="text-lg font-semibold text-white">
-                      Automated Check Items
+                      自动检查项
                     </h3>
                     <p className="mt-1 text-sm text-slate-400">
-                      Each row reflects the backend quality_result.checked_items map.
+                      每一项对应后端 quality_result.checked_items。
                     </p>
                   </div>
                   <StatusBadge
-                    label={approved ? "pass" : "needs attention"}
+                    label={approved ? "通过" : "需关注"}
                     tone={approved ? "success" : "warning"}
                   />
                 </div>
@@ -329,7 +329,7 @@ export function QualityPage({ taskId, onNavigate }: QualityPageProps) {
                       >
                         <span className="text-sm text-slate-200">{name}</span>
                         <StatusBadge
-                          label={passed ? "passed" : "failed"}
+                          label={passed ? "通过" : "失败"}
                           tone={passed ? checkTone.passed : checkTone.failed}
                         />
                       </div>
@@ -337,19 +337,19 @@ export function QualityPage({ taskId, onNavigate }: QualityPageProps) {
                   </div>
                 ) : (
                   <EmptyState
-                    title="No checked_items returned"
-                    description="The backend returned a quality result, but no check item map."
+                    title="暂无 checked_items"
+                    description="后端返回了质量结果，但没有返回检查项映射。"
                   />
                 )}
 
                 <div className="mt-6 grid gap-4 lg:grid-cols-2">
                   <section className="rounded-lg border border-emerald-400/25 bg-emerald-400/10 p-4">
                     <h4 className="text-sm font-semibold text-emerald-100">
-                      Passed Checks
+                      通过项
                     </h4>
                     <div className="mt-3">
                       <StatusList
-                        emptyLabel="No passed checks reported"
+                        emptyLabel="暂无通过项"
                         items={passedChecks}
                         tone="success"
                       />
@@ -358,11 +358,11 @@ export function QualityPage({ taskId, onNavigate }: QualityPageProps) {
 
                   <section className="rounded-lg border border-rose-400/25 bg-rose-500/10 p-4">
                     <h4 className="text-sm font-semibold text-rose-100">
-                      Failed Checks
+                      失败项
                     </h4>
                     <div className="mt-3">
                       <StatusList
-                        emptyLabel="No failed checks reported"
+                        emptyLabel="暂无失败项"
                         items={failedChecks}
                         tone="danger"
                       />
@@ -374,26 +374,26 @@ export function QualityPage({ taskId, onNavigate }: QualityPageProps) {
               <aside className="space-y-5">
                 <section className="rounded-lg border border-slate-800 bg-slate-950/80 p-5">
                   <h3 className="text-lg font-semibold text-white">
-                    Rejection Route
+                    打回路径
                   </h3>
                   <dl className="mt-4 space-y-4 text-sm">
                     <div>
                       <dt className="text-slate-500">reject_to</dt>
                       <dd className="mt-1 text-slate-100">
-                        {rejectTo || "None"}
+                        {rejectTo || "无"}
                       </dd>
                     </div>
                     <div>
                       <dt className="text-slate-500">reject_reason</dt>
                       <dd className="mt-1 leading-6 text-slate-200">
-                        {rejectReason || "None"}
+                        {rejectReason || "无"}
                       </dd>
                     </div>
                     <div>
                       <dt className="text-slate-500">rejected_agents</dt>
                       <dd className="mt-2">
                         <StatusList
-                          emptyLabel="No rejected agents"
+                          emptyLabel="暂无被打回 Agent"
                           items={rejectedAgents}
                           tone="warning"
                         />
@@ -404,14 +404,14 @@ export function QualityPage({ taskId, onNavigate }: QualityPageProps) {
 
                 <section className="rounded-lg border border-slate-800 bg-slate-950/80 p-5">
                   <h3 className="text-lg font-semibold text-white">
-                    Coverage Gaps
+                    覆盖缺口
                   </h3>
                   <div className="mt-4">
                     <p className="mb-2 text-xs uppercase tracking-[0.16em] text-slate-500">
                       missing_dimensions
                     </p>
                     <StatusList
-                      emptyLabel="None"
+                      emptyLabel="无"
                       items={missingDimensions}
                       tone="warning"
                     />
@@ -421,7 +421,7 @@ export function QualityPage({ taskId, onNavigate }: QualityPageProps) {
                       missing_platforms
                     </p>
                     <StatusList
-                      emptyLabel="None"
+                      emptyLabel="无"
                       items={missingPlatforms}
                       tone="warning"
                     />
@@ -430,20 +430,20 @@ export function QualityPage({ taskId, onNavigate }: QualityPageProps) {
 
                 <section className="rounded-lg border border-slate-800 bg-slate-950/80 p-5">
                   <h3 className="text-lg font-semibold text-white">
-                    Quality Trace
+                    质量执行轨迹
                   </h3>
                   <dl className="mt-4 space-y-4 text-sm">
                     <div>
                       <dt className="text-slate-500">status</dt>
                       <dd className="mt-1 text-slate-100">
-                        {qualityTrace?.status || "Not reported"}
+                        {qualityTrace?.status || "未返回"}
                       </dd>
                     </div>
                     <div>
                       <dt className="text-slate-500">output_summary</dt>
                       <dd className="mt-1 leading-6 text-slate-200">
                         {qualityTrace?.output_summary ||
-                          "No QualityAgent trace summary yet."}
+                          "暂无 QualityAgent 执行摘要。"}
                       </dd>
                     </div>
                     <div>
@@ -451,7 +451,7 @@ export function QualityPage({ taskId, onNavigate }: QualityPageProps) {
                       <dd className="mt-1 text-slate-100">
                         {typeof qualityTrace?.duration_ms === "number"
                           ? qualityTrace.duration_ms
-                          : "Not reported"}
+                          : "未返回"}
                       </dd>
                     </div>
                   </dl>
@@ -461,7 +461,7 @@ export function QualityPage({ taskId, onNavigate }: QualityPageProps) {
 
             <section className="rounded-lg border border-amber-400/30 bg-amber-400/10 p-5">
               <h3 className="text-lg font-semibold text-amber-100">
-                Required Actions
+                必要处理动作
               </h3>
               {requiredActions.length > 0 ? (
                 <ul className="mt-4 space-y-3">
@@ -476,7 +476,7 @@ export function QualityPage({ taskId, onNavigate }: QualityPageProps) {
                 </ul>
               ) : (
                 <p className="mt-3 text-sm text-amber-100/80">
-                  No required actions reported.
+                  暂无 required_actions。
                 </p>
               )}
             </section>

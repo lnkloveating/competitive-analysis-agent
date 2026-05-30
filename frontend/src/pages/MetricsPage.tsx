@@ -99,7 +99,7 @@ function BarMetric({
 
 function IdTags({ values }: { values?: string[] }) {
   if (!values || values.length === 0) {
-    return <span className="text-sm text-slate-500">None</span>;
+    return <span className="text-sm text-slate-500">无</span>;
   }
 
   return (
@@ -150,7 +150,7 @@ export function MetricsPage({ taskId, onNavigate }: MetricsPageProps) {
         setRiskFlags(Array.isArray(risksResult?.risk_flags) ? risksResult.risk_flags : []);
       } catch (err) {
         if (!cancelled) {
-          setError(err instanceof Error ? err.message : "Failed to load metrics.");
+          setError(err instanceof Error ? err.message : "指标数据加载失败。");
           setMetrics(null);
           setArtifacts(null);
           setRiskFlags([]);
@@ -178,15 +178,15 @@ export function MetricsPage({ taskId, onNavigate }: MetricsPageProps) {
     return (
       <section className="mx-auto max-w-6xl">
         <EmptyState
-          title="No active task"
-          description="Start a gaming_mouse analysis task before opening metrics."
+          title="暂无任务"
+          description="请先启动 gaming_mouse 分析任务，再打开指标看板。"
           action={
             <button
               className="rounded-md bg-cyan-300 px-4 py-2 text-sm font-semibold text-slate-950 transition hover:bg-cyan-200"
               onClick={() => onNavigate("new-analysis")}
               type="button"
             >
-              New Analysis
+              新建分析
             </button>
           }
         />
@@ -197,14 +197,14 @@ export function MetricsPage({ taskId, onNavigate }: MetricsPageProps) {
   return (
     <section className="mx-auto max-w-7xl">
       <div className="mb-6">
-        <p className="text-sm font-medium text-cyan-300">Metrics</p>
+        <p className="text-sm font-medium text-cyan-300">指标看板</p>
         <h2 className="mt-2 text-3xl font-semibold text-white">
-          Metrics Dashboard
+          指标看板
         </h2>
-        <p className="mt-3 break-all text-sm text-slate-400">Task ID: {taskId}</p>
+        <p className="mt-3 break-all text-sm text-slate-400">当前任务: {taskId}</p>
       </div>
 
-      {isLoading ? <LoadingState label="Loading metrics, artifacts and risks..." /> : null}
+      {isLoading ? <LoadingState label="正在加载指标、产物与风险数据..." /> : null}
 
       {error ? (
         <div className="mb-5 rounded-md border border-rose-500/35 bg-rose-500/10 px-4 py-3 text-sm text-rose-100">
@@ -215,8 +215,8 @@ export function MetricsPage({ taskId, onNavigate }: MetricsPageProps) {
       {!isLoading && !error ? (
         !hasMetrics ? (
           <EmptyState
-            title="No metrics returned yet"
-            description="Wait for StrategyAgent to complete, then reopen this page."
+            title="暂无指标"
+            description="请等待 StrategyAgent 完成后再查看。"
           />
         ) : (
           <div className="space-y-5">
@@ -224,22 +224,22 @@ export function MetricsPage({ taskId, onNavigate }: MetricsPageProps) {
               <MetricCard
                 label="evidence_count"
                 value={formatMetric(metrics?.evidence_count)}
-                helper="backend metrics"
+                helper="后端指标"
               />
               <MetricCard
                 label="claim_count"
                 value={formatMetric(metrics?.claim_count)}
-                helper="backend metrics"
+                helper="后端指标"
               />
               <MetricCard
                 label="quality_score"
                 value={formatMetric(metrics?.quality_score, "score")}
-                helper="quality gate score"
+                helper="质量门控评分"
               />
               <MetricCard
                 label="iteration_count"
                 value={formatMetric(metrics?.iteration_count)}
-                helper="repair iterations"
+                helper="修复轮次"
               />
             </div>
 
@@ -256,7 +256,7 @@ export function MetricsPage({ taskId, onNavigate }: MetricsPageProps) {
               </div>
 
               <div className="space-y-4 rounded-lg border border-slate-800 bg-slate-950/70 p-5">
-                <h3 className="text-lg font-semibold text-white">Credibility Mix</h3>
+                <h3 className="text-lg font-semibold text-white">可信度结构</h3>
                 <BarMetric
                   label="high_credibility_ratio"
                   percent={ratioPercent(metrics?.high_credibility_ratio)}
@@ -293,7 +293,7 @@ export function MetricsPage({ taskId, onNavigate }: MetricsPageProps) {
             </div>
 
             <section className="rounded-lg border border-slate-800 bg-slate-950/70 p-5">
-              <h3 className="text-lg font-semibold text-white">Artifacts</h3>
+              <h3 className="text-lg font-semibold text-white">产物统计</h3>
               <div className="mt-4 grid gap-3 md:grid-cols-4">
                 <MetricCard
                   label="raw_research_count"
@@ -309,19 +309,19 @@ export function MetricsPage({ taskId, onNavigate }: MetricsPageProps) {
               <div className="mt-4 flex flex-wrap gap-2">
                 <StatusBadge
                   label={`product_matrix ${
-                    artifacts?.has_product_matrix ? "ready" : "missing"
+                    artifacts?.has_product_matrix ? "已生成" : "缺失"
                   }`}
                   tone={artifacts?.has_product_matrix ? "success" : "neutral"}
                 />
                 <StatusBadge
                   label={`business_matrix ${
-                    artifacts?.has_business_matrix ? "ready" : "missing"
+                    artifacts?.has_business_matrix ? "已生成" : "缺失"
                   }`}
                   tone={artifacts?.has_business_matrix ? "success" : "neutral"}
                 />
                 <StatusBadge
                   label={`final_report ${
-                    artifacts?.has_final_report ? "ready" : "missing"
+                    artifacts?.has_final_report ? "已生成" : "缺失"
                   }`}
                   tone={artifacts?.has_final_report ? "success" : "neutral"}
                 />
@@ -329,9 +329,9 @@ export function MetricsPage({ taskId, onNavigate }: MetricsPageProps) {
             </section>
 
             <section className="rounded-lg border border-slate-800 bg-slate-950/70 p-5">
-              <h3 className="text-lg font-semibold text-white">Risks</h3>
+              <h3 className="text-lg font-semibold text-white">风险</h3>
               {riskFlags.length === 0 ? (
-                <p className="mt-3 text-sm text-slate-400">No risk flags detected.</p>
+                <p className="mt-3 text-sm text-slate-400">暂无风险标记。</p>
               ) : (
                 <div className="mt-4 grid gap-3 lg:grid-cols-2">
                   {riskFlags.map((risk, index) => (

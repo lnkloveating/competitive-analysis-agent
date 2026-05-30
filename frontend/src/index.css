@@ -15,6 +15,9 @@ body {
   margin: 0;
   min-width: 320px;
   min-height: 100vh;
+  background:
+    linear-gradient(120deg, rgba(34, 211, 238, 0.08), transparent 32%),
+    linear-gradient(135deg, #050812 0%, #07101d 48%, #050814 100%);
 }
 
 button,
@@ -71,6 +74,52 @@ textarea {
   to {
     background-position: 200% 50%;
   }
+}
+
+@keyframes backgroundGridDrift {
+  from {
+    background-position:
+      0 0,
+      0 0;
+  }
+
+  to {
+    background-position:
+      72px 72px,
+      -72px -72px;
+  }
+}
+
+.app-background {
+  position: relative;
+  isolation: isolate;
+  overflow: hidden;
+}
+
+.app-background::before {
+  animation: backgroundGridDrift 28s linear infinite;
+  background-image:
+    linear-gradient(rgba(148, 163, 184, 0.045) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(148, 163, 184, 0.045) 1px, transparent 1px);
+  background-size: 72px 72px;
+  content: "";
+  inset: 0;
+  mask-image: linear-gradient(to bottom, rgba(0, 0, 0, 0.95), rgba(0, 0, 0, 0.35));
+  pointer-events: none;
+  position: fixed;
+  z-index: -2;
+}
+
+.app-background::after {
+  background:
+    linear-gradient(120deg, rgba(34, 211, 238, 0.1), transparent 34%),
+    linear-gradient(240deg, rgba(59, 130, 246, 0.08), transparent 30%),
+    linear-gradient(180deg, rgba(2, 6, 23, 0.12), rgba(2, 6, 23, 0.68));
+  content: "";
+  inset: 0;
+  pointer-events: none;
+  position: fixed;
+  z-index: -1;
 }
 
 .workflow-node-enter {

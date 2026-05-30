@@ -21,14 +21,14 @@ type PageKey =
   | "metrics";
 
 const navItems: Array<NavItem & { key: PageKey }> = [
-  { key: "overview", label: "Overview" },
-  { key: "new-analysis", label: "New Analysis" },
-  { key: "workflow", label: "Agent Workflow" },
-  { key: "evidence", label: "Evidence Hub" },
-  { key: "claims", label: "Claims Graph" },
-  { key: "quality", label: "Quality Check" },
-  { key: "report", label: "Final Report" },
-  { key: "metrics", label: "Metrics" },
+  { key: "overview", label: "总览" },
+  { key: "new-analysis", label: "新建分析" },
+  { key: "workflow", label: "Agent 工作流" },
+  { key: "evidence", label: "证据中心" },
+  { key: "claims", label: "结论追踪" },
+  { key: "quality", label: "质量审查" },
+  { key: "report", label: "最终报告" },
+  { key: "metrics", label: "指标看板" },
 ];
 
 function isPageKey(key: string): key is PageKey {
