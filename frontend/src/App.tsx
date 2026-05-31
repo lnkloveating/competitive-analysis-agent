@@ -267,6 +267,7 @@ export default function App() {
             selectedIndustryKey={selectedIndustryKey}
             displayTaskId={displayTaskId ?? undefined}
             taskId={taskId ?? undefined}
+            demoStatusLabel={demoStatusLabel}
           />
         );
       case "new-analysis":
@@ -340,6 +341,7 @@ export default function App() {
             selectedIndustryKey={selectedIndustryKey}
             displayTaskId={displayTaskId ?? undefined}
             taskId={taskId ?? undefined}
+            demoStatusLabel={demoStatusLabel}
           />
         );
     }

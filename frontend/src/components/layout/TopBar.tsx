@@ -62,12 +62,12 @@ export function TopBar({
         : "检查 API";
 
   return (
-    <header className="flex flex-col gap-3 border-b border-slate-200/80 bg-white/85 px-5 py-4 shadow-sm backdrop-blur-xl md:flex-row md:items-center md:justify-between lg:px-8">
+    <header className="flex flex-col gap-3 border-b border-cyan-300/15 bg-slate-950/75 px-5 py-4 shadow-[0_12px_34px_rgba(2,6,23,0.22)] backdrop-blur-xl md:flex-row md:items-center md:justify-between lg:px-8">
       <div>
-        <p className="text-sm font-medium text-slate-700">
+        <p className="text-sm font-medium text-slate-100">
           AI 驱动的竞品分析系统
         </p>
-        <p className="mt-1 text-xs text-slate-400">系统服务状态</p>
+        <p className="mt-1 text-xs text-slate-500">系统服务状态</p>
       </div>
       <div className="flex flex-wrap items-center gap-2">
         <StatusBadge label={statusLabel} tone={statusTone} />
@@ -90,7 +90,7 @@ export function TopBar({
         ) : null}
         {onLogout ? (
           <button
-            className="rounded-full border border-slate-200 px-3 py-1 text-xs font-medium text-slate-600 transition hover:border-rose-300 hover:text-rose-600"
+            className="rounded-full border border-slate-700 bg-slate-900/55 px-3 py-1 text-xs font-medium text-slate-300 transition hover:border-rose-300/50 hover:bg-rose-500/10 hover:text-rose-200"
             onClick={onLogout}
             type="button"
             title="退出登录并返回登录页"

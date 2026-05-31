@@ -48,7 +48,7 @@ export function AppLayout({
   const currentStep = demoSteps[demoStepIndex];
 
   return (
-    <div className="app-background min-h-screen bg-slate-50 text-slate-900">
+    <div className="app-background min-h-screen bg-[#020617] text-slate-100">
       <div className="relative z-10 flex min-h-screen flex-col md:flex-row">
         <Sidebar
           items={navItems}
@@ -60,7 +60,7 @@ export function AppLayout({
           currentDemoKey={currentDemoKey}
           visitedKeys={visitedKeys}
         />
-        <div className="flex min-h-screen flex-1 flex-col">
+        <div className="flex min-h-screen min-w-0 flex-1 flex-col">
           <TopBar
             taskId={taskId}
             displayTaskId={displayTaskId}
@@ -72,7 +72,7 @@ export function AppLayout({
           />
 
           {demoRunning ? (
-            <div className="border-b border-cyan-200/70 bg-gradient-to-r from-cyan-50/90 to-white/80 px-5 py-3 backdrop-blur-sm lg:px-8">
+            <div className="border-b border-cyan-300/15 bg-slate-950/70 px-5 py-3 shadow-[0_12px_34px_rgba(2,6,23,0.24)] backdrop-blur-xl lg:px-8">
               <div className="mx-auto flex max-w-[1440px] flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
                 <div className="flex items-center gap-3">
                   <span className="relative flex h-2.5 w-2.5">
@@ -85,9 +85,9 @@ export function AppLayout({
                       }`}
                     />
                   </span>
-                  <p className="text-sm font-semibold text-slate-700">
+                  <p className="text-sm font-semibold text-slate-100">
                     {demoPaused ? "演示已暂停，可继续" : "自动演示中"}
-                    <span className="ml-2 font-normal text-slate-500">
+                    <span className="ml-2 font-normal text-slate-400">
                       第 {demoStepIndex + 1} / {demoSteps.length} 步 ·{" "}
                       {currentStep?.label}
                     </span>
@@ -97,7 +97,7 @@ export function AppLayout({
                 <div className="flex items-center gap-2">
                   {demoPaused ? (
                     <button
-                      className="rounded-full border border-cyan-300 bg-cyan-500 px-3 py-1.5 text-xs font-semibold text-white transition hover:bg-cyan-400"
+                      className="rounded-full border border-cyan-300/40 bg-cyan-400/15 px-3 py-1.5 text-xs font-semibold text-cyan-100 transition hover:border-cyan-200 hover:bg-cyan-300/20"
                       onClick={onResumeDemo}
                       type="button"
                     >
@@ -105,7 +105,7 @@ export function AppLayout({
                     </button>
                   ) : (
                     <button
-                      className="rounded-full border border-slate-300 bg-white px-3 py-1.5 text-xs font-semibold text-slate-600 transition hover:border-cyan-300 hover:text-cyan-700"
+                      className="rounded-full border border-slate-700 bg-slate-900/70 px-3 py-1.5 text-xs font-semibold text-slate-300 transition hover:border-cyan-300/50 hover:text-cyan-100"
                       onClick={onPauseDemo}
                       type="button"
                     >
@@ -113,7 +113,7 @@ export function AppLayout({
                     </button>
                   )}
                   <button
-                    className="rounded-full border border-slate-300 bg-white px-3 py-1.5 text-xs font-semibold text-slate-600 transition hover:border-rose-300 hover:text-rose-600"
+                    className="rounded-full border border-slate-700 bg-slate-900/70 px-3 py-1.5 text-xs font-semibold text-slate-300 transition hover:border-rose-300/50 hover:text-rose-200"
                     onClick={onStopDemo}
                     type="button"
                   >
@@ -130,7 +130,7 @@ export function AppLayout({
 
                   return (
                     <div key={step.key} className="flex flex-1 items-center gap-1.5">
-                      <div className="h-1.5 flex-1 overflow-hidden rounded-full bg-slate-200">
+                      <div className="h-1.5 flex-1 overflow-hidden rounded-full bg-slate-800/80">
                         <div
                           className={`h-full rounded-full ${
                             isDone
