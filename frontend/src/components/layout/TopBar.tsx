@@ -5,9 +5,10 @@ import { StatusBadge } from "../common/StatusBadge";
 type TopBarProps = {
   taskId?: string;
   displayTaskId?: string;
+  onExitDemo?: () => void;
 };
 
-export function TopBar({ taskId, displayTaskId }: TopBarProps) {
+export function TopBar({ taskId, displayTaskId, onExitDemo }: TopBarProps) {
   const [apiStatus, setApiStatus] = useState<"checking" | "online" | "offline">(
     "checking",
   );
@@ -63,6 +64,16 @@ export function TopBar({ taskId, displayTaskId }: TopBarProps) {
             tone={displayTaskId ? "info" : "neutral"}
           />
         </span>
+        {onExitDemo ? (
+          <button
+            className="rounded-full border border-slate-200 px-3 py-1 text-xs font-medium text-slate-600 transition hover:border-cyan-300 hover:text-cyan-700"
+            onClick={onExitDemo}
+            type="button"
+            title="返回欢迎页"
+          >
+            退出演示
+          </button>
+        ) : null}
       </div>
     </header>
   );

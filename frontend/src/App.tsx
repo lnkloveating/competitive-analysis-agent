@@ -8,8 +8,19 @@ import { MetricsPage } from "./pages/MetricsPage";
 import { NewAnalysisPage } from "./pages/NewAnalysisPage";
 import { QualityPage } from "./pages/QualityPage";
 import { ReportPage } from "./pages/ReportPage";
+import { WelcomePage } from "./pages/WelcomePage";
 import { WorkflowPage } from "./pages/WorkflowPage";
 import { getDisplayTaskId } from "./utils/taskDisplay";
+
+const HAS_ENTERED_KEY = "hasEnteredDemo";
+
+function getStoredHasEntered(): boolean {
+  if (typeof window === "undefined") {
+    return false;
+  }
+
+  return window.sessionStorage.getItem(HAS_ENTERED_KEY) === "true";
+}
 
 type PageKey =
   | "overview"
@@ -54,6 +65,7 @@ function getStoredTaskId(): string | null {
 }
 
 export default function App() {
+  const [hasEntered, setHasEntered] = useState<boolean>(getStoredHasEntered);
   const [activePage, setActivePage] = useState<PageKey>(getPageKeyFromHash);
   const [taskId, setTaskId] = useState<string | null>(getStoredTaskId);
   const [displayTaskId, setDisplayTaskId] = useState<string | null>(() =>
@@ -86,6 +98,22 @@ export default function App() {
       if (typeof window !== "undefined" && window.location.hash !== `#${key}`) {
         window.history.pushState(null, "", `#${key}`);
       }
+    }
+  }
+
+  function handleEnter() {
+    setHasEntered(true);
+
+    if (typeof window !== "undefined") {
+      window.sessionStorage.setItem(HAS_ENTERED_KEY, "true");
+    }
+  }
+
+  function handleExitDemo() {
+    setHasEntered(false);
+
+    if (typeof window !== "undefined") {
+      window.sessionStorage.removeItem(HAS_ENTERED_KEY);
     }
   }
 
@@ -206,11 +234,16 @@ export default function App() {
     }
   }
 
+  if (!hasEntered) {
+    return <WelcomePage onEnter={handleEnter} />;
+  }
+
   return (
     <AppLayout
       activePage={activePage}
       navItems={navItems}
       onNavigate={handleNavigate}
+      onExitDemo={handleExitDemo}
       displayTaskId={displayTaskId ?? undefined}
       taskId={taskId ?? undefined}
     >

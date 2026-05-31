@@ -9,6 +9,7 @@ type AppLayoutProps = {
   taskId?: string;
   displayTaskId?: string;
   onNavigate: (key: string) => void;
+  onExitDemo?: () => void;
 };
 
 export function AppLayout({
@@ -18,6 +19,7 @@ export function AppLayout({
   taskId,
   displayTaskId,
   onNavigate,
+  onExitDemo,
 }: AppLayoutProps) {
   return (
     <div className="app-background min-h-screen bg-slate-50 text-slate-900">
@@ -30,7 +32,11 @@ export function AppLayout({
           onNavigate={onNavigate}
         />
         <div className="flex min-h-screen flex-1 flex-col">
-          <TopBar taskId={taskId} displayTaskId={displayTaskId} />
+          <TopBar
+            taskId={taskId}
+            displayTaskId={displayTaskId}
+            onExitDemo={onExitDemo}
+          />
           <main className="flex-1 overflow-y-auto px-5 py-6 md:px-8 lg:px-10">
             {children}
           </main>
