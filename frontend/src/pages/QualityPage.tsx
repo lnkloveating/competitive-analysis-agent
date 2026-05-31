@@ -8,6 +8,7 @@ import type { AgentTrace, QualityResult } from "../types/analysis";
 
 type QualityPageProps = {
   taskId?: string;
+  displayTaskId?: string;
   onNavigate: (key: string) => void;
 };
 
@@ -21,12 +22,26 @@ type QualityPayload = {
   quality_status?: string;
 };
 
-const checkTone = {
-  passed: "success",
-  failed: "danger",
-} as const;
+type QualityTrace = AgentTrace & {
+  reason?: string;
+  reject_reason?: string;
+};
 
-function normalizeTrace(traceLog: unknown): AgentTrace[] {
+type CheckStatus = "passed" | "failed" | "unknown";
+
+type CheckEntry = {
+  name: string;
+  status: CheckStatus;
+};
+
+type CoverageItem = {
+  label: string;
+  tone: "neutral" | "success" | "warning" | "danger" | "info";
+};
+
+const MAX_RETRY_COUNT = 3;
+
+function normalizeTrace(traceLog: unknown): QualityTrace[] {
   if (!Array.isArray(traceLog)) {
     return [];
   }
@@ -52,15 +67,70 @@ function normalizeTrace(traceLog: unknown): AgentTrace[] {
         typeof item.error === "string" || item.error === null
           ? item.error
           : undefined,
+      reason: typeof item.reason === "string" ? item.reason : undefined,
+      reject_reason:
+        typeof item.reject_reason === "string" ? item.reject_reason : undefined,
     }));
 }
 
-function asList(value: string[] | undefined, fallback?: string): string[] {
-  if (Array.isArray(value) && value.length > 0) {
-    return value;
+function asRecord(value: unknown): Record<string, unknown> {
+  return value && typeof value === "object" && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : {};
+}
+
+function asOptionalString(value: unknown): string | null {
+  return typeof value === "string" && value.trim().length > 0 ? value : null;
+}
+
+function formatUnknownItem(item: unknown): string | null {
+  if (typeof item === "string" && item.trim().length > 0) {
+    return item;
   }
 
-  return fallback ? [fallback] : [];
+  if (typeof item === "number" || typeof item === "boolean") {
+    return String(item);
+  }
+
+  const record = asRecord(item);
+  if (Object.keys(record).length === 0) {
+    return null;
+  }
+
+  const title =
+    asOptionalString(record.name) ??
+    asOptionalString(record.key) ??
+    asOptionalString(record.risk_type) ??
+    asOptionalString(record.dimension) ??
+    asOptionalString(record.platform) ??
+    asOptionalString(record.evidence_id);
+  const severity = asOptionalString(record.severity);
+  const description =
+    asOptionalString(record.description) ??
+    asOptionalString(record.reason) ??
+    asOptionalString(record.summary);
+
+  return [severity ? `[${severity}]` : null, title, description]
+    .filter(Boolean)
+    .join(" ");
+}
+
+function asList(value: unknown, fallback?: unknown): string[] {
+  const items = Array.isArray(value) ? value : value ? [value] : [];
+  const normalized = items
+    .map(formatUnknownItem)
+    .filter((item): item is string => Boolean(item));
+
+  if (normalized.length > 0) {
+    return normalized;
+  }
+
+  const fallbackText = formatUnknownItem(fallback);
+  return fallbackText ? [fallbackText] : [];
+}
+
+function normalizeStatus(value: unknown): string {
+  return typeof value === "string" ? value.trim().toLowerCase() : "";
 }
 
 function getQualityScore(quality?: QualityResult): number | undefined {
@@ -82,6 +152,72 @@ function getQualityApproved(payload: QualityPayload | null): boolean | undefined
 
 function formatValue(value?: number) {
   return typeof value === "number" ? value.toFixed(1) : "N/A";
+}
+
+function normalizeCheckStatus(value: unknown): CheckStatus {
+  if (typeof value === "boolean") {
+    return value ? "passed" : "failed";
+  }
+
+  const record = asRecord(value);
+  if (Object.keys(record).length > 0) {
+    if ("passed" in record) {
+      return normalizeCheckStatus(record.passed);
+    }
+
+    if ("status" in record) {
+      return normalizeCheckStatus(record.status);
+    }
+  }
+
+  const status = normalizeStatus(value);
+  if (["true", "passed", "pass", "success", "approved"].includes(status)) {
+    return "passed";
+  }
+
+  if (["false", "failed", "fail", "rejected", "not_approved"].includes(status)) {
+    return "failed";
+  }
+
+  return "unknown";
+}
+
+function normalizeCheckedItems(value: unknown): CheckEntry[] {
+  if (Array.isArray(value)) {
+    return value
+      .map((item, index) => {
+        if (typeof item === "string") {
+          return { name: item, status: "unknown" as const };
+        }
+
+        const record = asRecord(item);
+        const name =
+          asOptionalString(record.name) ??
+          asOptionalString(record.key) ??
+          asOptionalString(record.check) ??
+          asOptionalString(record.id) ??
+          asOptionalString(record.label) ??
+          `检查项 ${index + 1}`;
+
+        return {
+          name,
+          status: normalizeCheckStatus(
+            "passed" in record ? record.passed : record.status,
+          ),
+        };
+      })
+      .filter((item) => item.name.trim().length > 0);
+  }
+
+  const record = asRecord(value);
+  return Object.entries(record).map(([name, status]) => ({
+    name,
+    status: normalizeCheckStatus(status),
+  }));
+}
+
+function mergeUnique(...groups: string[][]): string[] {
+  return Array.from(new Set(groups.flat().filter(Boolean)));
 }
 
 function StatusList({
@@ -106,11 +242,148 @@ function StatusList({
   );
 }
 
-export function QualityPage({ taskId, onNavigate }: QualityPageProps) {
+function CheckList({
+  emptyLabel,
+  items,
+  tone,
+}: {
+  emptyLabel: string;
+  items: string[];
+  tone: "success" | "warning" | "danger";
+}) {
+  if (items.length === 0) {
+    return <p className="text-sm text-slate-400">{emptyLabel}</p>;
+  }
+
+  return (
+    <ul className="space-y-2">
+      {items.map((item) => (
+        <li
+          className={`rounded-md border px-3 py-2 text-sm ${
+            tone === "success"
+              ? "border-emerald-400/25 bg-emerald-400/10 text-emerald-100"
+              : "border-rose-400/25 bg-rose-500/10 text-rose-100"
+          }`}
+          key={item}
+        >
+          {item}
+        </li>
+      ))}
+    </ul>
+  );
+}
+
+function getCoverageItems(qualityRecord: Record<string, unknown>): CoverageItem[] {
+  const missingDimensions = asList(qualityRecord.missing_dimensions).map((item) => ({
+    label: `missing_dimensions: ${item}`,
+    tone: "warning" as const,
+  }));
+  const missingPlatforms = asList(qualityRecord.missing_platforms).map((item) => ({
+    label: `missing_platforms: ${item}`,
+    tone: "warning" as const,
+  }));
+  const missingEvidence = asList(qualityRecord.missing_evidence).map((item) => ({
+    label: `missing_evidence: ${item}`,
+    tone: "warning" as const,
+  }));
+  const coverageGaps = asList(qualityRecord.coverage_gaps).map((item) => ({
+    label: `coverage_gaps: ${item}`,
+    tone: "warning" as const,
+  }));
+  const highRiskFlags = asList(qualityRecord.high_risk_flags).map((item) => ({
+    label: `high_risk_flags: ${item}`,
+    tone: "danger" as const,
+  }));
+  const riskFlags: CoverageItem[] = Array.isArray(qualityRecord.risk_flags)
+    ? qualityRecord.risk_flags
+        .map((risk): CoverageItem | null => {
+          const record = asRecord(risk);
+          const label = formatUnknownItem(risk);
+          if (!label) {
+            return null;
+          }
+
+          return {
+            label: `risk_flags: ${label}`,
+            tone:
+              normalizeStatus(record.severity) === "high"
+                ? ("danger" as const)
+                : ("warning" as const),
+          };
+        })
+        .filter((item): item is CoverageItem => item !== null)
+    : asList(qualityRecord.risk_flags).map((item) => ({
+        label: `risk_flags: ${item}`,
+        tone: "warning" as const,
+      }));
+
+  return [
+    ...missingDimensions,
+    ...missingPlatforms,
+    ...missingEvidence,
+    ...coverageGaps,
+    ...highRiskFlags,
+    ...riskFlags,
+  ];
+}
+
+function getQualityState({
+  approved,
+  inferredHumanReview,
+  status,
+}: {
+  approved?: boolean;
+  inferredHumanReview: boolean;
+  status: string;
+}) {
+  if (inferredHumanReview || status.includes("human")) {
+    return {
+      label: "需要人工审核",
+      tone: "warning" as const,
+      description: "质量门控未能自动通过，需要人工复核。",
+    };
+  }
+
+  if (
+    approved === true ||
+    ["approved", "pass", "passed", "success"].includes(status)
+  ) {
+    return {
+      label: "质量审查通过",
+      tone: "success" as const,
+      description: "当前报告已通过自动质量门控。",
+    };
+  }
+
+  if (
+    approved === false ||
+    status.includes("reject") ||
+    status.includes("fail") ||
+    status === "not_approved"
+  ) {
+    return {
+      label: "质量审查未通过",
+      tone: "danger" as const,
+      description: "质量门控发现问题，需要打回修复或人工处理。",
+    };
+  }
+
+  return {
+    label: "质量审查待处理",
+    tone: "neutral" as const,
+    description: "等待 QualityAgent 返回质量审查结果。",
+  };
+}
+
+export function QualityPage({
+  taskId,
+  displayTaskId,
+  onNavigate,
+}: QualityPageProps) {
   const [qualityPayload, setQualityPayload] = useState<QualityPayload | null>(
     null,
   );
-  const [traceLog, setTraceLog] = useState<AgentTrace[]>([]);
+  const [traceLog, setTraceLog] = useState<QualityTrace[]>([]);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -158,15 +431,13 @@ export function QualityPage({ taskId, onNavigate }: QualityPageProps) {
 
         setError(
           failedEndpoints.length > 0
-            ? `Unable to load ${failedEndpoints.join(", ")} endpoint.`
+            ? `无法加载 ${failedEndpoints.join(", ")} 接口。`
             : null,
         );
       } catch (err) {
         if (!cancelled) {
           setError(
-            err instanceof Error
-              ? err.message
-              : "质量结果加载失败。",
+            err instanceof Error ? err.message : "质量结果加载失败。",
           );
           setQualityPayload(null);
           setTraceLog([]);
@@ -186,22 +457,72 @@ export function QualityPage({ taskId, onNavigate }: QualityPageProps) {
   }, [taskId]);
 
   const quality = qualityPayload?.quality_result;
+  const qualityRecord = asRecord(quality);
   const qualityScore = getQualityScore(quality);
   const approved = getQualityApproved(qualityPayload);
-  const checkedItems = quality?.checked_items ?? {};
-  const checkedEntries = Object.entries(checkedItems);
-  const passedChecks = asList(quality?.passed_checks);
-  const failedChecks = asList(quality?.failed_checks);
-  const missingDimensions = asList(quality?.missing_dimensions);
-  const missingPlatforms = asList(quality?.missing_platforms);
+  const iterationCount =
+    typeof qualityPayload?.iteration_count === "number"
+      ? qualityPayload.iteration_count
+      : undefined;
+  const remainingRetryCount =
+    typeof iterationCount === "number"
+      ? Math.max(0, MAX_RETRY_COUNT - iterationCount)
+      : undefined;
+  const checkedItemEntries = normalizeCheckedItems(qualityRecord.checked_items);
+  const explicitPassedChecks = asList(qualityRecord.passed_checks);
+  const explicitFailedChecks = asList(qualityRecord.failed_checks);
+  const inferredPassedChecks = checkedItemEntries
+    .filter((item) => item.status === "passed")
+    .map((item) => item.name);
+  const inferredFailedChecks = checkedItemEntries
+    .filter((item) => item.status === "failed")
+    .map((item) => item.name);
+  const passedChecks =
+    explicitPassedChecks.length > 0 ? explicitPassedChecks : inferredPassedChecks;
+  const failedChecks =
+    explicitFailedChecks.length > 0 ? explicitFailedChecks : inferredFailedChecks;
+  const displayCheckEntries =
+    checkedItemEntries.length > 0
+      ? checkedItemEntries
+      : [
+          ...passedChecks.map((name) => ({ name, status: "passed" as const })),
+          ...failedChecks.map((name) => ({ name, status: "failed" as const })),
+        ];
+  const checkCount =
+    checkedItemEntries.length > 0
+      ? checkedItemEntries.length
+      : mergeUnique(passedChecks, failedChecks).length;
   const requiredActions = asList(
-    quality?.required_actions,
-    quality?.required_fix,
+    qualityRecord.required_actions,
+    qualityRecord.required_fix,
   );
-  const rejectedAgents = qualityPayload?.rejected_agents ?? [];
-  const rejectTo = quality?.reject_to ?? quality?.target_agent ?? null;
+  const rejectedAgents = Array.isArray(qualityPayload?.rejected_agents)
+    ? qualityPayload.rejected_agents
+    : [];
+  const rejectTo =
+    asOptionalString(qualityRecord.reject_to) ??
+    asOptionalString(qualityRecord.target_agent);
   const rejectReason =
-    quality?.reject_reason ?? quality?.reason ?? quality?.status ?? null;
+    asOptionalString(qualityRecord.reject_reason) ??
+    asOptionalString(qualityRecord.reason);
+  const qualityStatus = normalizeStatus(
+    qualityPayload?.quality_status ?? qualityRecord.status,
+  );
+  const needsHumanReviewFromRetry =
+    qualityPayload?.needs_human_review === undefined &&
+    typeof iterationCount === "number" &&
+    iterationCount >= MAX_RETRY_COUNT;
+  const needsHumanReview = Boolean(
+    qualityPayload?.needs_human_review ||
+      qualityStatus.includes("human") ||
+      needsHumanReviewFromRetry,
+  );
+  const qualityState = getQualityState({
+    approved,
+    inferredHumanReview: needsHumanReview,
+    status: qualityStatus,
+  });
+  const coverageItems = getCoverageItems(qualityRecord);
   const qualityTrace = useMemo(
     () =>
       traceLog
@@ -211,10 +532,13 @@ export function QualityPage({ taskId, onNavigate }: QualityPageProps) {
     [traceLog],
   );
   const hasQualityData = Boolean(
-    quality && Object.keys(quality).length > 0,
+    qualityPayload &&
+      (Object.keys(qualityRecord).length > 0 ||
+        qualityPayload.quality_status ||
+        typeof qualityPayload.iteration_count === "number" ||
+        typeof qualityPayload.needs_human_review === "boolean" ||
+        (qualityPayload.rejected_agents?.length ?? 0) > 0),
   );
-  const statusLabel =
-    qualityPayload?.quality_status || quality?.status || "not ready";
 
   if (!taskId) {
     return (
@@ -245,21 +569,16 @@ export function QualityPage({ taskId, onNavigate }: QualityPageProps) {
             质量门控审查
           </h2>
           <p className="mt-3 max-w-3xl break-all text-sm leading-6 text-slate-400">
-            当前任务: {taskId}
+            <span title={`真实任务 ID：${taskId}`}>
+              当前任务：{displayTaskId || taskId}
+            </span>
           </p>
         </div>
         <div className="flex flex-wrap gap-2 lg:justify-end">
+          <StatusBadge label={qualityState.label} tone={qualityState.tone} />
           <StatusBadge
-            label={approved === true ? "已通过" : approved === false ? "未通过" : "待处理"}
-            tone={approved === true ? "success" : approved === false ? "warning" : "neutral"}
-          />
-          <StatusBadge
-            label={
-              qualityPayload?.needs_human_review
-                ? "人工审核"
-                : statusLabel
-            }
-            tone={qualityPayload?.needs_human_review ? "warning" : "info"}
+            label={qualityPayload?.quality_status || String(qualityRecord.status || "pending")}
+            tone={needsHumanReview ? "warning" : "info"}
           />
         </div>
       </div>
@@ -280,205 +599,293 @@ export function QualityPage({ taskId, onNavigate }: QualityPageProps) {
           />
         ) : (
           <div className="space-y-5">
-            <div className="grid gap-4 md:grid-cols-4">
-              <MetricCard
-                label="quality_score"
-                value={formatValue(qualityScore)}
-                helper="QualityAgent 评分"
-              />
-              <MetricCard
-                label="iteration_count"
-                value={qualityPayload?.iteration_count ?? "N/A"}
-                helper="修复轮次"
-              />
-              <MetricCard
-                label="checked_items"
-                value={checkedEntries.length}
-                helper="自动检查项"
-              />
-              <MetricCard
-                label="rejected_agents"
-                value={rejectedAgents.length}
-                helper="被质量门控打回"
-              />
-            </div>
-
-            <div className="grid gap-5 xl:grid-cols-[minmax(0,1fr)_380px]">
-              <div className="rounded-lg border border-slate-800 bg-slate-950/70 p-5">
-                <div className="mb-5 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
-                  <div>
-                    <h3 className="text-lg font-semibold text-white">
-                      自动检查项
-                    </h3>
-                    <p className="mt-1 text-sm text-slate-400">
-                      每一项对应后端 quality_result.checked_items。
-                    </p>
-                  </div>
-                  <StatusBadge
-                    label={approved ? "通过" : "需关注"}
-                    tone={approved ? "success" : "warning"}
-                  />
+            <section className="rounded-lg border border-slate-800 bg-slate-950/70 p-5">
+              <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+                <div>
+                  <p className="text-sm font-medium text-cyan-300">当前质量状态</p>
+                  <h3 className="mt-2 text-2xl font-semibold text-white">
+                    {qualityState.label}
+                  </h3>
+                  <p className="mt-2 text-sm leading-6 text-slate-400">
+                    {qualityState.description}
+                  </p>
                 </div>
-
-                {checkedEntries.length > 0 ? (
-                  <div className="grid gap-3 md:grid-cols-2">
-                    {checkedEntries.map(([name, passed]) => (
-                      <div
-                        className="flex items-center justify-between gap-3 rounded-lg border border-slate-800 bg-slate-900/45 px-4 py-3"
-                        key={name}
-                      >
-                        <span className="text-sm text-slate-200">{name}</span>
-                        <StatusBadge
-                          label={passed ? "通过" : "失败"}
-                          tone={passed ? checkTone.passed : checkTone.failed}
-                        />
-                      </div>
-                    ))}
-                  </div>
-                ) : (
-                  <EmptyState
-                    title="暂无 checked_items"
-                    description="后端返回了质量结果，但没有返回检查项映射。"
+                <div className="flex flex-wrap gap-2 lg:justify-end">
+                  <StatusBadge label={qualityState.label} tone={qualityState.tone} />
+                  <StatusBadge
+                    label={needsHumanReview ? "是否需要人工审核: 是" : "是否需要人工审核: 否"}
+                    tone={needsHumanReview ? "warning" : "neutral"}
                   />
-                )}
-
-                <div className="mt-6 grid gap-4 lg:grid-cols-2">
-                  <section className="rounded-lg border border-emerald-400/25 bg-emerald-400/10 p-4">
-                    <h4 className="text-sm font-semibold text-emerald-100">
-                      通过项
-                    </h4>
-                    <div className="mt-3">
-                      <StatusList
-                        emptyLabel="暂无通过项"
-                        items={passedChecks}
-                        tone="success"
-                      />
-                    </div>
-                  </section>
-
-                  <section className="rounded-lg border border-rose-400/25 bg-rose-500/10 p-4">
-                    <h4 className="text-sm font-semibold text-rose-100">
-                      失败项
-                    </h4>
-                    <div className="mt-3">
-                      <StatusList
-                        emptyLabel="暂无失败项"
-                        items={failedChecks}
-                        tone="danger"
-                      />
-                    </div>
-                  </section>
                 </div>
               </div>
+            </section>
 
-              <aside className="space-y-5">
-                <section className="rounded-lg border border-slate-800 bg-slate-950/80 p-5">
-                  <h3 className="text-lg font-semibold text-white">
-                    打回路径
-                  </h3>
-                  <dl className="mt-4 space-y-4 text-sm">
-                    <div>
-                      <dt className="text-slate-500">reject_to</dt>
-                      <dd className="mt-1 text-slate-100">
-                        {rejectTo || "无"}
-                      </dd>
-                    </div>
-                    <div>
-                      <dt className="text-slate-500">reject_reason</dt>
-                      <dd className="mt-1 leading-6 text-slate-200">
-                        {rejectReason || "无"}
-                      </dd>
-                    </div>
-                    <div>
-                      <dt className="text-slate-500">rejected_agents</dt>
-                      <dd className="mt-2">
-                        <StatusList
-                          emptyLabel="暂无被打回 Agent"
-                          items={rejectedAgents}
-                          tone="warning"
-                        />
-                      </dd>
-                    </div>
-                  </dl>
-                </section>
-
-                <section className="rounded-lg border border-slate-800 bg-slate-950/80 p-5">
-                  <h3 className="text-lg font-semibold text-white">
-                    覆盖缺口
-                  </h3>
-                  <div className="mt-4">
-                    <p className="mb-2 text-xs uppercase tracking-[0.16em] text-slate-500">
-                      missing_dimensions
-                    </p>
-                    <StatusList
-                      emptyLabel="无"
-                      items={missingDimensions}
-                      tone="warning"
-                    />
-                  </div>
-                  <div className="mt-5">
-                    <p className="mb-2 text-xs uppercase tracking-[0.16em] text-slate-500">
-                      missing_platforms
-                    </p>
-                    <StatusList
-                      emptyLabel="无"
-                      items={missingPlatforms}
-                      tone="warning"
-                    />
-                  </div>
-                </section>
-
-                <section className="rounded-lg border border-slate-800 bg-slate-950/80 p-5">
-                  <h3 className="text-lg font-semibold text-white">
-                    质量执行轨迹
-                  </h3>
-                  <dl className="mt-4 space-y-4 text-sm">
-                    <div>
-                      <dt className="text-slate-500">status</dt>
-                      <dd className="mt-1 text-slate-100">
-                        {qualityTrace?.status || "未返回"}
-                      </dd>
-                    </div>
-                    <div>
-                      <dt className="text-slate-500">output_summary</dt>
-                      <dd className="mt-1 leading-6 text-slate-200">
-                        {qualityTrace?.output_summary ||
-                          "暂无 QualityAgent 执行摘要。"}
-                      </dd>
-                    </div>
-                    <div>
-                      <dt className="text-slate-500">duration_ms</dt>
-                      <dd className="mt-1 text-slate-100">
-                        {typeof qualityTrace?.duration_ms === "number"
-                          ? qualityTrace.duration_ms
-                          : "未返回"}
-                      </dd>
-                    </div>
-                  </dl>
-                </section>
-              </aside>
+            <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-5">
+              <MetricCard
+                label="质量得分"
+                value={formatValue(qualityScore)}
+                helper="质量得分"
+              />
+              <MetricCard
+                label="重试轮次"
+                value={
+                  typeof iterationCount === "number"
+                    ? `${iterationCount} / ${MAX_RETRY_COUNT}`
+                    : "暂无"
+                }
+                helper="重试轮次"
+              />
+              <MetricCard
+                label="检查项数量"
+                value={checkCount}
+                helper="检查项"
+              />
+              <MetricCard
+                label="被打回 Agent"
+                value={rejectedAgents.length}
+                helper="打回记录"
+              />
+              <MetricCard
+                label="是否需要人工审核"
+                value={needsHumanReview ? "是" : "否"}
+                helper="人工审核"
+              />
             </div>
 
-            <section className="rounded-lg border border-amber-400/30 bg-amber-400/10 p-5">
-              <h3 className="text-lg font-semibold text-amber-100">
-                必要处理动作
-              </h3>
-              {requiredActions.length > 0 ? (
-                <ul className="mt-4 space-y-3">
-                  {requiredActions.map((action) => (
-                    <li
-                      className="rounded-md border border-amber-300/25 bg-slate-950/45 px-4 py-3 text-sm leading-6 text-amber-50"
-                      key={action}
-                    >
-                      {action}
-                    </li>
-                  ))}
-                </ul>
+            <section className="rounded-lg border border-slate-800 bg-slate-950/70 p-5">
+              <div className="mb-5 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+                <div>
+                  <h3 className="text-lg font-semibold text-white">
+                    检查项展示
+                  </h3>
+                  <p className="mt-1 text-sm text-slate-400">
+                    优先使用系统返回的通过/失败项；缺失时从检查项结果反推。
+                  </p>
+                </div>
+                <StatusBadge
+                  label={`${checkCount} 项检查`}
+                  tone={failedChecks.length > 0 ? "warning" : "success"}
+                />
+              </div>
+
+              {displayCheckEntries.length > 0 ? (
+                <div className="grid gap-3 md:grid-cols-2">
+                  {displayCheckEntries.map((item) => {
+                    const tone =
+                      item.status === "passed"
+                        ? "success"
+                        : item.status === "failed"
+                          ? "danger"
+                          : "neutral";
+
+                    return (
+                      <div
+                        className="flex min-w-0 items-center justify-between gap-3 rounded-lg border border-slate-800 bg-slate-900/45 px-4 py-3"
+                        key={`${item.name}-${item.status}`}
+                      >
+                        <span className="min-w-0 break-words text-sm text-slate-200">
+                          {item.name}
+                        </span>
+                        <StatusBadge
+                          label={
+                            item.status === "passed"
+                              ? "通过"
+                              : item.status === "failed"
+                                ? "失败"
+                                : "未标记"
+                          }
+                          tone={tone}
+                        />
+                      </div>
+                    );
+                  })}
+                </div>
               ) : (
-                <p className="mt-3 text-sm text-amber-100/80">
-                  暂无 required_actions。
-                </p>
+                <EmptyState
+                  title="暂无检查项"
+                  description="系统暂未返回可展示的质量检查项。"
+                />
               )}
+
+              <div className="mt-6 grid gap-4 lg:grid-cols-2">
+                <section className="rounded-lg border border-emerald-400/25 bg-emerald-400/10 p-4">
+                  <h4 className="text-sm font-semibold text-emerald-100">
+                    通过检查项
+                  </h4>
+                  <div className="mt-3">
+                    <CheckList
+                      emptyLabel="暂无通过检查项"
+                      items={passedChecks}
+                      tone="success"
+                    />
+                  </div>
+                </section>
+
+                <section className="rounded-lg border border-rose-400/25 bg-rose-500/10 p-4">
+                  <h4 className="text-sm font-semibold text-rose-100">
+                    失败检查项
+                  </h4>
+                  <div className="mt-3">
+                    <CheckList
+                      emptyLabel="暂无失败检查项"
+                      items={failedChecks}
+                      tone="danger"
+                    />
+                  </div>
+                </section>
+              </div>
+            </section>
+
+            <div className="grid gap-5 xl:grid-cols-2">
+              <section className="rounded-lg border border-slate-800 bg-slate-950/80 p-5">
+                <h3 className="text-lg font-semibold text-white">打回路径</h3>
+                <dl className="mt-4 space-y-4 text-sm">
+                  <div>
+                    <dt className="text-slate-500">打回目标</dt>
+                    <dd className="mt-1 break-words text-slate-100">
+                      {rejectTo || "无"}
+                    </dd>
+                  </div>
+                  <div>
+                    <dt className="text-slate-500">打回原因</dt>
+                    <dd className="mt-1 break-words leading-6 text-slate-200">
+                      {rejectReason || "无"}
+                    </dd>
+                  </div>
+                  <div>
+                    <dt className="text-slate-500">被打回 Agent</dt>
+                    <dd className="mt-2">
+                      <StatusList
+                        emptyLabel="无"
+                        items={rejectedAgents}
+                        tone="warning"
+                      />
+                    </dd>
+                  </div>
+                  <div>
+                    <dt className="text-slate-500">修复建议</dt>
+                    <dd className="mt-2">
+                      <StatusList
+                        emptyLabel="无"
+                        items={requiredActions}
+                        tone="warning"
+                      />
+                    </dd>
+                  </div>
+                </dl>
+              </section>
+
+              <section
+                className={`rounded-lg border p-5 ${
+                  needsHumanReview
+                    ? "border-amber-400/35 bg-amber-400/10"
+                    : "border-slate-800 bg-slate-950/80"
+                }`}
+              >
+                <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+                  <h3 className="text-lg font-semibold text-white">
+                    重试与人工审核
+                  </h3>
+                  <StatusBadge
+                    label={needsHumanReview ? "需要人工审核" : "自动流程"}
+                    tone={needsHumanReview ? "warning" : "neutral"}
+                  />
+                </div>
+                <dl className="mt-4 space-y-4 text-sm">
+                  <div>
+                    <dt className="text-slate-500">当前重试轮次</dt>
+                    <dd className="mt-1 text-slate-100">
+                      {typeof iterationCount === "number"
+                        ? `${iterationCount} / ${MAX_RETRY_COUNT}`
+                        : "暂无"}
+                    </dd>
+                  </div>
+                  <div>
+                    <dt className="text-slate-500">剩余自动修复次数</dt>
+                    <dd className="mt-1 text-slate-100">
+                      {typeof remainingRetryCount === "number"
+                        ? remainingRetryCount
+                        : "暂无"}
+                    </dd>
+                  </div>
+                  <div>
+                    <dt className="text-slate-500">是否需要人工审核</dt>
+                    <dd className="mt-1 text-slate-100">
+                      {needsHumanReview ? "是" : "否"}
+                    </dd>
+                  </div>
+                </dl>
+                {needsHumanReview ? (
+                  <p className="mt-5 rounded-md border border-amber-300/30 bg-slate-950/40 px-4 py-3 text-sm leading-6 text-amber-100">
+                    {needsHumanReviewFromRetry
+                      ? "根据重试轮次推断：自动修复已达到上限，请进入人工审核。"
+                      : "自动修复已达到上限，请进入人工审核。"}
+                  </p>
+                ) : null}
+              </section>
+            </div>
+
+            <section className="rounded-lg border border-slate-800 bg-slate-950/70 p-5">
+              <div className="mb-4 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+                <div>
+                  <h3 className="text-lg font-semibold text-white">覆盖缺口</h3>
+                  <p className="mt-1 text-sm text-slate-400">
+                    展示 missing_dimensions、missing_platforms、missing_evidence、coverage_gaps 与风险标记。
+                  </p>
+                </div>
+                <StatusBadge
+                  label={coverageItems.length > 0 ? "存在缺口" : "覆盖完整"}
+                  tone={coverageItems.length > 0 ? "warning" : "success"}
+                />
+              </div>
+              {coverageItems.length > 0 ? (
+                <div className="flex flex-wrap gap-2">
+                  {coverageItems.map((item) => (
+                    <StatusBadge
+                      key={`${item.label}-${item.tone}`}
+                      label={item.label}
+                      tone={item.tone}
+                    />
+                  ))}
+                </div>
+              ) : (
+                <p className="text-sm text-slate-400">暂无覆盖缺口</p>
+              )}
+            </section>
+
+            <section className="rounded-lg border border-slate-800 bg-slate-950/80 p-5">
+              <h3 className="text-lg font-semibold text-white">
+                最近一次质量审查记录
+              </h3>
+              <dl className="mt-4 grid gap-4 text-sm md:grid-cols-2">
+                <div>
+                  <dt className="text-slate-500">最新执行状态</dt>
+                  <dd className="mt-1 text-slate-100">
+                    {qualityTrace?.status || "未返回"}
+                  </dd>
+                </div>
+                <div>
+                  <dt className="text-slate-500">执行耗时</dt>
+                  <dd className="mt-1 text-slate-100">
+                    {typeof qualityTrace?.duration_ms === "number"
+                      ? qualityTrace.duration_ms
+                      : "未返回"}
+                  </dd>
+                </div>
+                <div className="md:col-span-2">
+                  <dt className="text-slate-500">输出摘要</dt>
+                  <dd className="mt-1 break-words leading-6 text-slate-200">
+                    {qualityTrace?.output_summary ||
+                      "暂无 QualityAgent 执行摘要。"}
+                  </dd>
+                </div>
+                <div className="md:col-span-2">
+                  <dt className="text-slate-500">reason</dt>
+                  <dd className="mt-1 break-words leading-6 text-slate-200">
+                    {qualityTrace?.reject_reason ?? qualityTrace?.reason ?? "无"}
+                  </dd>
+                </div>
+              </dl>
             </section>
           </div>
         )

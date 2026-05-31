@@ -9,6 +9,7 @@ import { NewAnalysisPage } from "./pages/NewAnalysisPage";
 import { QualityPage } from "./pages/QualityPage";
 import { ReportPage } from "./pages/ReportPage";
 import { WorkflowPage } from "./pages/WorkflowPage";
+import { getDisplayTaskId } from "./utils/taskDisplay";
 
 type PageKey =
   | "overview"
@@ -55,6 +56,9 @@ function getStoredTaskId(): string | null {
 export default function App() {
   const [activePage, setActivePage] = useState<PageKey>(getPageKeyFromHash);
   const [taskId, setTaskId] = useState<string | null>(getStoredTaskId);
+  const [displayTaskId, setDisplayTaskId] = useState<string | null>(() =>
+    getDisplayTaskId(getStoredTaskId()),
+  );
   const [selectedDomain, setSelectedDomain] = useState<string | null>(null);
   const [selectedCategory, setSelectedCategory] = useState<string | null>(null);
   const [selectedIndustryKey, setSelectedIndustryKey] = useState<string | null>(
@@ -87,11 +91,16 @@ export default function App() {
 
   function handleTaskCreated(nextTaskId: string) {
     setTaskId(nextTaskId);
+    setDisplayTaskId(getDisplayTaskId(nextTaskId));
 
     if (typeof window !== "undefined") {
       window.sessionStorage.setItem("activeTaskId", nextTaskId);
     }
   }
+
+  useEffect(() => {
+    setDisplayTaskId(getDisplayTaskId(taskId));
+  }, [taskId]);
 
   function handleHomeSelection(selection: {
     selectedDomain?: string | null;
@@ -121,29 +130,67 @@ export default function App() {
             selectedCategory={selectedCategory}
             selectedDomain={selectedDomain}
             selectedIndustryKey={selectedIndustryKey}
+            displayTaskId={displayTaskId ?? undefined}
             taskId={taskId ?? undefined}
           />
         );
       case "new-analysis":
         return (
           <NewAnalysisPage
+            displayTaskId={displayTaskId ?? undefined}
             onNavigate={handleNavigate}
             onTaskCreated={handleTaskCreated}
             selectedIndustryKey={selectedIndustryKey}
           />
         );
       case "workflow":
-        return <WorkflowPage taskId={taskId ?? undefined} onNavigate={handleNavigate} />;
+        return (
+          <WorkflowPage
+            displayTaskId={displayTaskId ?? undefined}
+            taskId={taskId ?? undefined}
+            onNavigate={handleNavigate}
+          />
+        );
       case "evidence":
-        return <EvidencePage taskId={taskId ?? undefined} onNavigate={handleNavigate} />;
+        return (
+          <EvidencePage
+            displayTaskId={displayTaskId ?? undefined}
+            taskId={taskId ?? undefined}
+            onNavigate={handleNavigate}
+          />
+        );
       case "claims":
-        return <ClaimsPage taskId={taskId ?? undefined} onNavigate={handleNavigate} />;
+        return (
+          <ClaimsPage
+            displayTaskId={displayTaskId ?? undefined}
+            taskId={taskId ?? undefined}
+            onNavigate={handleNavigate}
+          />
+        );
       case "quality":
-        return <QualityPage taskId={taskId ?? undefined} onNavigate={handleNavigate} />;
+        return (
+          <QualityPage
+            displayTaskId={displayTaskId ?? undefined}
+            taskId={taskId ?? undefined}
+            onNavigate={handleNavigate}
+          />
+        );
       case "report":
-        return <ReportPage taskId={taskId ?? undefined} onNavigate={handleNavigate} />;
+        return (
+          <ReportPage
+            displayTaskId={displayTaskId ?? undefined}
+            taskId={taskId ?? undefined}
+            onNavigate={handleNavigate}
+          />
+        );
       case "metrics":
-        return <MetricsPage taskId={taskId ?? undefined} onNavigate={handleNavigate} />;
+        return (
+          <MetricsPage
+            displayTaskId={displayTaskId ?? undefined}
+            taskId={taskId ?? undefined}
+            onNavigate={handleNavigate}
+          />
+        );
       default:
         return (
           <HomePage
@@ -152,6 +199,7 @@ export default function App() {
             selectedCategory={selectedCategory}
             selectedDomain={selectedDomain}
             selectedIndustryKey={selectedIndustryKey}
+            displayTaskId={displayTaskId ?? undefined}
             taskId={taskId ?? undefined}
           />
         );
@@ -163,6 +211,7 @@ export default function App() {
       activePage={activePage}
       navItems={navItems}
       onNavigate={handleNavigate}
+      displayTaskId={displayTaskId ?? undefined}
       taskId={taskId ?? undefined}
     >
       {renderPage()}

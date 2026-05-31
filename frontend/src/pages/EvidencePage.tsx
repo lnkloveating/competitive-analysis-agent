@@ -8,6 +8,7 @@ import type { EvidenceItem } from "../types/analysis";
 
 type EvidencePageProps = {
   taskId?: string;
+  displayTaskId?: string;
   onNavigate: (key: string) => void;
 };
 
@@ -77,7 +78,11 @@ function EvidenceSelect({
   );
 }
 
-export function EvidencePage({ taskId, onNavigate }: EvidencePageProps) {
+export function EvidencePage({
+  taskId,
+  displayTaskId,
+  onNavigate,
+}: EvidencePageProps) {
   const [evidenceList, setEvidenceList] = useState<EvidenceItem[]>([]);
   const [selectedEvidenceId, setSelectedEvidenceId] = useState<string | null>(null);
   const [filters, setFilters] = useState<EvidenceFilters>(defaultFilters);
@@ -205,12 +210,14 @@ export function EvidencePage({ taskId, onNavigate }: EvidencePageProps) {
           证据来源台账
         </h2>
         <p className="mt-3 max-w-3xl break-all text-sm leading-6 text-slate-400">
-          当前任务: {taskId}
+          <span title={`真实任务 ID：${taskId}`}>
+            当前任务：{displayTaskId || taskId}
+          </span>
         </p>
       </div>
 
       <div className="mb-5 grid gap-3 md:grid-cols-4">
-        <MetricCard label="证据总数" value={evidenceList.length} helper="来自后端" />
+        <MetricCard label="证据总数" value={evidenceList.length} helper="系统返回" />
         <MetricCard
           label="筛选结果"
           value={filteredEvidence.length}
@@ -328,13 +335,13 @@ export function EvidencePage({ taskId, onNavigate }: EvidencePageProps) {
                             {normalizeText(item.source_title, "未命名来源")}
                           </h3>
                           <p className="mt-2 line-clamp-2 text-sm leading-6 text-slate-400">
-                            {normalizeText(item.claim, "后端未返回证据摘要。")}
+                            {normalizeText(item.claim, "系统暂未返回证据摘要。")}
                           </p>
                         </div>
                         <div className="grid gap-2 text-xs text-slate-400 sm:grid-cols-3 lg:min-w-72">
                           <span>{normalizeText(item.related_dimension)}</span>
                           <span>{normalizeText(item.source_type)}</span>
-                          <span>score {formatScore(item.confidence_score)}</span>
+                          <span>置信分数 {formatScore(item.confidence_score)}</span>
                         </div>
                       </div>
                     </button>
@@ -366,13 +373,13 @@ export function EvidencePage({ taskId, onNavigate }: EvidencePageProps) {
 
                 <dl className="mt-5 space-y-4 text-sm">
                   <div>
-                    <dt className="text-slate-500">原文内容</dt>
+                    <dt className="text-slate-500">证据内容</dt>
                     <dd className="mt-1 max-h-60 overflow-auto rounded-md border border-slate-800 bg-slate-900/45 p-3 leading-6 text-slate-200">
-                      {normalizeText(selectedEvidence.raw_content, "暂无原文内容。")}
+                      {normalizeText(selectedEvidence.raw_content, "暂无证据内容。")}
                     </dd>
                   </div>
                   <div>
-                    <dt className="text-slate-500">source_url</dt>
+                    <dt className="text-slate-500">来源链接</dt>
                     <dd className="mt-1 break-all text-cyan-200">
                       {selectedEvidence.source_url ? (
                         <a

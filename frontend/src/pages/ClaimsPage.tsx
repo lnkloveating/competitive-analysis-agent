@@ -8,6 +8,7 @@ import type { Claim, EvidenceItem } from "../types/analysis";
 
 type ClaimsPageProps = {
   taskId?: string;
+  displayTaskId?: string;
   onNavigate: (key: string) => void;
 };
 
@@ -56,7 +57,11 @@ function buildEvidenceMap(evidenceList: EvidenceItem[]) {
   }, {});
 }
 
-export function ClaimsPage({ taskId, onNavigate }: ClaimsPageProps) {
+export function ClaimsPage({
+  taskId,
+  displayTaskId,
+  onNavigate,
+}: ClaimsPageProps) {
   const [claims, setClaims] = useState<Claim[]>([]);
   const [evidenceList, setEvidenceList] = useState<EvidenceItem[]>([]);
   const [selectedClaimId, setSelectedClaimId] = useState<string | null>(null);
@@ -163,12 +168,14 @@ export function ClaimsPage({ taskId, onNavigate }: ClaimsPageProps) {
           结论与证据追踪
         </h2>
         <p className="mt-3 max-w-3xl break-all text-sm leading-6 text-slate-400">
-          当前任务: {taskId}
+          <span title={`真实任务 ID：${taskId}`}>
+            当前任务：{displayTaskId || taskId}
+          </span>
         </p>
       </div>
 
       <div className="mb-5 grid gap-3 md:grid-cols-4">
-        <MetricCard label="结论总数" value={claims.length} helper="来自后端" />
+        <MetricCard label="结论总数" value={claims.length} helper="系统返回" />
         <MetricCard label="证据总数" value={evidenceList.length} helper="用于反查证据链" />
         <MetricCard label="PCL" value={pclCount} helper="ProductAgent 结论" />
         <MetricCard label="BCL" value={bclCount} helper="BusinessAgent 结论" />
@@ -219,18 +226,18 @@ export function ClaimsPage({ taskId, onNavigate }: ClaimsPageProps) {
                             />
                           </div>
                           <p className="mt-3 text-sm leading-6 text-slate-100">
-                            {normalizeText(claim.content, "后端未返回结论内容。")}
+                            {normalizeText(claim.content, "系统暂未返回结论内容。")}
                           </p>
                         </div>
                         <div className="lg:min-w-72">
                           <p className="text-xs uppercase tracking-[0.16em] text-slate-500">
-                            dimension
+                            分析维度
                           </p>
                           <p className="mt-1 text-sm text-slate-200">
                             {normalizeText(claim.dimension)}
                           </p>
                           <p className="mt-3 text-xs uppercase tracking-[0.16em] text-slate-500">
-                            confidence
+                            置信分数
                           </p>
                           <p className="mt-1 text-sm text-slate-200">
                             {formatScore(claim.confidence_score)}
@@ -245,7 +252,7 @@ export function ClaimsPage({ taskId, onNavigate }: ClaimsPageProps) {
                             ? `${evidenceIds.join(" + ")} -> ${normalizeText(
                                 claim.claim_id,
                               )}`
-                            : `暂无 evidence_ids -> ${normalizeText(claim.claim_id)}`}
+                            : `暂无证据 ID -> ${normalizeText(claim.claim_id)}`}
                         </p>
                       </div>
                     </button>
@@ -275,11 +282,11 @@ export function ClaimsPage({ taskId, onNavigate }: ClaimsPageProps) {
                   <div>
                     <dt className="text-slate-500">结论内容</dt>
                     <dd className="mt-1 leading-6 text-slate-200">
-                      {normalizeText(selectedClaim.content, "后端未返回结论内容。")}
+                      {normalizeText(selectedClaim.content, "系统暂未返回结论内容。")}
                     </dd>
                   </div>
                   <div>
-                    <dt className="text-slate-500">related_platforms</dt>
+                    <dt className="text-slate-500">关联品牌</dt>
                     <dd className="mt-2 flex flex-wrap gap-2">
                       {(selectedClaim.related_platforms ?? []).length > 0 ? (
                         selectedClaim.related_platforms.map((platform) => (
@@ -291,7 +298,7 @@ export function ClaimsPage({ taskId, onNavigate }: ClaimsPageProps) {
                     </dd>
                   </div>
                   <div>
-                    <dt className="text-slate-500">evidence_ids</dt>
+                    <dt className="text-slate-500">证据 ID</dt>
                     <dd className="mt-2 flex flex-wrap gap-2">
                       {selectedEvidenceIds.length > 0 ? (
                         selectedEvidenceIds.map((evidenceId) => (
@@ -302,7 +309,7 @@ export function ClaimsPage({ taskId, onNavigate }: ClaimsPageProps) {
                           />
                         ))
                       ) : (
-                        <span className="text-slate-400">暂无 evidence_ids。</span>
+                        <span className="text-slate-400">暂无证据 ID。</span>
                       )}
                     </dd>
                   </div>
@@ -344,7 +351,7 @@ export function ClaimsPage({ taskId, onNavigate }: ClaimsPageProps) {
                             {normalizeText(evidence.source_title, "未命名来源")}
                           </h4>
                           <p className="mt-2 text-sm leading-6 text-slate-400">
-                            {normalizeText(evidence.claim, "后端未返回证据摘要。")}
+                            {normalizeText(evidence.claim, "系统暂未返回证据摘要。")}
                           </p>
                         </article>
                       ))}
@@ -357,7 +364,7 @@ export function ClaimsPage({ taskId, onNavigate }: ClaimsPageProps) {
 
                   {missingEvidenceIds.length > 0 ? (
                     <div className="mt-4 rounded-md border border-rose-500/35 bg-rose-500/10 px-3 py-2 text-sm text-rose-100">
-                      evidence_list 中缺少这些证据: {missingEvidenceIds.join(", ")}
+                      证据列表中缺少这些证据：{missingEvidenceIds.join(", ")}
                     </div>
                   ) : null}
                 </div>

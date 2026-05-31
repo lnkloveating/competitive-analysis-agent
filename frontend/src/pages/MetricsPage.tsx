@@ -8,6 +8,7 @@ import type { ArtifactsSummary, Metrics, RiskFlag } from "../types/analysis";
 
 type MetricsPageProps = {
   taskId?: string;
+  displayTaskId?: string;
   onNavigate: (key: string) => void;
 };
 
@@ -111,7 +112,11 @@ function IdTags({ values }: { values?: string[] }) {
   );
 }
 
-export function MetricsPage({ taskId, onNavigate }: MetricsPageProps) {
+export function MetricsPage({
+  taskId,
+  displayTaskId,
+  onNavigate,
+}: MetricsPageProps) {
   const [metrics, setMetrics] = useState<Metrics | null>(null);
   const [artifacts, setArtifacts] = useState<ArtifactsSummary | null>(null);
   const [riskFlags, setRiskFlags] = useState<RiskFlag[]>([]);
@@ -201,7 +206,11 @@ export function MetricsPage({ taskId, onNavigate }: MetricsPageProps) {
         <h2 className="mt-2 text-3xl font-semibold text-white">
           指标看板
         </h2>
-        <p className="mt-3 break-all text-sm text-slate-400">当前任务: {taskId}</p>
+        <p className="mt-3 break-all text-sm text-slate-400">
+          <span title={`真实任务 ID：${taskId}`}>
+            当前任务：{displayTaskId || taskId}
+          </span>
+        </p>
       </div>
 
       {isLoading ? <LoadingState label="正在加载指标、产物与风险数据..." /> : null}
@@ -222,22 +231,22 @@ export function MetricsPage({ taskId, onNavigate }: MetricsPageProps) {
           <div className="space-y-5">
             <div className="grid gap-4 md:grid-cols-4">
               <MetricCard
-                label="evidence_count"
+                label="证据数量"
                 value={formatMetric(metrics?.evidence_count)}
-                helper="后端指标"
+                helper="系统指标"
               />
               <MetricCard
-                label="claim_count"
+                label="结论数量"
                 value={formatMetric(metrics?.claim_count)}
-                helper="后端指标"
+                helper="系统指标"
               />
               <MetricCard
-                label="quality_score"
+                label="质量得分"
                 value={formatMetric(metrics?.quality_score, "score")}
                 helper="质量门控评分"
               />
               <MetricCard
-                label="iteration_count"
+                label="重试轮次"
                 value={formatMetric(metrics?.iteration_count)}
                 helper="修复轮次"
               />
@@ -246,11 +255,11 @@ export function MetricsPage({ taskId, onNavigate }: MetricsPageProps) {
             <div className="grid gap-5 lg:grid-cols-[360px_minmax(0,1fr)]">
               <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-1">
                 <ProgressRing
-                  label="citation_rate"
+                  label="引用完整率"
                   percent={ratioPercent(metrics?.citation_rate)}
                 />
                 <ProgressRing
-                  label="coverage_rate"
+                  label="覆盖率"
                   percent={ratioPercent(metrics?.coverage_rate)}
                 />
               </div>
@@ -258,32 +267,32 @@ export function MetricsPage({ taskId, onNavigate }: MetricsPageProps) {
               <div className="space-y-4 rounded-lg border border-slate-800 bg-slate-950/70 p-5">
                 <h3 className="text-lg font-semibold text-white">可信度结构</h3>
                 <BarMetric
-                  label="high_credibility_ratio"
+                  label="高可信证据占比"
                   percent={ratioPercent(metrics?.high_credibility_ratio)}
                   tone="emerald"
                 />
                 <BarMetric
-                  label="low_credibility_ratio"
+                  label="低可信证据占比"
                   percent={ratioPercent(metrics?.low_credibility_ratio)}
                   tone="rose"
                 />
                 <BarMetric
-                  label="citation_rate"
+                  label="引用完整率"
                   percent={ratioPercent(metrics?.citation_rate)}
                 />
                 <BarMetric
-                  label="coverage_rate"
+                  label="覆盖率"
                   percent={ratioPercent(metrics?.coverage_rate)}
                 />
                 <div className="grid gap-3 pt-2 sm:grid-cols-2">
                   <div className="rounded-lg border border-slate-800 bg-slate-900/45 p-4">
-                    <p className="text-sm text-slate-400">citation_rate</p>
+                    <p className="text-sm text-slate-400">引用完整率</p>
                     <p className="mt-2 text-2xl font-semibold text-slate-50">
                       {formatMetric(metrics?.citation_rate, "ratio")}
                     </p>
                   </div>
                   <div className="rounded-lg border border-slate-800 bg-slate-900/45 p-4">
-                    <p className="text-sm text-slate-400">coverage_rate</p>
+                    <p className="text-sm text-slate-400">覆盖率</p>
                     <p className="mt-2 text-2xl font-semibold text-slate-50">
                       {formatMetric(metrics?.coverage_rate, "ratio")}
                     </p>
@@ -296,31 +305,31 @@ export function MetricsPage({ taskId, onNavigate }: MetricsPageProps) {
               <h3 className="text-lg font-semibold text-white">产物统计</h3>
               <div className="mt-4 grid gap-3 md:grid-cols-4">
                 <MetricCard
-                  label="raw_research_count"
+                  label="调研记录数"
                   value={artifacts?.raw_research_count ?? "N/A"}
                 />
                 <MetricCard
-                  label="artifact evidence"
+                  label="证据产物"
                   value={artifacts?.evidence_count ?? "N/A"}
                 />
-                <MetricCard label="artifact claims" value={artifacts?.claim_count ?? "N/A"} />
-                <MetricCard label="risk_count" value={artifacts?.risk_count ?? "N/A"} />
+                <MetricCard label="结论产物" value={artifacts?.claim_count ?? "N/A"} />
+                <MetricCard label="风险数量" value={artifacts?.risk_count ?? "N/A"} />
               </div>
               <div className="mt-4 flex flex-wrap gap-2">
                 <StatusBadge
-                  label={`product_matrix ${
+                  label={`产品矩阵 ${
                     artifacts?.has_product_matrix ? "已生成" : "缺失"
                   }`}
                   tone={artifacts?.has_product_matrix ? "success" : "neutral"}
                 />
                 <StatusBadge
-                  label={`business_matrix ${
+                  label={`商业矩阵 ${
                     artifacts?.has_business_matrix ? "已生成" : "缺失"
                   }`}
                   tone={artifacts?.has_business_matrix ? "success" : "neutral"}
                 />
                 <StatusBadge
-                  label={`final_report ${
+                  label={`最终报告 ${
                     artifacts?.has_final_report ? "已生成" : "缺失"
                   }`}
                   tone={artifacts?.has_final_report ? "success" : "neutral"}
@@ -354,13 +363,13 @@ export function MetricsPage({ taskId, onNavigate }: MetricsPageProps) {
                       <div className="mt-4 grid gap-3 sm:grid-cols-2">
                         <div>
                           <p className="mb-2 text-xs uppercase tracking-[0.16em] text-slate-500">
-                            related_platforms
+                            关联品牌
                           </p>
                           <IdTags values={risk.related_platforms} />
                         </div>
                         <div>
                           <p className="mb-2 text-xs uppercase tracking-[0.16em] text-slate-500">
-                            related_dimensions
+                            关联维度
                           </p>
                           <IdTags values={risk.related_dimensions} />
                         </div>

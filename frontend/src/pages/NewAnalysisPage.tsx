@@ -5,6 +5,7 @@ import type { StartAnalysisRequest } from "../types/analysis";
 
 type NewAnalysisPageProps = {
   selectedIndustryKey?: string | null;
+  displayTaskId?: string;
   onTaskCreated: (taskId: string) => void;
   onNavigate: (key: string) => void;
 };
@@ -22,6 +23,7 @@ const defaultDimensions = [
 
 export function NewAnalysisPage({
   selectedIndustryKey,
+  displayTaskId,
   onTaskCreated,
   onNavigate,
 }: NewAnalysisPageProps) {
@@ -58,7 +60,7 @@ export function NewAnalysisPage({
       const response = await analysisApi.startAnalysis(payload);
 
       if (!response?.task_id) {
-        throw new Error("后端未返回 task_id");
+        throw new Error("系统未返回任务编号");
       }
 
       setCreatedTaskId(response.task_id);
@@ -85,12 +87,15 @@ export function NewAnalysisPage({
             配置 Agent 分析任务
           </h2>
           <p className="mt-3 max-w-3xl text-sm leading-6 text-slate-400">
-            使用当前后端任务创建接口启动多 Agent 工作流，系统将围绕电竞鼠标赛道完成证据采集、结论生成、质量审查与报告输出。
+            使用当前系统任务创建接口启动多 Agent 工作流，系统将围绕电竞鼠标赛道完成证据采集、结论生成、质量审查与报告输出。
           </p>
         </div>
         <div className="flex flex-wrap gap-2 lg:justify-end">
-          <StatusBadge label="POST /api/analysis/start" tone="info" />
-          <StatusBadge label="后端任务创建已启用" tone="success" />
+          <StatusBadge label="任务创建接口已连接" tone="info" />
+          <StatusBadge label="系统任务创建已启用" tone="success" />
+          {displayTaskId ? (
+            <StatusBadge label={`当前任务：${displayTaskId}`} tone="neutral" />
+          ) : null}
         </div>
       </div>
 
@@ -103,7 +108,7 @@ export function NewAnalysisPage({
                 电竞外设 / 电竞鼠标
               </h3>
             </div>
-            <StatusBadge label={industryKey} tone="info" />
+            <StatusBadge label="电竞鼠标" tone="info" />
           </div>
 
           <dl className="mt-5 grid gap-3">
@@ -203,7 +208,7 @@ export function NewAnalysisPage({
               任务创建参数
             </h3>
           </div>
-          <StatusBadge label="不改变后端 API" tone="success" />
+          <StatusBadge label="保持现有系统接口" tone="success" />
         </div>
 
         <div className="mt-5 grid gap-3 md:grid-cols-3">
@@ -217,15 +222,15 @@ export function NewAnalysisPage({
           </div>
           <div className="rounded-xl border border-white/10 bg-slate-900/45 p-4">
             <p className="text-xs uppercase tracking-[0.16em] text-slate-500">
-              industry_key
+              分析场景
             </p>
-            <p className="mt-2 font-mono text-sm text-cyan-200">
+            <p className="mt-2 text-sm font-medium text-cyan-700">
               {payload.industry_key}
             </p>
           </div>
           <div className="rounded-xl border border-white/10 bg-slate-900/45 p-4">
             <p className="text-xs uppercase tracking-[0.16em] text-slate-500">
-              focus_dimensions
+              分析维度
             </p>
             <p className="mt-2 text-sm text-slate-200">
               {payload.focus_dimensions.length} 项
@@ -241,7 +246,7 @@ export function NewAnalysisPage({
 
         {createdTaskId ? (
           <p className="mt-5 rounded-lg border border-emerald-400/30 bg-emerald-400/10 px-4 py-3 text-sm text-emerald-100">
-            任务已创建: {createdTaskId}
+            任务已创建：{displayTaskId || "新任务"}
           </p>
         ) : null}
 

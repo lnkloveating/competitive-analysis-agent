@@ -13,6 +13,7 @@ type HomeSelection = {
 
 type HomePageProps = {
   taskId?: string;
+  displayTaskId?: string;
   selectedDomain?: string | null;
   selectedCategory?: string | null;
   selectedIndustryKey?: string | null;
@@ -58,7 +59,7 @@ const categories: SelectOption[] = [
   {
     key: "gaming_mouse",
     label: "电竞鼠标",
-    description: "当前可分析场景，连接 industry_key = gaming_mouse",
+    description: "当前可分析场景：电竞鼠标",
     available: true,
   },
   {
@@ -145,6 +146,7 @@ function flattenRepresentativeProducts(industry?: Industry) {
 
 export function HomePage({
   taskId,
+  displayTaskId,
   selectedDomain,
   selectedCategory,
   selectedIndustryKey,
@@ -264,17 +266,17 @@ export function HomePage({
             tone={isLoading ? "warning" : error ? "danger" : "success"}
           />
           <StatusBadge
-            label={hasGamingMouse ? "电竞鼠标可分析" : "电竞鼠标后端未就绪"}
+            label={hasGamingMouse ? "电竞鼠标可分析" : "电竞鼠标服务未就绪"}
             tone={hasGamingMouse ? "success" : "warning"}
           />
           <StatusBadge
-            label={taskId ? `当前任务: ${taskId}` : "暂无任务"}
+            label={displayTaskId ? `当前任务：${displayTaskId}` : "暂无任务"}
             tone={taskId ? "info" : "neutral"}
           />
         </div>
       </div>
 
-      {isLoading ? <LoadingState label="正在加载后端行业配置..." /> : null}
+      {isLoading ? <LoadingState label="正在加载分析场景..." /> : null}
 
       {!isLoading && error ? (
         <EmptyState
@@ -380,9 +382,9 @@ export function HomePage({
               </div>
               <div className="rounded-lg border border-white/10 bg-slate-950/60 p-3">
                   <p className="text-xs uppercase tracking-[0.16em] text-slate-500">
-                    industry_key
+                    分析场景
                 </p>
-                <p className="mt-2 font-mono text-sm text-cyan-200">
+                <p className="mt-2 text-sm font-medium text-cyan-700">
                     {canEnterConfig ? selectedIndustryKey || "gaming_mouse" : "暂未开放"}
                 </p>
               </div>
@@ -404,7 +406,7 @@ export function HomePage({
                     ))
                   ) : (
                     <span className="text-sm text-slate-500">
-                      {canEnterConfig ? "后端暂未返回代表型号" : "该品类仍在规划中"}
+                      {canEnterConfig ? "系统暂未返回代表型号" : "该品类仍在规划中"}
                     </span>
                   )}
                 </div>
@@ -442,7 +444,7 @@ export function HomePage({
 
           <div className="mt-6 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
             <p className="text-sm text-slate-400">
-              进入配置后将使用现有后端接口创建任务，不会改变请求路径或任务存储方式。
+              进入配置后将使用现有系统接口创建任务，不会改变请求路径或任务存储方式。
             </p>
             <button
               className="rounded-lg bg-cyan-300 px-5 py-3 text-sm font-semibold text-slate-950 shadow-[0_0_28px_rgba(34,211,238,0.24)] transition hover:bg-cyan-200 disabled:cursor-not-allowed disabled:bg-slate-700 disabled:text-slate-400 disabled:shadow-none"

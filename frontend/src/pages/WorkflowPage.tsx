@@ -7,6 +7,7 @@ import type { AgentTrace, AnalysisStatus, QualityResult } from "../types/analysi
 
 type WorkflowPageProps = {
   taskId?: string;
+  displayTaskId?: string;
   onNavigate: (key: string) => void;
 };
 
@@ -87,7 +88,7 @@ const agentNodes: AgentNode[] = [
 const humanReviewNode: AgentNode = {
   name: "HumanReviewRequired",
   label: "人工审核",
-  subtitle: "人工复核节点",
+  subtitle: "Human Review · 质量门控未通过时进入人工复核",
 };
 
 const statusTone: Record<AgentStatus, "neutral" | "success" | "warning" | "danger" | "info"> = {
@@ -222,23 +223,6 @@ function asList(value: string[] | undefined, fallback?: string): string[] {
   return fallback ? [fallback] : [];
 }
 
-function getQualityScore(quality?: QualityResult): number | undefined {
-  const score = quality?.score ?? quality?.quality_score;
-  return typeof score === "number" ? score : undefined;
-}
-
-function getQualityApproved(qualityPayload: QualityPayload | null): boolean | undefined {
-  if (typeof qualityPayload?.quality_result?.approved === "boolean") {
-    return qualityPayload.quality_result.approved;
-  }
-
-  if (typeof qualityPayload?.is_approved === "boolean") {
-    return qualityPayload.is_approved;
-  }
-
-  return undefined;
-}
-
 function statusIcon(status: AgentStatus) {
   if (status === "success") {
     return "✓";
@@ -370,7 +354,11 @@ function latestStatusIsSuccessAfterReject(entries?: WorkflowTrace[]): boolean {
   );
 }
 
-export function WorkflowPage({ taskId, onNavigate }: WorkflowPageProps) {
+export function WorkflowPage({
+  taskId,
+  displayTaskId,
+  onNavigate,
+}: WorkflowPageProps) {
   const [status, setStatus] = useState<AnalysisStatus | null>(null);
   const [traceLog, setTraceLog] = useState<WorkflowTrace[]>([]);
   const [qualityPayload, setQualityPayload] = useState<QualityPayload | null>(null);
@@ -442,7 +430,7 @@ export function WorkflowPage({ taskId, onNavigate }: WorkflowPageProps) {
 
       setError(
         failedEndpoints.length > 0
-          ? `Unable to refresh ${failedEndpoints.join(", ")} endpoint.`
+          ? `无法刷新 ${failedEndpoints.join(", ")} 数据。`
           : null,
       );
       setLastUpdated(new Date());
@@ -470,9 +458,12 @@ export function WorkflowPage({ taskId, onNavigate }: WorkflowPageProps) {
   }, [taskId]);
 
   const qualityResult = qualityPayload?.quality_result;
-  const qualityScore = getQualityScore(qualityResult);
-  const qualityApproved = getQualityApproved(qualityPayload);
-  const checkedItems = qualityResult?.checked_items ?? {};
+  const qualityApproved =
+    typeof qualityResult?.approved === "boolean"
+      ? qualityResult.approved
+      : typeof qualityPayload?.is_approved === "boolean"
+        ? qualityPayload.is_approved
+        : undefined;
   const requiredActions = asList(
     qualityResult?.required_actions,
     qualityResult?.required_fix,
@@ -482,6 +473,9 @@ export function WorkflowPage({ taskId, onNavigate }: WorkflowPageProps) {
     qualityResult?.reject_reason ?? qualityResult?.reason ?? qualityResult?.status ?? null;
   const rejectedAgents = qualityPayload?.rejected_agents ?? [];
   const uniqueRejectedAgents = Array.from(new Set(rejectedAgents));
+  const normalizedQualityStatus = normalizeStatus(
+    qualityPayload?.quality_status ?? qualityResult?.status,
+  );
   const hasHumanReviewTrace = traceLog.some((trace) => {
     return (
       includesHumanReview(trace.agent_name) ||
@@ -495,6 +489,24 @@ export function WorkflowPage({ taskId, onNavigate }: WorkflowPageProps) {
       includesHumanReview(status?.current_agent) ||
       hasHumanReviewTrace,
   );
+  const isQualityRejected = Boolean(
+    rejectTo ||
+      normalizedQualityStatus === "rejected" ||
+      normalizedQualityStatus.includes("reject"),
+  );
+  const qualityFlowLabel = isHumanReviewRequired
+    ? "进入人工审核"
+      : isQualityRejected
+        ? "质量打回"
+      : qualityApproved === true || normalizedQualityStatus === "approved"
+        ? "质量门控已通过"
+        : "待审查";
+  const qualityFlowTone: "neutral" | "success" | "warning" | "danger" | "info" =
+    isHumanReviewRequired || isQualityRejected
+      ? "warning"
+      : qualityApproved === true || normalizedQualityStatus === "approved"
+        ? "success"
+        : "neutral";
   const latestTraceByAgent = useMemo(() => buildLatestTraceMap(traceLog), [traceLog]);
   const traceHistoryByAgent = useMemo(
     () => buildTraceHistoryMap(traceLog),
@@ -508,6 +520,8 @@ export function WorkflowPage({ taskId, onNavigate }: WorkflowPageProps) {
       acc[agent.name] =
         agent.name === humanReviewNode.name
           ? "required"
+          : agent.name === "QualityAgent" && isQualityRejected
+            ? "rejected"
           : deriveAgentStatus(
               agent.name,
               latestTraceByAgent[agent.name],
@@ -534,13 +548,24 @@ export function WorkflowPage({ taskId, onNavigate }: WorkflowPageProps) {
       ? latestTraceByAgent.HumanReviewAgent
       : undefined);
   const selectedStatus = derivedStatuses[selectedAgent.name] ?? "pending";
+  const selectedRejectTo =
+    selectedTrace?.reject_to ??
+    selectedTrace?.target_agent ??
+    (selectedAgent.name === "QualityAgent" ? rejectTo : null);
+  const selectedRejectReason =
+    selectedTrace?.reject_reason ??
+    selectedTrace?.reason ??
+    (selectedAgent.name === "QualityAgent" ? rejectReason : null);
+  const selectedRequiredActions =
+    selectedTrace?.required_actions ??
+    (selectedAgent.name === "QualityAgent" ? requiredActions : []);
   function getNodeBadges(agentName: string) {
     const latestStatus = normalizeStatus(latestTraceByAgent[agentName]?.status);
     const wasRejectedByQuality = uniqueRejectedAgents.includes(agentName);
 
     return rerunAgents.has(agentName) ||
       (wasRejectedByQuality && latestStatus === "success")
-      ? [{ label: "rerun", tone: "warning" as const }]
+      ? [{ label: "已重跑", tone: "warning" as const }]
       : [];
   }
 
@@ -573,7 +598,9 @@ export function WorkflowPage({ taskId, onNavigate }: WorkflowPageProps) {
             多 Agent 执行路径
           </h2>
           <p className="mt-3 max-w-3xl break-all text-sm leading-6 text-slate-400">
-            当前任务: {taskId}
+            <span title={`真实任务 ID：${taskId}`}>
+              当前任务：{displayTaskId || taskId}
+            </span>
           </p>
         </div>
         <div className="flex flex-wrap gap-2 lg:justify-end">
@@ -582,6 +609,7 @@ export function WorkflowPage({ taskId, onNavigate }: WorkflowPageProps) {
             label={`进度 ${status?.progress ?? 0}%`}
             tone={status?.progress === 100 ? "success" : "neutral"}
           />
+          <StatusBadge label={qualityFlowLabel} tone={qualityFlowTone} />
           {isRefreshing ? <StatusBadge label="轮询中" tone="info" /> : null}
         </div>
       </div>
@@ -602,7 +630,7 @@ export function WorkflowPage({ taskId, onNavigate }: WorkflowPageProps) {
             <div>
               <h3 className="text-lg font-semibold text-white">Agent 执行路径</h3>
               <p className="mt-1 text-sm text-slate-400">
-                节点状态来自后端 trace_log 与 current_agent。
+                节点状态来自系统执行记录与当前 Agent。
               </p>
             </div>
             {lastUpdated ? (
@@ -682,7 +710,7 @@ export function WorkflowPage({ taskId, onNavigate }: WorkflowPageProps) {
                   <div className="w-[210px] shrink-0">
                     <AgentCard
                       agent={humanReviewNode}
-                      badges={[{ label: "manual gate", tone: "warning" }]}
+                      badges={[{ label: "人工复核", tone: "warning" }]}
                       index={6}
                       isSelected={selectedAgentName === humanReviewNode.name}
                       onSelect={() => setSelectedAgentName(humanReviewNode.name)}
@@ -706,144 +734,55 @@ export function WorkflowPage({ taskId, onNavigate }: WorkflowPageProps) {
           </div>
         </section>
 
-        <section className="grid min-w-0 gap-3 sm:grid-cols-3">
+        <section className="grid min-w-0 gap-3 sm:grid-cols-2 xl:grid-cols-5">
           <div className="min-w-0 rounded-lg border border-slate-800 bg-slate-900/45 p-4">
             <p className="text-xs uppercase tracking-[0.18em] text-slate-500">
               当前 Agent
             </p>
             <p className="mt-2 break-words text-sm font-medium text-slate-100">
-                {status?.current_agent || "等待中"}
+              {status?.current_agent || "等待中"}
             </p>
           </div>
           <div className="min-w-0 rounded-lg border border-slate-800 bg-slate-900/45 p-4">
             <p className="text-xs uppercase tracking-[0.18em] text-slate-500">
-              轨迹记录
+              执行记录数
             </p>
             <p className="mt-2 text-sm font-medium text-slate-100">
-              {traceLog.length}
+              {traceLog.length} 条
             </p>
           </div>
           <div className="min-w-0 rounded-lg border border-slate-800 bg-slate-900/45 p-4">
             <p className="text-xs uppercase tracking-[0.18em] text-slate-500">
-              质量状态
+              质量门控
             </p>
-            <p className="mt-2 break-words text-sm font-medium text-slate-100">
-              {qualityPayload?.quality_status || qualityResult?.status || "待处理"}
+            <div className="mt-2 flex flex-wrap items-center gap-2">
+              <StatusBadge label={qualityFlowLabel} tone={qualityFlowTone} />
+              <span className="break-words text-sm font-medium text-slate-100">
+                {qualityPayload?.quality_status || qualityResult?.status || "待处理"}
+              </span>
+            </div>
+          </div>
+          <div className="min-w-0 rounded-lg border border-slate-800 bg-slate-900/45 p-4">
+            <p className="text-xs uppercase tracking-[0.18em] text-slate-500">
+              重试轮次
+            </p>
+            <p className="mt-2 text-sm font-medium text-slate-100">
+              {typeof qualityPayload?.iteration_count === "number"
+                ? `${qualityPayload.iteration_count} / 3`
+                : "暂无"}
+            </p>
+          </div>
+          <div className="min-w-0 rounded-lg border border-slate-800 bg-slate-900/45 p-4">
+            <p className="text-xs uppercase tracking-[0.18em] text-slate-500">
+              打回状态
+            </p>
+            <p className="mt-2 text-sm font-medium text-slate-100">
+              {rejectTo ? `已打回 ${rejectTo}` : "本次流程未触发打回"}
             </p>
           </div>
         </section>
 
-        <section className="grid min-w-0 gap-5 xl:grid-cols-[minmax(0,1fr)_minmax(320px,420px)]">
-          <div className="min-w-0 space-y-4">
-            <div className="rounded-lg border border-slate-800 bg-slate-900/45 p-4">
-              <div className="mb-4 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
-                <div>
-                  <h3 className="text-sm font-semibold text-white">
-                    重试摘要
-                  </h3>
-                  <p className="mt-1 text-xs text-slate-500">
-                    后端返回质量结果后自动填充。
-                  </p>
-                </div>
-                <StatusBadge
-                  label={isHumanReviewRequired ? "人工审核" : "自动流程"}
-                  tone={isHumanReviewRequired ? "warning" : "neutral"}
-                />
-              </div>
-              <div className="grid min-w-0 gap-3 md:grid-cols-2 2xl:grid-cols-4">
-                <div className="min-w-0 rounded-md border border-slate-800 bg-slate-950/60 p-3">
-                  <p className="text-xs uppercase tracking-[0.16em] text-slate-500">
-                    重试轮次
-                  </p>
-                  <p className="mt-2 text-sm font-semibold text-slate-100">
-                    {typeof qualityPayload?.iteration_count === "number"
-                      ? `${qualityPayload.iteration_count} / 3`
-                      : "暂无"}
-                  </p>
-                </div>
-                <div className="min-w-0 rounded-md border border-slate-800 bg-slate-950/60 p-3">
-                  <p className="text-xs uppercase tracking-[0.16em] text-slate-500">
-                    打回目标
-                  </p>
-                  <p className="mt-2 break-words text-sm font-semibold text-slate-100">
-                    {rejectTo || "暂无"}
-                  </p>
-                </div>
-                <div className="min-w-0 rounded-md border border-slate-800 bg-slate-950/60 p-3">
-                  <p className="text-xs uppercase tracking-[0.16em] text-slate-500">
-                    被打回 Agent
-                  </p>
-                  <div className="mt-2 flex flex-wrap gap-2">
-                    {uniqueRejectedAgents.length > 0 ? (
-                      uniqueRejectedAgents.map((agentName) => (
-                        <StatusBadge
-                          key={agentName}
-                          label={agentName}
-                          tone="warning"
-                        />
-                      ))
-                    ) : (
-                      <span className="text-sm text-slate-400">暂无</span>
-                    )}
-                  </div>
-                </div>
-                <div className="min-w-0 rounded-md border border-slate-800 bg-slate-950/60 p-3">
-                  <p className="text-xs uppercase tracking-[0.16em] text-slate-500">
-                    是否需要人工审核
-                  </p>
-                  <p className="mt-2 text-sm font-semibold text-slate-100">
-                    {isHumanReviewRequired ? "是" : "否"}
-                  </p>
-                </div>
-              </div>
-            </div>
-
-          {isHumanReviewRequired ? (
-            <div className="rounded-lg border border-amber-400/35 bg-amber-400/10 p-4">
-              <div className="mb-4 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
-                <div>
-                  <p className="text-xs uppercase tracking-[0.18em] text-amber-200/80">
-                    人工审核分支
-                  </p>
-                  <p className="mt-1 font-mono text-sm text-amber-100">
-                    QualityAgent {" -> "} 人工审核
-                  </p>
-                </div>
-                <StatusBadge label="需要人工审核" tone="warning" />
-              </div>
-            </div>
-          ) : null}
-
-          {rejectTo ? (
-            <div className="rounded-lg border border-amber-400/35 bg-amber-400/10 p-4">
-              <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
-                <div>
-                  <p className="text-xs uppercase tracking-[0.18em] text-amber-200/80">
-                    打回路径
-                  </p>
-                  <p className="mt-2 font-mono text-sm text-amber-100">
-                    QualityAgent {" -> "} {rejectTo}
-                  </p>
-                  {rejectReason ? (
-                    <p className="mt-2 text-sm leading-6 text-amber-100/85">
-                      {rejectReason}
-                    </p>
-                  ) : null}
-                </div>
-                <StatusBadge label="质量审查未通过" tone="warning" />
-              </div>
-              {requiredActions.length > 0 ? (
-                <div className="mt-4 flex flex-wrap gap-2">
-                  {requiredActions.map((action) => (
-                    <StatusBadge key={action} label={action} tone="warning" />
-                  ))}
-                </div>
-              ) : null}
-            </div>
-          ) : null}
-          </div>
-
-          <aside className="min-w-0 overflow-hidden rounded-lg border border-slate-800 bg-slate-950/80 p-5">
+        <section className="min-w-0 overflow-hidden rounded-lg border border-slate-800 bg-slate-950/80 p-5">
             <div className="flex items-start justify-between gap-3">
               <div>
                 <p className="text-xs uppercase tracking-[0.18em] text-slate-500">
@@ -858,19 +797,45 @@ export function WorkflowPage({ taskId, onNavigate }: WorkflowPageProps) {
 
             <dl className="mt-5 space-y-4 text-sm">
               <div>
-                <dt className="text-slate-500">status</dt>
+                <dt className="text-slate-500">最新执行状态</dt>
                 <dd className="mt-1 break-words text-slate-100">
                   {selectedTrace?.status ?? selectedStatus}
                 </dd>
               </div>
               <div>
-                <dt className="text-slate-500">output_summary</dt>
+                <dt className="text-slate-500">输出摘要</dt>
                 <dd className="mt-1 break-words leading-6 text-slate-200">
-                  {selectedTrace?.output_summary || "暂无 trace 输出摘要。"}
+                  {selectedTrace?.output_summary || "暂无输出摘要。"}
                 </dd>
               </div>
               <div>
-                <dt className="text-slate-500">duration_ms</dt>
+                <dt className="text-slate-500">打回原因</dt>
+                <dd className="mt-1 break-words leading-6 text-slate-200">
+                  {selectedRejectReason || "无"}
+                </dd>
+              </div>
+              <div>
+                <dt className="text-slate-500">修复建议</dt>
+                <dd className="mt-2">
+                  {selectedRequiredActions.length > 0 ? (
+                    <div className="flex flex-wrap gap-2">
+                      {selectedRequiredActions.map((action) => (
+                        <StatusBadge key={action} label={action} tone="warning" />
+                      ))}
+                    </div>
+                  ) : (
+                    <span className="text-slate-400">无</span>
+                  )}
+                </dd>
+              </div>
+              <div>
+                <dt className="text-slate-500">打回目标</dt>
+                <dd className="mt-1 break-words text-slate-100">
+                  {selectedRejectTo || "无"}
+                </dd>
+              </div>
+              <div>
+                <dt className="text-slate-500">执行耗时</dt>
                 <dd className="mt-1 text-slate-100">
                   {typeof selectedTrace?.duration_ms === "number"
                     ? selectedTrace.duration_ms
@@ -878,103 +843,23 @@ export function WorkflowPage({ taskId, onNavigate }: WorkflowPageProps) {
                 </dd>
               </div>
               <div>
-                <dt className="text-slate-500">error</dt>
+                <dt className="text-slate-500">错误信息</dt>
                 <dd className="mt-1 break-words leading-6 text-slate-200">
                   {selectedTrace?.error || "无"}
                 </dd>
               </div>
             </dl>
 
-            {selectedAgent.name === "QualityAgent" ? (
-              <div className="mt-6 border-t border-slate-800 pt-5">
-                <h4 className="text-sm font-semibold text-white">质量门控</h4>
-                <dl className="mt-4 space-y-4 text-sm">
-                  <div>
-                    <dt className="text-slate-500">approved</dt>
-                    <dd className="mt-1 text-slate-100">
-                      {typeof qualityApproved === "boolean"
-                        ? String(qualityApproved)
-                        : "未返回"}
-                    </dd>
-                  </div>
-                  <div>
-                    <dt className="text-slate-500">score</dt>
-                    <dd className="mt-1 text-slate-100">
-                      {typeof qualityScore === "number" ? qualityScore : "未返回"}
-                    </dd>
-                  </div>
-                  <div>
-                    <dt className="text-slate-500">reject_to</dt>
-                    <dd className="mt-1 break-words text-slate-100">
-                      {rejectTo || "无"}
-                    </dd>
-                  </div>
-                  <div>
-                    <dt className="text-slate-500">reject_reason</dt>
-                    <dd className="mt-1 break-words leading-6 text-slate-200">
-                      {rejectReason || "无"}
-                    </dd>
-                  </div>
-                </dl>
-
-                <div className="mt-5">
-                  <p className="text-xs uppercase tracking-[0.18em] text-slate-500">
-                    required_actions
-                  </p>
-                  {requiredActions.length > 0 ? (
-                    <ul className="mt-3 space-y-2">
-                      {requiredActions.map((action) => (
-                        <li
-                          className="break-words rounded-md border border-amber-400/25 bg-amber-400/10 px-3 py-2 text-sm text-amber-100"
-                          key={action}
-                        >
-                          {action}
-                        </li>
-                      ))}
-                    </ul>
-                  ) : (
-                    <p className="mt-2 text-sm text-slate-400">暂无 required_actions。</p>
-                  )}
-                </div>
-
-                <div className="mt-5">
-                  <p className="text-xs uppercase tracking-[0.18em] text-slate-500">
-                    checked_items
-                  </p>
-                  {Object.keys(checkedItems).length > 0 ? (
-                    <div className="mt-3 space-y-2">
-                      {Object.entries(checkedItems).map(([name, passed]) => (
-                        <div
-                          className="flex min-w-0 items-center justify-between gap-3 rounded-md border border-slate-800 bg-slate-900/55 px-3 py-2 text-sm"
-                          key={name}
-                        >
-                          <span className="min-w-0 break-words text-slate-200">{name}</span>
-                          <StatusBadge
-                            label={passed ? "passed" : "failed"}
-                            tone={passed ? "success" : "danger"}
-                          />
-                        </div>
-                      ))}
-                    </div>
-                  ) : (
-                    <p className="mt-2 text-sm text-slate-400">
-                      暂无 checked_items。
-                    </p>
-                  )}
-                </div>
-              </div>
-            ) : null}
-          </aside>
         </section>
 
         <section className="w-full max-w-full overflow-hidden rounded-lg border border-slate-800 bg-slate-950/70 p-5">
           <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
             <div>
               <h3 className="text-lg font-semibold text-white">
-                执行轨迹
+                执行时间线
               </h3>
               <p className="mt-1 text-sm text-slate-400">
-                按时间展示后端返回的 trace_log。
+                按时间展示系统返回的执行记录。
               </p>
             </div>
             <StatusBadge label={`${traceLog.length} 条记录`} tone="neutral" />
@@ -1027,7 +912,7 @@ export function WorkflowPage({ taskId, onNavigate }: WorkflowPageProps) {
                             tone={traceTone(trace.status)}
                           />
                           {isLatestTraceForAgent && isRerunSuccess ? (
-                            <StatusBadge label="重新执行" tone="warning" />
+                            <StatusBadge label="已重跑" tone="warning" />
                           ) : null}
                         </div>
                         {trace.output_summary ? (
@@ -1037,9 +922,9 @@ export function WorkflowPage({ taskId, onNavigate }: WorkflowPageProps) {
                         ) : null}
                         {traceRejectTo || traceReason ? (
                           <p className="mt-2 break-words text-sm leading-6 text-amber-100">
-                            {traceRejectTo ? `reject_to: ${traceRejectTo}` : ""}
+                            {traceRejectTo ? `打回目标：${traceRejectTo}` : ""}
                             {traceRejectTo && traceReason ? " | " : ""}
-                            {traceReason ? `reason: ${traceReason}` : ""}
+                            {traceReason ? `原因：${traceReason}` : ""}
                           </p>
                         ) : null}
                       </div>
