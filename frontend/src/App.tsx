@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { AppLayout } from "./components/layout/AppLayout";
 import type { NavItem } from "./components/layout/Sidebar";
+import { demoSteps } from "./utils/demoSteps";
 import { ClaimsPage } from "./pages/ClaimsPage";
 import { EvidencePage } from "./pages/EvidencePage";
 import { HomePage } from "./pages/HomePage";
@@ -11,15 +12,34 @@ import { ReportPage } from "./pages/ReportPage";
 import { WelcomePage } from "./pages/WelcomePage";
 import { WorkflowPage } from "./pages/WorkflowPage";
 import { getDisplayTaskId } from "./utils/taskDisplay";
+import type { AuthUser } from "./api/authApi";
 
-const HAS_ENTERED_KEY = "hasEnteredDemo";
+const AUTH_TOKEN_KEY = "authToken";
+const CURRENT_USER_KEY = "currentUser";
 
-function getStoredHasEntered(): boolean {
+function getStoredToken(): string | null {
   if (typeof window === "undefined") {
-    return false;
+    return null;
   }
 
-  return window.sessionStorage.getItem(HAS_ENTERED_KEY) === "true";
+  return window.sessionStorage.getItem(AUTH_TOKEN_KEY);
+}
+
+function getStoredUser(): AuthUser | null {
+  if (typeof window === "undefined") {
+    return null;
+  }
+
+  const raw = window.sessionStorage.getItem(CURRENT_USER_KEY);
+  if (!raw) {
+    return null;
+  }
+
+  try {
+    return JSON.parse(raw) as AuthUser;
+  } catch {
+    return null;
+  }
 }
 
 type PageKey =
@@ -65,7 +85,8 @@ function getStoredTaskId(): string | null {
 }
 
 export default function App() {
-  const [hasEntered, setHasEntered] = useState<boolean>(getStoredHasEntered);
+  const [authToken, setAuthToken] = useState<string | null>(getStoredToken);
+  const [currentUser, setCurrentUser] = useState<AuthUser | null>(getStoredUser);
   const [activePage, setActivePage] = useState<PageKey>(getPageKeyFromHash);
   const [taskId, setTaskId] = useState<string | null>(getStoredTaskId);
   const [displayTaskId, setDisplayTaskId] = useState<string | null>(() =>
@@ -76,6 +97,81 @@ export default function App() {
   const [selectedIndustryKey, setSelectedIndustryKey] = useState<string | null>(
     null,
   );
+
+  // 自动演示模式状态
+  const [autoDemoEnabled, setAutoDemoEnabled] = useState(true);
+  const [demoRunning, setDemoRunning] = useState(false);
+  const [demoPaused, setDemoPaused] = useState(false);
+  const [demoStepIndex, setDemoStepIndex] = useState(0);
+  const [visitedKeys, setVisitedKeys] = useState<Set<string>>(new Set());
+
+  function markVisited(key: string) {
+    setVisitedKeys((current) => {
+      if (current.has(key)) {
+        return current;
+      }
+      const next = new Set(current);
+      next.add(key);
+      return next;
+    });
+  }
+
+  // 仅供自动演示内部使用的导航：切换页面但不暂停演示。
+  function goToDemoPage(key: PageKey) {
+    setActivePage(key);
+    if (typeof window !== "undefined" && window.location.hash !== `#${key}`) {
+      window.history.pushState(null, "", `#${key}`);
+    }
+    markVisited(key);
+  }
+
+  function startAutoDemo() {
+    setVisitedKeys(new Set());
+    setDemoStepIndex(0);
+    setDemoPaused(false);
+    setDemoRunning(true);
+    goToDemoPage(demoSteps[0].key as PageKey);
+  }
+
+  function pauseDemo() {
+    setDemoPaused(true);
+  }
+
+  function resumeDemo() {
+    setDemoPaused(false);
+    goToDemoPage(demoSteps[demoStepIndex].key as PageKey);
+  }
+
+  function stopDemo() {
+    setDemoRunning(false);
+    setDemoPaused(false);
+  }
+
+  // 自动演示定时器：每个步骤停留指定时长后切换到下一页。
+  useEffect(() => {
+    if (!demoRunning || demoPaused) {
+      return;
+    }
+
+    const step = demoSteps[demoStepIndex];
+    if (!step) {
+      return;
+    }
+
+    const timerId = window.setTimeout(() => {
+      const nextIndex = demoStepIndex + 1;
+      if (nextIndex >= demoSteps.length) {
+        setDemoRunning(false);
+        return;
+      }
+      setDemoStepIndex(nextIndex);
+      goToDemoPage(demoSteps[nextIndex].key as PageKey);
+    }, step.delay);
+
+    return () => window.clearTimeout(timerId);
+    // goToDemoPage 仅调用稳定的 setState，无需作为依赖。
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [demoRunning, demoPaused, demoStepIndex]);
 
   useEffect(() => {
     function handleHashChange() {
@@ -93,7 +189,13 @@ export default function App() {
 
   function handleNavigate(key: string) {
     if (isPageKey(key)) {
+      // 用户手动切换页面时暂停自动演示（手动模式始终可用）。
+      if (demoRunning && !demoPaused) {
+        setDemoPaused(true);
+      }
+
       setActivePage(key);
+      markVisited(key);
 
       if (typeof window !== "undefined" && window.location.hash !== `#${key}`) {
         window.history.pushState(null, "", `#${key}`);
@@ -101,19 +203,24 @@ export default function App() {
     }
   }
 
-  function handleEnter() {
-    setHasEntered(true);
+  function handleLogin(token: string, user: AuthUser) {
+    setAuthToken(token);
+    setCurrentUser(user);
 
     if (typeof window !== "undefined") {
-      window.sessionStorage.setItem(HAS_ENTERED_KEY, "true");
+      window.sessionStorage.setItem(AUTH_TOKEN_KEY, token);
+      window.sessionStorage.setItem(CURRENT_USER_KEY, JSON.stringify(user));
     }
   }
 
-  function handleExitDemo() {
-    setHasEntered(false);
+  function handleLogout() {
+    stopDemo();
+    setAuthToken(null);
+    setCurrentUser(null);
 
     if (typeof window !== "undefined") {
-      window.sessionStorage.removeItem(HAS_ENTERED_KEY);
+      window.sessionStorage.removeItem(AUTH_TOKEN_KEY);
+      window.sessionStorage.removeItem(CURRENT_USER_KEY);
     }
   }
 
@@ -169,6 +276,9 @@ export default function App() {
             onNavigate={handleNavigate}
             onTaskCreated={handleTaskCreated}
             selectedIndustryKey={selectedIndustryKey}
+            autoDemoEnabled={autoDemoEnabled}
+            onToggleAutoDemo={setAutoDemoEnabled}
+            onStartAutoDemo={startAutoDemo}
           />
         );
       case "workflow":
@@ -177,6 +287,7 @@ export default function App() {
             displayTaskId={displayTaskId ?? undefined}
             taskId={taskId ?? undefined}
             onNavigate={handleNavigate}
+            autoDemoActive={demoRunning && !demoPaused}
           />
         );
       case "evidence":
@@ -234,20 +345,40 @@ export default function App() {
     }
   }
 
-  if (!hasEntered) {
-    return <WelcomePage onEnter={handleEnter} />;
+  if (!authToken) {
+    return <WelcomePage onLogin={handleLogin} />;
   }
+
+  const demoStatusLabel = demoRunning
+    ? demoPaused
+      ? "已暂停"
+      : "演示中"
+    : "手动模式";
+  const currentDemoKey = demoRunning ? demoSteps[demoStepIndex]?.key : undefined;
 
   return (
     <AppLayout
       activePage={activePage}
       navItems={navItems}
       onNavigate={handleNavigate}
-      onExitDemo={handleExitDemo}
+      onLogout={handleLogout}
+      currentUser={currentUser}
       displayTaskId={displayTaskId ?? undefined}
       taskId={taskId ?? undefined}
+      demoSteps={demoSteps}
+      demoRunning={demoRunning}
+      demoPaused={demoPaused}
+      demoStepIndex={demoStepIndex}
+      demoStatusLabel={demoStatusLabel}
+      currentDemoKey={currentDemoKey}
+      visitedKeys={visitedKeys}
+      onPauseDemo={pauseDemo}
+      onResumeDemo={resumeDemo}
+      onStopDemo={stopDemo}
     >
-      {renderPage()}
+      <div className="page-enter" key={activePage}>
+        {renderPage()}
+      </div>
     </AppLayout>
   );
 }

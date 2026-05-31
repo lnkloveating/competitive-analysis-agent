@@ -1,7 +1,8 @@
 import { useEffect, useRef, useState, type ReactNode } from "react";
+import { authApi, type AuthUser } from "../api/authApi";
 
 type WelcomePageProps = {
-  onEnter: () => void;
+  onLogin: (token: string, user: AuthUser) => void;
 };
 
 type AgentNode = {
@@ -111,11 +112,33 @@ function StatCard({
   );
 }
 
-export function WelcomePage({ onEnter }: WelcomePageProps) {
+export function WelcomePage({ onLogin }: WelcomePageProps) {
   const reducedMotion = usePrefersReducedMotion();
   const [pointer, setPointer] = useState({ x: 0, y: 0 });
   const [hoveredAgent, setHoveredAgent] = useState<string | null>(null);
+  const [username, setUsername] = useState("");
+  const [password, setPassword] = useState("");
+  const [loading, setLoading] = useState(false);
+  const [loginError, setLoginError] = useState<string | null>(null);
   const frameRef = useRef<number>();
+
+  async function handleLoginSubmit(event: React.FormEvent) {
+    event.preventDefault();
+    if (loading) {
+      return;
+    }
+
+    setLoginError(null);
+    setLoading(true);
+    try {
+      const result = await authApi.login(username.trim(), password);
+      onLogin(result.token, result.user);
+    } catch (err) {
+      setLoginError(err instanceof Error ? err.message : "账号或密码错误");
+    } finally {
+      setLoading(false);
+    }
+  }
 
   function handlePointerMove(event: React.MouseEvent<HTMLDivElement>) {
     if (reducedMotion) {
@@ -276,23 +299,60 @@ export function WelcomePage({ onEnter }: WelcomePageProps) {
             </div>
           </div>
 
-          <div
-            className="welcome-fade-up mt-9 flex flex-wrap items-center gap-4"
+          {/* 登录卡片 */}
+          <form
+            className="welcome-fade-up mt-8 max-w-sm rounded-2xl border border-[#38bdf8]/25 bg-[#0a1326]/70 p-5 shadow-[0_20px_60px_rgba(2,6,23,0.5)] backdrop-blur-md"
             style={{ animationDelay: "0.58s" }}
+            onSubmit={handleLoginSubmit}
           >
+            <label className="block">
+              <span className="text-xs font-medium tracking-[0.08em] text-[#9fb2d4]">
+                账号
+              </span>
+              <input
+                autoComplete="username"
+                className="mt-1.5 w-full rounded-lg border px-3 py-2.5 text-sm outline-none transition !border-[#38bdf8]/35 !bg-[#0b1226]/85 !text-[#e6eefc] placeholder:!text-[#5f7299] focus:!border-[#7dd3fc] focus:shadow-[0_0_0_3px_rgba(56,189,248,0.22)]"
+                onChange={(event) => setUsername(event.target.value)}
+                placeholder="请输入账号"
+                value={username}
+              />
+            </label>
+
+            <label className="mt-3 block">
+              <span className="text-xs font-medium tracking-[0.08em] text-[#9fb2d4]">
+                密码
+              </span>
+              <input
+                autoComplete="current-password"
+                className="mt-1.5 w-full rounded-lg border px-3 py-2.5 text-sm outline-none transition !border-[#38bdf8]/35 !bg-[#0b1226]/85 !text-[#e6eefc] placeholder:!text-[#5f7299] focus:!border-[#7dd3fc] focus:shadow-[0_0_0_3px_rgba(56,189,248,0.22)]"
+                onChange={(event) => setPassword(event.target.value)}
+                placeholder="请输入密码"
+                type="password"
+                value={password}
+              />
+            </label>
+
+            {loginError ? (
+              <p className="mt-3 rounded-lg border border-rose-400/40 bg-rose-500/15 px-3 py-2 text-xs text-rose-200">
+                {loginError}
+              </p>
+            ) : null}
+
             <button
-              className="group relative inline-flex items-center gap-2 rounded-xl bg-gradient-to-r from-[#22d3ee] to-[#6366f1] px-7 py-3.5 text-base font-semibold text-white shadow-[0_10px_40px_rgba(34,211,238,0.35)] transition duration-200 hover:-translate-y-0.5 hover:shadow-[0_18px_55px_rgba(99,102,241,0.6)] focus:outline-none focus-visible:ring-2 focus-visible:ring-[#7dd3fc]"
-              onClick={onEnter}
-              type="button"
+              className="group relative mt-4 inline-flex w-full items-center justify-center gap-2 rounded-xl bg-gradient-to-r from-[#22d3ee] to-[#6366f1] px-7 py-3 text-base font-semibold text-white shadow-[0_10px_40px_rgba(34,211,238,0.35)] transition duration-200 hover:-translate-y-0.5 hover:shadow-[0_18px_55px_rgba(99,102,241,0.6)] focus:outline-none focus-visible:ring-2 focus-visible:ring-[#7dd3fc] disabled:cursor-not-allowed disabled:opacity-70"
+              disabled={loading}
+              type="submit"
             >
               <span className="pointer-events-none absolute -inset-1 rounded-xl bg-gradient-to-r from-[#22d3ee] to-[#6366f1] opacity-0 blur-md transition duration-200 group-hover:opacity-60" />
-              <span className="relative">进入系统</span>
-              <span className="relative transition-transform duration-200 group-hover:translate-x-1">
-                →
+              <span className="relative">
+                {loading ? "登录中..." : "登录进入系统"}
               </span>
             </button>
-            <span className="text-sm text-[#6f84a8]">无需账号，直接进入演示</span>
-          </div>
+
+            <p className="mt-3 text-xs text-[#6f84a8]">
+              测试账号：admin · 测试密码：123456
+            </p>
+          </form>
 
           {/* 指标卡片（hover 展开详情） */}
           <div

@@ -17,6 +17,7 @@ type WorkflowPageProps = {
   taskId?: string;
   displayTaskId?: string;
   onNavigate: (key: string) => void;
+  autoDemoActive?: boolean;
 };
 
 type AgentStatus =
@@ -427,6 +428,7 @@ export function WorkflowPage({
   taskId,
   displayTaskId,
   onNavigate,
+  autoDemoActive = false,
 }: WorkflowPageProps) {
   const [status, setStatus] = useState<AnalysisStatus | null>(null);
   const [traceLog, setTraceLog] = useState<WorkflowTrace[]>([]);
@@ -748,6 +750,18 @@ export function WorkflowPage({
           {isRefreshing ? <StatusBadge label="轮询中" tone="info" /> : null}
         </div>
       </div>
+
+      {autoDemoActive ? (
+        <div className="mb-5 flex items-center gap-3 rounded-lg border border-cyan-200/70 bg-cyan-50/80 px-4 py-3">
+          <span className="relative flex h-2.5 w-2.5">
+            <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-cyan-400 opacity-75" />
+            <span className="relative inline-flex h-2.5 w-2.5 rounded-full bg-cyan-500" />
+          </span>
+          <p className="text-sm font-medium text-cyan-800">
+            当前正在展示：多 Agent 协作流程
+          </p>
+        </div>
+      ) : null}
 
       {isInitialLoading ? (
         <LoadingState label="正在读取工作流状态、执行轨迹与质量结果..." />

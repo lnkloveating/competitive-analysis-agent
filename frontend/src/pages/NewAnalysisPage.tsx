@@ -8,6 +8,9 @@ type NewAnalysisPageProps = {
   displayTaskId?: string;
   onTaskCreated: (taskId: string) => void;
   onNavigate: (key: string) => void;
+  autoDemoEnabled: boolean;
+  onToggleAutoDemo: (enabled: boolean) => void;
+  onStartAutoDemo: () => void;
 };
 
 const defaultCompetitors = ["罗技", "雷蛇", "海盗船"];
@@ -26,6 +29,9 @@ export function NewAnalysisPage({
   displayTaskId,
   onTaskCreated,
   onNavigate,
+  autoDemoEnabled,
+  onToggleAutoDemo,
+  onStartAutoDemo,
 }: NewAnalysisPageProps) {
   const [targetPlatform, setTargetPlatform] = useState("罗技");
   const [targetUser, setTargetUser] = useState("产品经理");
@@ -67,7 +73,11 @@ export function NewAnalysisPage({
       onTaskCreated(response.task_id);
 
       window.setTimeout(() => {
-        onNavigate("workflow");
+        if (autoDemoEnabled) {
+          onStartAutoDemo();
+        } else {
+          onNavigate("workflow");
+        }
       }, 700);
     } catch (err) {
       setError(
@@ -259,7 +269,43 @@ export function NewAnalysisPage({
           </p>
         ) : null}
 
-        <div className="mt-7 flex justify-end">
+        {/* 自动演示流程开关 */}
+        <div className="mt-6 flex flex-col gap-3 rounded-xl border border-cyan-300/25 bg-cyan-300/5 p-4 sm:flex-row sm:items-center sm:justify-between">
+          <div className="min-w-0">
+            <div className="flex items-center gap-2">
+              <p className="text-sm font-semibold text-slate-100">自动演示流程</p>
+              <span
+                className={`rounded-full px-2 py-0.5 text-xs font-medium ${
+                  autoDemoEnabled
+                    ? "bg-cyan-300/20 text-cyan-700"
+                    : "bg-slate-200 text-slate-500"
+                }`}
+              >
+                {autoDemoEnabled ? "已开启" : "已关闭"}
+              </span>
+            </div>
+            <p className="mt-1 text-xs leading-5 text-slate-400">
+              开启后，系统将在任务创建后自动按 Agent 工作流、证据中心、结论追踪、质量审查、最终报告和指标看板依次展示。
+            </p>
+          </div>
+          <button
+            aria-pressed={autoDemoEnabled}
+            className={`relative inline-flex h-7 w-12 shrink-0 items-center rounded-full transition ${
+              autoDemoEnabled ? "bg-cyan-400" : "bg-slate-300"
+            }`}
+            onClick={() => onToggleAutoDemo(!autoDemoEnabled)}
+            role="switch"
+            type="button"
+          >
+            <span
+              className={`inline-block h-5 w-5 transform rounded-full bg-white shadow transition ${
+                autoDemoEnabled ? "translate-x-6" : "translate-x-1"
+              }`}
+            />
+          </button>
+        </div>
+
+        <div className="mt-6 flex justify-end">
           <button
             className="rounded-lg bg-cyan-300 px-6 py-3 text-sm font-semibold text-slate-950 shadow-[0_0_28px_rgba(34,211,238,0.24)] transition hover:bg-cyan-200 disabled:cursor-not-allowed disabled:bg-slate-700 disabled:text-slate-400 disabled:shadow-none"
             disabled={isStarting}

@@ -15,6 +15,24 @@ from agents.workflow import app as workflow_app
 app = FastAPI(title="竞品分析 Agent 系统", version="1.0.0")
 app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"])
 
+# 认证模块（独立、最小侵入）。即便认证依赖缺失也不影响分析主流程。
+try:
+    from auth.router import router as auth_router
+
+    app.include_router(auth_router)
+
+    @app.on_event("startup")
+    def _init_auth() -> None:
+        try:
+            from auth.service import ensure_initialized
+
+            ensure_initialized()
+        except Exception:
+            # 数据库未就绪时不阻塞主系统启动，登录时再返回明确错误。
+            pass
+except Exception:  # pragma: no cover - 认证可选，失败不影响分析接口
+    pass
+
 TASKS: Dict[str, Dict[str, Any]] = {}
 TASK_LOCK = threading.Lock()
 

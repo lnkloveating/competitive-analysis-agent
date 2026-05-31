@@ -1,14 +1,27 @@
 import { useEffect, useState } from "react";
 import { analysisApi } from "../../api/analysisApi";
+import type { AuthUser } from "../../api/authApi";
 import { StatusBadge } from "../common/StatusBadge";
 
 type TopBarProps = {
   taskId?: string;
   displayTaskId?: string;
-  onExitDemo?: () => void;
+  onLogout?: () => void;
+  currentUser?: AuthUser | null;
+  demoStatusLabel?: string;
+  demoRunning?: boolean;
+  demoPaused?: boolean;
 };
 
-export function TopBar({ taskId, displayTaskId, onExitDemo }: TopBarProps) {
+export function TopBar({
+  taskId,
+  displayTaskId,
+  onLogout,
+  currentUser,
+  demoStatusLabel,
+  demoRunning,
+  demoPaused,
+}: TopBarProps) {
   const [apiStatus, setApiStatus] = useState<"checking" | "online" | "offline">(
     "checking",
   );
@@ -64,14 +77,25 @@ export function TopBar({ taskId, displayTaskId, onExitDemo }: TopBarProps) {
             tone={displayTaskId ? "info" : "neutral"}
           />
         </span>
-        {onExitDemo ? (
+        {demoStatusLabel ? (
+          <StatusBadge
+            label={`自动演示：${demoStatusLabel}`}
+            tone={
+              demoRunning ? (demoPaused ? "warning" : "success") : "neutral"
+            }
+          />
+        ) : null}
+        {currentUser ? (
+          <StatusBadge label={`${currentUser.username}`} tone="neutral" />
+        ) : null}
+        {onLogout ? (
           <button
-            className="rounded-full border border-slate-200 px-3 py-1 text-xs font-medium text-slate-600 transition hover:border-cyan-300 hover:text-cyan-700"
-            onClick={onExitDemo}
+            className="rounded-full border border-slate-200 px-3 py-1 text-xs font-medium text-slate-600 transition hover:border-rose-300 hover:text-rose-600"
+            onClick={onLogout}
             type="button"
-            title="返回欢迎页"
+            title="退出登录并返回登录页"
           >
-            退出演示
+            退出登录
           </button>
         ) : null}
       </div>
