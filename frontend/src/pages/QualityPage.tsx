@@ -3,7 +3,9 @@ import { analysisApi } from "../api/analysisApi";
 import { EmptyState } from "../components/common/EmptyState";
 import { LoadingState } from "../components/common/LoadingState";
 import { MetricCard } from "../components/common/MetricCard";
+import { ScoreRing } from "../components/common/ScoreRing";
 import { StatusBadge } from "../components/common/StatusBadge";
+import { getCoverageFieldLabel } from "../utils/labels";
 import type { AgentTrace, QualityResult } from "../types/analysis";
 
 type QualityPageProps = {
@@ -275,23 +277,23 @@ function CheckList({
 
 function getCoverageItems(qualityRecord: Record<string, unknown>): CoverageItem[] {
   const missingDimensions = asList(qualityRecord.missing_dimensions).map((item) => ({
-    label: `missing_dimensions: ${item}`,
+    label: `${getCoverageFieldLabel("missing_dimensions")}：${item}`,
     tone: "warning" as const,
   }));
   const missingPlatforms = asList(qualityRecord.missing_platforms).map((item) => ({
-    label: `missing_platforms: ${item}`,
+    label: `${getCoverageFieldLabel("missing_platforms")}：${item}`,
     tone: "warning" as const,
   }));
   const missingEvidence = asList(qualityRecord.missing_evidence).map((item) => ({
-    label: `missing_evidence: ${item}`,
+    label: `${getCoverageFieldLabel("missing_evidence")}：${item}`,
     tone: "warning" as const,
   }));
   const coverageGaps = asList(qualityRecord.coverage_gaps).map((item) => ({
-    label: `coverage_gaps: ${item}`,
+    label: `${getCoverageFieldLabel("coverage_gaps")}：${item}`,
     tone: "warning" as const,
   }));
   const highRiskFlags = asList(qualityRecord.high_risk_flags).map((item) => ({
-    label: `high_risk_flags: ${item}`,
+    label: `${getCoverageFieldLabel("high_risk_flags")}：${item}`,
     tone: "danger" as const,
   }));
   const riskFlags: CoverageItem[] = Array.isArray(qualityRecord.risk_flags)
@@ -304,7 +306,7 @@ function getCoverageItems(qualityRecord: Record<string, unknown>): CoverageItem[
           }
 
           return {
-            label: `risk_flags: ${label}`,
+            label: `${getCoverageFieldLabel("risk_flags")}：${label}`,
             tone:
               normalizeStatus(record.severity) === "high"
                 ? ("danger" as const)
@@ -313,7 +315,7 @@ function getCoverageItems(qualityRecord: Record<string, unknown>): CoverageItem[
         })
         .filter((item): item is CoverageItem => item !== null)
     : asList(qualityRecord.risk_flags).map((item) => ({
-        label: `risk_flags: ${item}`,
+        label: `${getCoverageFieldLabel("risk_flags")}：${item}`,
         tone: "warning" as const,
       }));
 
@@ -620,6 +622,61 @@ export function QualityPage({
               </div>
             </section>
 
+            <section className="rounded-lg border border-slate-800 bg-slate-950/70 p-5">
+              <div className="grid gap-6 lg:grid-cols-[200px_minmax(0,1fr)] lg:items-center">
+                <div className="flex justify-center">
+                  <ScoreRing
+                    value={typeof qualityScore === "number" ? qualityScore : 0}
+                    label="质量得分"
+                    decimals={1}
+                    tone={
+                      typeof qualityScore === "number" && qualityScore >= 80
+                        ? "emerald"
+                        : typeof qualityScore === "number" && qualityScore >= 60
+                          ? "amber"
+                          : "rose"
+                    }
+                  />
+                </div>
+                <div>
+                  <div className="flex items-center justify-between gap-3">
+                    <p className="text-sm font-medium text-slate-200">
+                      自动重试进度
+                    </p>
+                    <span className="text-sm font-semibold text-slate-100">
+                      {typeof iterationCount === "number"
+                        ? `${iterationCount} / ${MAX_RETRY_COUNT}`
+                        : `0 / ${MAX_RETRY_COUNT}`}
+                    </span>
+                  </div>
+                  <div className="mt-3 h-3 overflow-hidden rounded-full bg-slate-200">
+                    <div
+                      className={`h-full rounded-full transition-all duration-700 ease-out ${
+                        (iterationCount ?? 0) >= MAX_RETRY_COUNT
+                          ? "bg-rose-400"
+                          : "bg-cyan-400"
+                      }`}
+                      style={{
+                        width: `${Math.min(
+                          100,
+                          ((iterationCount ?? 0) / MAX_RETRY_COUNT) * 100,
+                        )}%`,
+                      }}
+                    />
+                  </div>
+                  <p className="mt-3 text-sm text-slate-400">
+                    {iterationCount === undefined || iterationCount === 0
+                      ? "自动流程未触发重试。"
+                      : iterationCount >= MAX_RETRY_COUNT
+                        ? "已达到自动修复上限，需要人工审核。"
+                        : `已自动修复 ${iterationCount} 轮，仍有 ${
+                            MAX_RETRY_COUNT - iterationCount
+                          } 次自动修复机会。`}
+                  </p>
+                </div>
+              </div>
+            </section>
+
             <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-5">
               <MetricCard
                 label="质量得分"
@@ -670,7 +727,7 @@ export function QualityPage({
 
               {displayCheckEntries.length > 0 ? (
                 <div className="grid gap-3 md:grid-cols-2">
-                  {displayCheckEntries.map((item) => {
+                  {displayCheckEntries.map((item, index) => {
                     const tone =
                       item.status === "passed"
                         ? "success"
@@ -680,8 +737,9 @@ export function QualityPage({
 
                     return (
                       <div
-                        className="flex min-w-0 items-center justify-between gap-3 rounded-lg border border-slate-800 bg-slate-900/45 px-4 py-3"
+                        className="checklist-item flex min-w-0 items-center justify-between gap-3 rounded-lg border border-slate-800 bg-slate-900/45 px-4 py-3"
                         key={`${item.name}-${item.status}`}
+                        style={{ animationDelay: `${index * 80}ms` }}
                       >
                         <span className="min-w-0 break-words text-sm text-slate-200">
                           {item.name}
@@ -830,7 +888,7 @@ export function QualityPage({
                 <div>
                   <h3 className="text-lg font-semibold text-white">覆盖缺口</h3>
                   <p className="mt-1 text-sm text-slate-400">
-                    展示 missing_dimensions、missing_platforms、missing_evidence、coverage_gaps 与风险标记。
+                    展示缺失维度、缺失品牌、缺失证据、覆盖缺口与风险标记。
                   </p>
                 </div>
                 <StatusBadge
@@ -868,7 +926,7 @@ export function QualityPage({
                   <dt className="text-slate-500">执行耗时</dt>
                   <dd className="mt-1 text-slate-100">
                     {typeof qualityTrace?.duration_ms === "number"
-                      ? qualityTrace.duration_ms
+                      ? `${qualityTrace.duration_ms} ms`
                       : "未返回"}
                   </dd>
                 </div>
@@ -880,7 +938,7 @@ export function QualityPage({
                   </dd>
                 </div>
                 <div className="md:col-span-2">
-                  <dt className="text-slate-500">reason</dt>
+                  <dt className="text-slate-500">原因</dt>
                   <dd className="mt-1 break-words leading-6 text-slate-200">
                     {qualityTrace?.reject_reason ?? qualityTrace?.reason ?? "无"}
                   </dd>

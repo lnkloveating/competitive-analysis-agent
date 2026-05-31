@@ -2,8 +2,16 @@ import { useEffect, useMemo, useState } from "react";
 import { EmptyState } from "../components/common/EmptyState";
 import { LoadingState } from "../components/common/LoadingState";
 import { StatusBadge } from "../components/common/StatusBadge";
+import { Tooltip } from "../components/common/Tooltip";
 import { analysisApi } from "../api/analysisApi";
-import type { AgentTrace, AnalysisStatus, QualityResult } from "../types/analysis";
+import { getAgentRole } from "../utils/labels";
+import type {
+  AgentTrace,
+  AnalysisStatus,
+  ArtifactsSummary,
+  Metrics,
+  QualityResult,
+} from "../types/analysis";
 
 type WorkflowPageProps = {
   taskId?: string;
@@ -98,6 +106,15 @@ const statusTone: Record<AgentStatus, "neutral" | "success" | "warning" | "dange
   rejected: "warning",
   failed: "danger",
   required: "warning",
+};
+
+const statusLabel: Record<AgentStatus, string> = {
+  pending: "等待中",
+  running: "执行中",
+  success: "已完成",
+  rejected: "已打回",
+  failed: "执行失败",
+  required: "待人工审核",
 };
 
 const nodeClasses: Record<AgentStatus, string> = {
@@ -250,6 +267,7 @@ function AgentCard({
   isSelected,
   onSelect,
   status,
+  produce,
 }: {
   badges?: Array<{
     label: string;
@@ -260,54 +278,105 @@ function AgentCard({
   isSelected: boolean;
   onSelect: () => void;
   status: AgentStatus;
+  produce: string;
 }) {
   return (
-    <button
-      className={`workflow-node-enter min-h-32 w-full rounded-lg border p-4 text-left transition duration-200 hover:-translate-y-0.5 hover:border-cyan-300/70 ${nodeClasses[status]} ${
-        isSelected ? "ring-2 ring-cyan-300/60" : ""
-      } ${status === "running" ? "workflow-node-pulse" : ""}`}
-      onClick={onSelect}
-      style={{ animationDelay: `${index * 90}ms` }}
-      type="button"
-    >
-      <div className="flex items-start justify-between gap-3">
-        <div>
-          <p className="text-xs uppercase tracking-[0.18em] text-slate-500">
-            Step {String(index + 1).padStart(2, "0")}
-          </p>
-          <h3 className="mt-2 text-base font-semibold text-white">{agent.label}</h3>
-          <p className="mt-1 text-xs text-slate-400">{agent.subtitle}</p>
-        </div>
-        <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full border border-white/15 bg-slate-950/70 text-sm font-bold">
-          {status === "running" ? (
-            <span className="h-2.5 w-2.5 rounded-full bg-cyan-300 shadow-[0_0_16px_rgba(103,232,249,0.9)]" />
-          ) : (
-            statusIcon(status)
-          )}
-        </span>
-      </div>
-      <div className="mt-4">
-        <StatusBadge label={status} tone={statusTone[status]} />
-        {badges.length > 0 ? (
-          <span className="ml-2 inline-flex flex-wrap gap-2">
-            {badges.map((badge) => (
-              <StatusBadge
-                key={badge.label}
-                label={badge.label}
-                tone={badge.tone ?? "neutral"}
-              />
-            ))}
+    <Tooltip
+      className="block w-full"
+      width={250}
+      content={
+        <span className="space-y-1">
+          <span className="block text-sm font-semibold text-slate-800">
+            {agent.name}
           </span>
-        ) : null}
-      </div>
-    </button>
+          <span className="block">
+            <span className="text-slate-400">作用：</span>
+            {getAgentRole(agent.name)}
+          </span>
+          <span className="block">
+            <span className="text-slate-400">本次产出：</span>
+            {produce}
+          </span>
+          <span className="block">
+            <span className="text-slate-400">状态：</span>
+            {statusLabel[status]}
+          </span>
+        </span>
+      }
+    >
+      <button
+        className={`workflow-node-enter min-h-32 w-full rounded-lg border p-4 text-left transition duration-200 hover:-translate-y-0.5 hover:border-cyan-300/70 ${nodeClasses[status]} ${
+          isSelected ? "ring-2 ring-cyan-300/60" : ""
+        } ${status === "running" ? "workflow-node-pulse" : ""}`}
+        onClick={onSelect}
+        style={{ animationDelay: `${index * 90}ms` }}
+        type="button"
+      >
+        <div className="flex items-start justify-between gap-3">
+          <div>
+            <p className="text-xs uppercase tracking-[0.18em] text-slate-500">
+              Step {String(index + 1).padStart(2, "0")}
+            </p>
+            <h3 className="mt-2 text-base font-semibold text-white">{agent.label}</h3>
+            <p className="mt-1 text-xs text-slate-400">{agent.subtitle}</p>
+          </div>
+          <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full border border-white/15 bg-slate-950/70 text-sm font-bold">
+            {status === "running" ? (
+              <span className="h-2.5 w-2.5 rounded-full bg-cyan-300 shadow-[0_0_16px_rgba(103,232,249,0.9)]" />
+            ) : (
+              statusIcon(status)
+            )}
+          </span>
+        </div>
+        <div className="mt-4">
+          <StatusBadge label={statusLabel[status]} tone={statusTone[status]} />
+          {badges.length > 0 ? (
+            <span className="ml-2 inline-flex flex-wrap gap-2">
+              {badges.map((badge) => (
+                <StatusBadge
+                  key={badge.label}
+                  label={badge.label}
+                  tone={badge.tone ?? "neutral"}
+                />
+              ))}
+            </span>
+          ) : null}
+        </div>
+      </button>
+    </Tooltip>
   );
 }
 
-function FlowConnector() {
+type FlowTone = "pending" | "success" | "running" | "reject" | "failed";
+
+const flowLineClasses: Record<FlowTone, string> = {
+  pending: "workflow-flow-line--pending",
+  success: "workflow-flow-line--success",
+  running: "workflow-flow-line",
+  reject: "workflow-flow-line--reject",
+  failed: "workflow-flow-line--failed",
+};
+
+function flowToneFromStatus(status: AgentStatus): FlowTone {
+  if (status === "success") {
+    return "success";
+  }
+  if (status === "running") {
+    return "running";
+  }
+  if (status === "rejected" || status === "required") {
+    return "reject";
+  }
+  if (status === "failed") {
+    return "failed";
+  }
+  return "pending";
+}
+
+function FlowConnector({ tone = "pending" }: { tone?: FlowTone }) {
   return (
     <div className="flex w-12 shrink-0 items-center justify-center">
-      <span className="workflow-flow-line h-px w-full min-w-10" />
+      <span className={`h-0.5 w-full min-w-10 rounded-full ${flowLineClasses[tone]}`} />
     </div>
   );
 }
@@ -362,6 +431,8 @@ export function WorkflowPage({
   const [status, setStatus] = useState<AnalysisStatus | null>(null);
   const [traceLog, setTraceLog] = useState<WorkflowTrace[]>([]);
   const [qualityPayload, setQualityPayload] = useState<QualityPayload | null>(null);
+  const [artifacts, setArtifacts] = useState<ArtifactsSummary | null>(null);
+  const [metrics, setMetrics] = useState<Metrics | null>(null);
   const [selectedAgentName, setSelectedAgentName] = useState("ResearchAgent");
   const [isInitialLoading, setIsInitialLoading] = useState(false);
   const [isRefreshing, setIsRefreshing] = useState(false);
@@ -377,6 +448,8 @@ export function WorkflowPage({
       setStatus(null);
       setTraceLog([]);
       setQualityPayload(null);
+      setArtifacts(null);
+      setMetrics(null);
       setError(null);
       setLastUpdated(null);
       return;
@@ -395,11 +468,14 @@ export function WorkflowPage({
       inFlight = true;
       setIsRefreshing(true);
 
-      const [statusResult, traceResult, qualityResult] = await Promise.allSettled([
-        analysisApi.getStatus(activeTaskId),
-        analysisApi.getTrace(activeTaskId),
-        analysisApi.getQuality(activeTaskId),
-      ]);
+      const [statusResult, traceResult, qualityResult, artifactsResult, metricsResult] =
+        await Promise.allSettled([
+          analysisApi.getStatus(activeTaskId),
+          analysisApi.getTrace(activeTaskId),
+          analysisApi.getQuality(activeTaskId),
+          analysisApi.getArtifacts(activeTaskId),
+          analysisApi.getMetrics(activeTaskId),
+        ]);
 
       if (cancelled) {
         inFlight = false;
@@ -426,6 +502,14 @@ export function WorkflowPage({
         setQualityPayload(qualityResult.value);
       } else {
         failedEndpoints.push("quality");
+      }
+
+      if (artifactsResult.status === "fulfilled") {
+        setArtifacts(artifactsResult.value);
+      }
+
+      if (metricsResult.status === "fulfilled") {
+        setMetrics(metricsResult.value?.metrics ?? null);
       }
 
       setError(
@@ -569,6 +653,57 @@ export function WorkflowPage({
       : [];
   }
 
+  const qualityScore =
+    qualityResult?.score ??
+    qualityResult?.quality_score ??
+    metrics?.quality_score;
+
+  // 各 Agent 的"本次产出"摘要，尽量从已有 artifacts / metrics / quality / trace 读取。
+  function getAgentProduce(agentName: string): string {
+    const agentStatus = derivedStatuses[agentName] ?? "pending";
+    const outputSummary = latestTraceByAgent[agentName]?.output_summary;
+
+    switch (agentName) {
+      case "ResearchAgent":
+        return typeof artifacts?.raw_research_count === "number"
+          ? `${artifacts.raw_research_count} 条原始调研记录`
+          : outputSummary || "暂无";
+      case "EvidenceAgent": {
+        const count = artifacts?.evidence_count ?? metrics?.evidence_count;
+        return typeof count === "number" ? `${count} 条结构化证据` : outputSummary || "暂无";
+      }
+      case "ProductAgent":
+        return outputSummary ||
+          (artifacts?.has_product_matrix ? "产品分析矩阵已生成" : "暂无");
+      case "BusinessAgent":
+        return outputSummary ||
+          (artifacts?.has_business_matrix ? "商业分析矩阵已生成" : "暂无");
+      case "RiskAgent":
+        return typeof artifacts?.risk_count === "number"
+          ? `${artifacts.risk_count} 条风险`
+          : outputSummary || "暂无";
+      case "QualityAgent": {
+        const scoreText =
+          typeof qualityScore === "number" ? `质量得分 ${qualityScore}` : "尚未评分";
+        const resultText =
+          qualityApproved === true
+            ? "审查通过"
+            : isQualityRejected
+              ? "已打回"
+              : isHumanReviewRequired
+                ? "待人工审核"
+                : "待审查";
+        return `${scoreText}｜${resultText}`;
+      }
+      case "StrategyAgent":
+        return artifacts?.has_final_report ? "最终报告已生成" : outputSummary || "暂无";
+      case humanReviewNode.name:
+        return "等待人工复核";
+      default:
+        return outputSummary || "暂无";
+    }
+  }
+
   if (!taskId) {
     return (
       <section className="mx-auto max-w-6xl">
@@ -650,9 +785,12 @@ export function WorkflowPage({
                   isSelected={selectedAgentName === agentNodes[0].name}
                   onSelect={() => setSelectedAgentName(agentNodes[0].name)}
                   status={derivedStatuses[agentNodes[0].name] ?? "pending"}
+                  produce={getAgentProduce(agentNodes[0].name)}
                 />
               </div>
-              <FlowConnector />
+              <FlowConnector
+                tone={flowToneFromStatus(derivedStatuses[agentNodes[0].name] ?? "pending")}
+              />
               <div className="w-[210px] shrink-0">
                 <AgentCard
                   agent={agentNodes[1]}
@@ -661,9 +799,12 @@ export function WorkflowPage({
                   isSelected={selectedAgentName === agentNodes[1].name}
                   onSelect={() => setSelectedAgentName(agentNodes[1].name)}
                   status={derivedStatuses[agentNodes[1].name] ?? "pending"}
+                  produce={getAgentProduce(agentNodes[1].name)}
                 />
               </div>
-              <FlowConnector />
+              <FlowConnector
+                tone={flowToneFromStatus(derivedStatuses[agentNodes[1].name] ?? "pending")}
+              />
               <div className="grid w-[230px] shrink-0 gap-3">
                 <AgentCard
                   agent={agentNodes[2]}
@@ -672,6 +813,7 @@ export function WorkflowPage({
                   isSelected={selectedAgentName === agentNodes[2].name}
                   onSelect={() => setSelectedAgentName(agentNodes[2].name)}
                   status={derivedStatuses[agentNodes[2].name] ?? "pending"}
+                  produce={getAgentProduce(agentNodes[2].name)}
                 />
                 <AgentCard
                   agent={agentNodes[3]}
@@ -680,9 +822,12 @@ export function WorkflowPage({
                   isSelected={selectedAgentName === agentNodes[3].name}
                   onSelect={() => setSelectedAgentName(agentNodes[3].name)}
                   status={derivedStatuses[agentNodes[3].name] ?? "pending"}
+                  produce={getAgentProduce(agentNodes[3].name)}
                 />
               </div>
-              <FlowConnector />
+              <FlowConnector
+                tone={flowToneFromStatus(derivedStatuses[agentNodes[3].name] ?? "pending")}
+              />
               <div className="w-[210px] shrink-0">
                 <AgentCard
                   agent={agentNodes[4]}
@@ -691,9 +836,12 @@ export function WorkflowPage({
                   isSelected={selectedAgentName === agentNodes[4].name}
                   onSelect={() => setSelectedAgentName(agentNodes[4].name)}
                   status={derivedStatuses[agentNodes[4].name] ?? "pending"}
+                  produce={getAgentProduce(agentNodes[4].name)}
                 />
               </div>
-              <FlowConnector />
+              <FlowConnector
+                tone={flowToneFromStatus(derivedStatuses[agentNodes[4].name] ?? "pending")}
+              />
               <div className="w-[210px] shrink-0">
                 <AgentCard
                   agent={agentNodes[5]}
@@ -702,11 +850,16 @@ export function WorkflowPage({
                   isSelected={selectedAgentName === agentNodes[5].name}
                   onSelect={() => setSelectedAgentName(agentNodes[5].name)}
                   status={derivedStatuses[agentNodes[5].name] ?? "pending"}
+                  produce={getAgentProduce(agentNodes[5].name)}
                 />
               </div>
               {isHumanReviewRequired ? (
                 <>
-                  <FlowConnector />
+                  <FlowConnector
+                    tone={flowToneFromStatus(
+                      derivedStatuses[agentNodes[5].name] ?? "pending",
+                    )}
+                  />
                   <div className="w-[210px] shrink-0">
                     <AgentCard
                       agent={humanReviewNode}
@@ -715,11 +868,18 @@ export function WorkflowPage({
                       isSelected={selectedAgentName === humanReviewNode.name}
                       onSelect={() => setSelectedAgentName(humanReviewNode.name)}
                       status="required"
+                      produce={getAgentProduce(humanReviewNode.name)}
                     />
                   </div>
                 </>
               ) : null}
-              <FlowConnector />
+              <FlowConnector
+                tone={flowToneFromStatus(
+                  isHumanReviewRequired
+                    ? "required"
+                    : derivedStatuses[agentNodes[5].name] ?? "pending",
+                )}
+              />
               <div className="w-[210px] shrink-0">
                 <AgentCard
                   agent={agentNodes[6]}
@@ -728,6 +888,7 @@ export function WorkflowPage({
                   isSelected={selectedAgentName === agentNodes[6].name}
                   onSelect={() => setSelectedAgentName(agentNodes[6].name)}
                   status={derivedStatuses[agentNodes[6].name] ?? "pending"}
+                  produce={getAgentProduce(agentNodes[6].name)}
                 />
               </div>
             </div>
@@ -792,14 +953,29 @@ export function WorkflowPage({
                   {selectedAgent.name}
                 </h3>
               </div>
-              <StatusBadge label={selectedStatus} tone={statusTone[selectedStatus]} />
+              <StatusBadge
+                label={statusLabel[selectedStatus]}
+                tone={statusTone[selectedStatus]}
+              />
             </div>
 
             <dl className="mt-5 space-y-4 text-sm">
               <div>
+                <dt className="text-slate-500">作用</dt>
+                <dd className="mt-1 break-words text-slate-100">
+                  {getAgentRole(selectedAgent.name)}
+                </dd>
+              </div>
+              <div>
                 <dt className="text-slate-500">最新执行状态</dt>
                 <dd className="mt-1 break-words text-slate-100">
-                  {selectedTrace?.status ?? selectedStatus}
+                  {statusLabel[selectedStatus]}
+                </dd>
+              </div>
+              <div>
+                <dt className="text-slate-500">本次产出</dt>
+                <dd className="mt-1 break-words text-slate-100">
+                  {getAgentProduce(selectedAgent.name)}
                 </dd>
               </div>
               <div>
@@ -838,7 +1014,7 @@ export function WorkflowPage({
                 <dt className="text-slate-500">执行耗时</dt>
                 <dd className="mt-1 text-slate-100">
                   {typeof selectedTrace?.duration_ms === "number"
-                    ? selectedTrace.duration_ms
+                    ? `${selectedTrace.duration_ms} ms`
                     : "未返回"}
                 </dd>
               </div>

@@ -247,22 +247,56 @@ export function HomePage({
 
   return (
     <section className="mx-auto max-w-[1280px] space-y-6">
-      <div className="relative overflow-hidden rounded-2xl border border-white/10 bg-slate-950/70 px-6 py-8 shadow-[0_24px_80px_rgba(2,6,23,0.32)] md:px-8">
+      <div className="relative overflow-hidden rounded-2xl border border-white/10 bg-slate-950/70 px-6 py-10 shadow-[0_24px_80px_rgba(2,6,23,0.32)] md:px-8">
+        {/* 轻量动态背景：渐变光斑 + 漂浮的 Agent 节点 */}
+        <div className="pointer-events-none absolute inset-0 overflow-hidden" aria-hidden>
+          <div className="hero-blob absolute -left-10 -top-16 h-56 w-56 rounded-full bg-cyan-300/20 blur-3xl" />
+          <div className="hero-blob absolute right-0 top-10 h-64 w-64 rounded-full bg-violet-300/20 blur-3xl" style={{ animationDelay: "2s" }} />
+          {["调研", "证据", "结论", "质检", "策略"].map((node, index) => (
+            <span
+              key={node}
+              className="hero-float absolute hidden rounded-full border border-cyan-300/30 bg-white/70 px-3 py-1 text-xs font-medium text-cyan-700 shadow-sm md:inline-block"
+              style={{
+                top: `${18 + index * 14}%`,
+                right: `${6 + (index % 3) * 12}%`,
+                animationDelay: `${index * 0.6}s`,
+              }}
+            >
+              {node}
+            </span>
+          ))}
+        </div>
         <div className="absolute inset-x-0 top-0 h-px bg-gradient-to-r from-transparent via-cyan-300/70 to-transparent" />
-        <div className="max-w-4xl">
+        <div className="relative max-w-4xl">
           <p className="text-sm font-semibold text-cyan-300">
             Multi-Agent Competitive Intelligence
           </p>
-          <h2 className="mt-3 text-3xl font-semibold tracking-normal text-white md:text-4xl">
-            AI 竞品分析 Agent 控制台
+          <h2 className="mt-3 text-4xl font-semibold tracking-normal text-white md:text-5xl">
+            AI 竞品情报中枢
           </h2>
           <p className="mt-4 max-w-3xl text-sm leading-7 text-slate-300 md:text-base">
-            从公开信息到可追溯竞品报告的多 Agent 自动化分析平台，覆盖调研、证据抽取、结论追踪、质量审查与报告生成。
+            多 Agent 协同完成公开调研、证据抽取、结论追踪、质量审查与策略报告生成。
           </p>
+          <div className="mt-7 flex flex-wrap gap-3">
+            <button
+              className="rounded-lg bg-cyan-300 px-5 py-3 text-sm font-semibold text-slate-950 shadow-[0_0_28px_rgba(34,211,238,0.24)] transition hover:-translate-y-0.5 hover:bg-cyan-200"
+              onClick={handleEnterConfig}
+              type="button"
+            >
+              开始分析
+            </button>
+            <button
+              className="rounded-lg border border-cyan-300/40 bg-white/60 px-5 py-3 text-sm font-semibold text-cyan-700 transition hover:-translate-y-0.5 hover:border-cyan-400"
+              onClick={() => onNavigate("workflow")}
+              type="button"
+            >
+              查看 Agent 工作流
+            </button>
+          </div>
         </div>
-        <div className="mt-6 flex flex-wrap gap-2">
+        <div className="relative mt-6 flex flex-wrap gap-2">
           <StatusBadge
-            label={isLoading ? "正在读取分析场景" : "/api/industries 已连接"}
+            label={isLoading ? "正在读取分析场景" : "分析场景已连接"}
             tone={isLoading ? "warning" : error ? "danger" : "success"}
           />
           <StatusBadge
@@ -276,13 +310,50 @@ export function HomePage({
         </div>
       </div>
 
+      {/* 能力卡片 */}
+      <div className="grid gap-4 md:grid-cols-3">
+        {[
+          {
+            key: "evidence",
+            title: "证据可追溯",
+            desc: "每条结论都能反查到支撑证据与来源，证据链清晰可审查。",
+            tone: "border-emerald-300/40",
+          },
+          {
+            key: "workflow",
+            title: "多 Agent 协作",
+            desc: "调研、证据、产品、商业、风险、质检与策略 Agent 串联协作。",
+            tone: "border-cyan-300/40",
+          },
+          {
+            key: "quality",
+            title: "质量门控审查",
+            desc: "证据完整性、维度覆盖与结论支撑自动门控，未通过可打回重试。",
+            tone: "border-violet-300/40",
+          },
+        ].map((card) => (
+          <button
+            key={card.key}
+            className={`group rounded-2xl border ${card.tone} bg-slate-950/60 p-5 text-left shadow-sm transition hover:-translate-y-1 hover:shadow-lg`}
+            onClick={() => onNavigate(card.key)}
+            type="button"
+          >
+            <h3 className="text-base font-semibold text-white">{card.title}</h3>
+            <p className="mt-2 text-sm leading-6 text-slate-400">{card.desc}</p>
+            <span className="mt-4 inline-block text-sm font-medium text-cyan-700 transition group-hover:translate-x-1">
+              查看详情 →
+            </span>
+          </button>
+        ))}
+      </div>
+
       {isLoading ? <LoadingState label="正在加载分析场景..." /> : null}
 
       {!isLoading && error ? (
         <EmptyState
           title="分析场景加载失败"
           description={error}
-          action={<StatusBadge label="请确认 FastAPI 服务已启动" tone="danger" />}
+          action={<StatusBadge label="请确认系统服务已启动" tone="danger" />}
         />
       ) : null}
 

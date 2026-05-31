@@ -212,12 +212,15 @@ export function NewAnalysisPage({
         </div>
 
         <div className="mt-5 grid gap-3 md:grid-cols-3">
-          <div className="rounded-xl border border-white/10 bg-slate-900/45 p-4">
+          <div
+            className="rounded-xl border border-white/10 bg-slate-900/45 p-4"
+            title="POST /api/analysis/start"
+          >
             <p className="text-xs uppercase tracking-[0.16em] text-slate-500">
-              请求方法
+              执行流程
             </p>
-            <p className="mt-2 font-mono text-sm text-cyan-200">
-              POST /api/analysis/start
+            <p className="mt-2 text-sm font-medium text-cyan-700">
+              启动多 Agent 工作流
             </p>
           </div>
           <div className="rounded-xl border border-white/10 bg-slate-900/45 p-4">

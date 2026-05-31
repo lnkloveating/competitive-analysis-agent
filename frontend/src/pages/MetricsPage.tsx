@@ -1,10 +1,18 @@
 import { useEffect, useMemo, useState } from "react";
 import { EmptyState } from "../components/common/EmptyState";
+import { InteractiveBars, type BarDatum } from "../components/common/InteractiveBars";
 import { LoadingState } from "../components/common/LoadingState";
 import { MetricCard } from "../components/common/MetricCard";
 import { StatusBadge } from "../components/common/StatusBadge";
 import { analysisApi } from "../api/analysisApi";
-import type { ArtifactsSummary, Metrics, RiskFlag } from "../types/analysis";
+import { getCredibilityExplain, getCredibilityLabel } from "../utils/labels";
+import type {
+  ArtifactsSummary,
+  Claim,
+  EvidenceItem,
+  Metrics,
+  RiskFlag,
+} from "../types/analysis";
 
 type MetricsPageProps = {
   taskId?: string;
@@ -120,6 +128,8 @@ export function MetricsPage({
   const [metrics, setMetrics] = useState<Metrics | null>(null);
   const [artifacts, setArtifacts] = useState<ArtifactsSummary | null>(null);
   const [riskFlags, setRiskFlags] = useState<RiskFlag[]>([]);
+  const [evidenceList, setEvidenceList] = useState<EvidenceItem[]>([]);
+  const [claims, setClaims] = useState<Claim[]>([]);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -128,6 +138,8 @@ export function MetricsPage({
       setMetrics(null);
       setArtifacts(null);
       setRiskFlags([]);
+      setEvidenceList([]);
+      setClaims([]);
       setError(null);
       return;
     }
@@ -140,25 +152,56 @@ export function MetricsPage({
       setError(null);
 
       try {
-        const [metricsResult, artifactsResult, risksResult] = await Promise.all([
-          analysisApi.getMetrics(activeTaskId),
-          analysisApi.getArtifacts(activeTaskId),
-          analysisApi.getRisks(activeTaskId),
-        ]);
+        const [metricsResult, artifactsResult, risksResult, evidenceResult, claimsResult] =
+          await Promise.allSettled([
+            analysisApi.getMetrics(activeTaskId),
+            analysisApi.getArtifacts(activeTaskId),
+            analysisApi.getRisks(activeTaskId),
+            analysisApi.getEvidence(activeTaskId),
+            analysisApi.getClaims(activeTaskId),
+          ]);
 
         if (cancelled) {
           return;
         }
 
-        setMetrics(metricsResult?.metrics ?? {});
-        setArtifacts(artifactsResult ?? null);
-        setRiskFlags(Array.isArray(risksResult?.risk_flags) ? risksResult.risk_flags : []);
+        if (metricsResult.status === "fulfilled") {
+          setMetrics(metricsResult.value?.metrics ?? {});
+        } else {
+          throw metricsResult.reason instanceof Error
+            ? metricsResult.reason
+            : new Error("指标数据加载失败。");
+        }
+
+        setArtifacts(
+          artifactsResult.status === "fulfilled" ? artifactsResult.value : null,
+        );
+        setRiskFlags(
+          risksResult.status === "fulfilled" &&
+            Array.isArray(risksResult.value?.risk_flags)
+            ? risksResult.value.risk_flags
+            : [],
+        );
+        setEvidenceList(
+          evidenceResult.status === "fulfilled" &&
+            Array.isArray(evidenceResult.value?.evidence_list)
+            ? evidenceResult.value.evidence_list
+            : [],
+        );
+        setClaims(
+          claimsResult.status === "fulfilled" &&
+            Array.isArray(claimsResult.value?.claims)
+            ? claimsResult.value.claims
+            : [],
+        );
       } catch (err) {
         if (!cancelled) {
           setError(err instanceof Error ? err.message : "指标数据加载失败。");
           setMetrics(null);
           setArtifacts(null);
           setRiskFlags([]);
+          setEvidenceList([]);
+          setClaims([]);
         }
       } finally {
         if (!cancelled) {
@@ -178,6 +221,84 @@ export function MetricsPage({
     () => Boolean(metrics && Object.keys(metrics).length > 0),
     [metrics],
   );
+
+  // 证据可信度分布（high / medium / low）。
+  const credibilityBars = useMemo<BarDatum[]>(() => {
+    const total = evidenceList.length;
+    const order: Array<{ key: string; tone: BarDatum["tone"] }> = [
+      { key: "high", tone: "emerald" },
+      { key: "medium", tone: "amber" },
+      { key: "low", tone: "rose" },
+    ];
+
+    return order.map(({ key, tone }) => {
+      const count = evidenceList.filter(
+        (item) => (item.credibility || "").toLowerCase() === key,
+      ).length;
+      const percent = total > 0 ? Math.round((count / total) * 100) : 0;
+
+      return {
+        key,
+        label: getCredibilityLabel(key),
+        value: count,
+        display: `${count} 条`,
+        tone,
+        tooltip: (
+          <span className="space-y-1">
+            <span className="block font-semibold text-slate-800">
+              {getCredibilityLabel(key)}
+            </span>
+            <span className="block">
+              数量：{count} 条 · 占比 {percent}%
+            </span>
+            <span className="block text-slate-500">{getCredibilityExplain(key)}</span>
+          </span>
+        ),
+      };
+    });
+  }, [evidenceList]);
+
+  // 结论类型分布（产品 / 商业 / 其他）。
+  const claimTypeBars = useMemo<BarDatum[]>(() => {
+    const counts = { PCL: 0, BCL: 0, Other: 0 };
+    claims.forEach((claim) => {
+      const id = claim.claim_id || "";
+      if (id.startsWith("PCL") || claim.generated_by === "ProductAgent") {
+        counts.PCL += 1;
+      } else if (id.startsWith("BCL") || claim.generated_by === "BusinessAgent") {
+        counts.BCL += 1;
+      } else {
+        counts.Other += 1;
+      }
+    });
+    const total = claims.length;
+
+    const defs: Array<{ key: keyof typeof counts; label: string; tone: BarDatum["tone"] }> = [
+      { key: "PCL", label: "产品结论 PCL", tone: "cyan" },
+      { key: "BCL", label: "商业结论 BCL", tone: "violet" },
+      { key: "Other", label: "其他结论", tone: "slate" },
+    ];
+
+    return defs.map(({ key, label, tone }) => {
+      const count = counts[key];
+      const percent = total > 0 ? Math.round((count / total) * 100) : 0;
+      return {
+        key,
+        label,
+        value: count,
+        display: `${count} 条`,
+        tone,
+        tooltip: (
+          <span className="space-y-1">
+            <span className="block font-semibold text-slate-800">{label}</span>
+            <span className="block">
+              数量：{count} 条 · 占比 {percent}%
+            </span>
+          </span>
+        ),
+      };
+    });
+  }, [claims]);
 
   if (!taskId) {
     return (
@@ -299,6 +420,39 @@ export function MetricsPage({
                   </div>
                 </div>
               </div>
+            </div>
+
+            <div className="grid gap-5 lg:grid-cols-2">
+              <section className="rounded-lg border border-slate-800 bg-slate-950/70 p-5">
+                <div className="flex items-center justify-between gap-3">
+                  <h3 className="text-lg font-semibold text-white">
+                    证据可信度分布
+                  </h3>
+                  <StatusBadge label={`共 ${evidenceList.length} 条`} tone="neutral" />
+                </div>
+                <p className="mt-1 text-sm text-slate-400">
+                  悬停每一行查看数量与占比。
+                </p>
+                <div className="mt-4">
+                  <InteractiveBars
+                    data={credibilityBars}
+                    emptyLabel="暂无证据数据。"
+                  />
+                </div>
+              </section>
+
+              <section className="rounded-lg border border-slate-800 bg-slate-950/70 p-5">
+                <div className="flex items-center justify-between gap-3">
+                  <h3 className="text-lg font-semibold text-white">结论类型分布</h3>
+                  <StatusBadge label={`共 ${claims.length} 条`} tone="neutral" />
+                </div>
+                <p className="mt-1 text-sm text-slate-400">
+                  产品结论、商业结论与其他结论的数量分布。
+                </p>
+                <div className="mt-4">
+                  <InteractiveBars data={claimTypeBars} emptyLabel="暂无结论数据。" />
+                </div>
+              </section>
             </div>
 
             <section className="rounded-lg border border-slate-800 bg-slate-950/70 p-5">

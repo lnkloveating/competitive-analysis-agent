@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { EmptyState } from "../components/common/EmptyState";
+import { InteractiveBars, type BarDatum } from "../components/common/InteractiveBars";
 import { LoadingState } from "../components/common/LoadingState";
 import { StatusBadge } from "../components/common/StatusBadge";
 import { analysisApi } from "../api/analysisApi";
@@ -618,6 +619,46 @@ export function ReportPage({
   const report = useMemo(() => normalizeReport(reportResponse), [reportResponse]);
   const executiveSummary = useMemo(() => normalizeExecutiveSummary(report), [report]);
   const ranking = useMemo(() => normalizeRanking(report), [report]);
+  const rankingBars = useMemo<BarDatum[]>(() => {
+    const palette: BarDatum["tone"][] = [
+      "cyan",
+      "violet",
+      "emerald",
+      "amber",
+      "rose",
+      "slate",
+    ];
+
+    return ranking.map((item, index) => {
+      const evidenceIds = item.supporting_evidence_ids ?? [];
+      const hasScore = typeof item.score === "number";
+
+      return {
+        key: `${item.platform}-${index}`,
+        label: `#${item.rank ?? index + 1} ${item.platform ?? "未知"}`,
+        value: hasScore ? (item.score as number) : 0,
+        display: hasScore ? (item.score as number).toFixed(2) : "未评分",
+        tone: palette[index % palette.length],
+        tooltip: (
+          <span className="space-y-1">
+            <span className="block font-semibold text-slate-800">
+              {item.platform ?? "未知竞品"}
+            </span>
+            <span className="block">
+              总分：{hasScore ? (item.score as number).toFixed(2) : "未评分"}
+            </span>
+            {item.summary ? (
+              <span className="block text-slate-500">{item.summary}</span>
+            ) : null}
+            <span className="block text-slate-400">
+              支撑证据：
+              {evidenceIds.length > 0 ? evidenceIds.join("、") : "暂无"}
+            </span>
+          </span>
+        ),
+      };
+    });
+  }, [ranking]);
   const swot = useMemo(() => normalizeSwot(report), [report]);
   const recommendations = useMemo(() => normalizeRecommendations(report), [report]);
   const risks = useMemo(() => normalizeRisks(report, riskFlags), [report, riskFlags]);
@@ -676,7 +717,7 @@ export function ReportPage({
         <StatusBadge label={reportGateState.title} tone={reportGateState.tone} />
       </div>
 
-      {isLoading ? <LoadingState label="正在从 FastAPI 加载最终报告..." /> : null}
+      {isLoading ? <LoadingState label="正在加载最终报告..." /> : null}
 
       {error ? (
         <div className="mb-5 rounded-md border border-rose-500/35 bg-rose-500/10 px-4 py-3 text-sm text-rose-100">
@@ -760,6 +801,14 @@ export function ReportPage({
                         竞品排名
                       </h3>
                       {ranking.length > 0 ? (
+                        <div className="mt-4 rounded-lg border border-slate-800 bg-slate-900/40 p-4">
+                          <InteractiveBars data={rankingBars} />
+                          <p className="mt-3 text-xs text-slate-500">
+                            排名依据来自当前结构化 Claim 与 Evidence；悬停查看竞品得分与支撑证据。
+                          </p>
+                        </div>
+                      ) : null}
+                      {ranking.length > 0 ? (
                         <div className="mt-4 space-y-3">
                           {ranking.map((item, index) => (
                             <article
@@ -834,7 +883,7 @@ export function ReportPage({
                               <div className="mt-4 grid gap-4 md:grid-cols-2">
                                 <div>
                                   <p className="mb-2 text-xs uppercase tracking-[0.16em] text-slate-500">
-                                    supporting_claim_ids
+                                    支撑 Claim
                                   </p>
                                   <IdTags
                                     ids={item.supporting_claim_ids ?? []}
@@ -870,7 +919,7 @@ export function ReportPage({
                         {swotKeys.map((key) => (
                           <div key={key}>
                             <p className="text-xs uppercase tracking-[0.16em] text-slate-500">
-                              {swotLabels[key]} / {key}
+                              {swotLabels[key]}
                             </p>
                             {swot[key]?.length > 0 ? (
                               <div className="mt-2 space-y-2">

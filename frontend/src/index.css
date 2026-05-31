@@ -135,12 +135,121 @@ textarea {
 .workflow-flow-line {
   background: linear-gradient(
     90deg,
-    rgba(51, 65, 85, 0.35),
-    rgba(8, 145, 178, 0.75),
-    rgba(51, 65, 85, 0.35)
+    rgba(148, 163, 184, 0.25),
+    rgba(8, 145, 178, 0.7),
+    rgba(148, 163, 184, 0.25)
   );
   background-size: 200% 100%;
   animation: workflowFlow 1.6s linear infinite;
+}
+
+/* 成功链路：青绿色流光 */
+.workflow-flow-line--success {
+  background: linear-gradient(
+    90deg,
+    rgba(148, 163, 184, 0.25),
+    rgba(16, 185, 129, 0.75),
+    rgba(148, 163, 184, 0.25)
+  );
+  background-size: 200% 100%;
+  animation: workflowFlow 1.6s linear infinite;
+}
+
+/* 打回链路：橙色反向流光 */
+.workflow-flow-line--reject {
+  background: linear-gradient(
+    90deg,
+    rgba(251, 191, 36, 0.25),
+    rgba(245, 158, 11, 0.85),
+    rgba(251, 191, 36, 0.25)
+  );
+  background-size: 200% 100%;
+  animation: workflowFlowReverse 1.4s linear infinite;
+}
+
+/* 失败链路：红色流光 */
+.workflow-flow-line--failed {
+  background: linear-gradient(
+    90deg,
+    rgba(244, 63, 94, 0.25),
+    rgba(244, 63, 94, 0.85),
+    rgba(244, 63, 94, 0.25)
+  );
+  background-size: 200% 100%;
+  animation: workflowFlow 1.4s linear infinite;
+}
+
+/* 未开始链路：静态淡灰 */
+.workflow-flow-line--pending {
+  background: rgba(148, 163, 184, 0.3);
+}
+
+@keyframes workflowFlowReverse {
+  from {
+    background-position: 200% 50%;
+  }
+
+  to {
+    background-position: 0% 50%;
+  }
+}
+
+@keyframes checklistItemEnter {
+  from {
+    opacity: 0;
+    transform: translateX(-6px);
+  }
+
+  to {
+    opacity: 1;
+    transform: translateX(0);
+  }
+}
+
+.checklist-item {
+  animation: checklistItemEnter 360ms ease both;
+}
+
+@keyframes heroFloat {
+  0%,
+  100% {
+    transform: translateY(0);
+  }
+
+  50% {
+    transform: translateY(-10px);
+  }
+}
+
+.hero-float {
+  animation: heroFloat 5s ease-in-out infinite;
+}
+
+@keyframes heroBlobDrift {
+  0%,
+  100% {
+    transform: translate(0, 0) scale(1);
+  }
+
+  50% {
+    transform: translate(14px, -12px) scale(1.06);
+  }
+}
+
+.hero-blob {
+  animation: heroBlobDrift 11s ease-in-out infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .workflow-flow-line,
+  .workflow-flow-line--success,
+  .workflow-flow-line--reject,
+  .workflow-flow-line--failed,
+  .hero-float,
+  .hero-blob,
+  .workflow-node-pulse {
+    animation: none !important;
+  }
 }
 
 /* Light presentation theme overrides for legacy dark utility classes. */
