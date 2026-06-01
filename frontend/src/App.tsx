@@ -268,6 +268,8 @@ export default function App() {
             displayTaskId={displayTaskId ?? undefined}
             taskId={taskId ?? undefined}
             demoStatusLabel={demoStatusLabel}
+            currentDemoKey={currentDemoKey}
+            visitedKeys={visitedKeys}
           />
         );
       case "new-analysis":
@@ -342,6 +344,8 @@ export default function App() {
             displayTaskId={displayTaskId ?? undefined}
             taskId={taskId ?? undefined}
             demoStatusLabel={demoStatusLabel}
+            currentDemoKey={currentDemoKey}
+            visitedKeys={visitedKeys}
           />
         );
     }
