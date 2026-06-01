@@ -5,8 +5,12 @@ import type { StartAnalysisRequest } from "../types/analysis";
 
 type NewAnalysisPageProps = {
   selectedIndustryKey?: string | null;
+  displayTaskId?: string;
   onTaskCreated: (taskId: string) => void;
   onNavigate: (key: string) => void;
+  autoDemoEnabled: boolean;
+  onToggleAutoDemo: (enabled: boolean) => void;
+  onStartAutoDemo: () => void;
 };
 
 const defaultCompetitors = ["罗技", "雷蛇", "海盗船"];
@@ -22,8 +26,12 @@ const defaultDimensions = [
 
 export function NewAnalysisPage({
   selectedIndustryKey,
+  displayTaskId,
   onTaskCreated,
   onNavigate,
+  autoDemoEnabled,
+  onToggleAutoDemo,
+  onStartAutoDemo,
 }: NewAnalysisPageProps) {
   const [targetPlatform, setTargetPlatform] = useState("罗技");
   const [targetUser, setTargetUser] = useState("产品经理");
@@ -58,20 +66,22 @@ export function NewAnalysisPage({
       const response = await analysisApi.startAnalysis(payload);
 
       if (!response?.task_id) {
-        throw new Error("Backend did not return task_id");
+        throw new Error("系统未返回任务编号");
       }
 
       setCreatedTaskId(response.task_id);
       onTaskCreated(response.task_id);
 
       window.setTimeout(() => {
-        onNavigate("workflow");
+        if (autoDemoEnabled) {
+          onStartAutoDemo();
+        } else {
+          onNavigate("workflow");
+        }
       }, 700);
     } catch (err) {
       setError(
-        err instanceof Error
-          ? err.message
-          : "Failed to initialize agent analysis",
+        err instanceof Error ? err.message : "分析任务创建失败，请稍后重试",
       );
     } finally {
       setIsStarting(false);
@@ -79,139 +89,233 @@ export function NewAnalysisPage({
   }
 
   return (
-    <section className="mx-auto max-w-6xl">
-      <div className="mb-6">
-        <p className="text-sm font-medium text-cyan-300">New Analysis</p>
-        <h2 className="mt-2 text-3xl font-semibold text-white">
-          Configure Agent Analysis
-        </h2>
-        <p className="mt-3 max-w-3xl text-sm leading-6 text-slate-400">
-          电竞鼠标 Demo 将使用真实 FastAPI 任务创建接口启动，多 Agent 工作流会在后端执行。
-        </p>
+    <section className="mx-auto max-w-[1280px] space-y-6">
+      <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+        <div>
+          <p className="text-sm font-medium text-cyan-300">新建分析</p>
+          <h2 className="mt-2 text-3xl font-semibold text-white">
+            配置 Agent 分析任务
+          </h2>
+          <p className="mt-3 max-w-3xl text-sm leading-6 text-slate-400">
+            使用当前系统任务创建接口启动多 Agent 工作流，系统将围绕电竞鼠标赛道完成证据采集、结论生成、质量审查与报告输出。
+          </p>
+        </div>
+        <div className="flex flex-wrap gap-2 lg:justify-end">
+          <StatusBadge label="任务创建接口已连接" tone="info" />
+          <StatusBadge label="系统任务创建已启用" tone="success" />
+          {displayTaskId ? (
+            <StatusBadge label={`当前任务：${displayTaskId}`} tone="neutral" />
+          ) : null}
+        </div>
       </div>
 
-      <div className="rounded-lg border border-cyan-300/25 bg-slate-950/80 p-6 shadow-[0_0_40px_rgba(34,211,238,0.12)]">
-        <div className="flex flex-col gap-4 border-b border-slate-800 pb-5 md:flex-row md:items-start md:justify-between">
+      <div className="grid gap-5 xl:grid-cols-[minmax(0,0.9fr)_minmax(0,1.1fr)]">
+        <section className="rounded-2xl border border-white/10 bg-slate-950/70 p-5 shadow-[0_24px_70px_rgba(2,6,23,0.24)]">
+          <div className="flex items-start justify-between gap-3 border-b border-white/10 pb-5">
+            <div>
+              <p className="text-sm font-medium text-cyan-300">当前分析范围</p>
+              <h3 className="mt-2 text-2xl font-semibold text-white">
+                电竞外设 / 电竞鼠标
+              </h3>
+            </div>
+            <StatusBadge label="电竞鼠标" tone="info" />
+          </div>
+
+          <dl className="mt-5 grid gap-3">
+            <div className="rounded-xl border border-white/10 bg-slate-900/45 p-4">
+              <dt className="text-xs uppercase tracking-[0.16em] text-slate-500">
+                行业
+              </dt>
+              <dd className="mt-2 text-sm font-medium text-slate-100">
+                电竞外设
+              </dd>
+            </div>
+            <div className="rounded-xl border border-white/10 bg-slate-900/45 p-4">
+              <dt className="text-xs uppercase tracking-[0.16em] text-slate-500">
+                品类
+              </dt>
+              <dd className="mt-2 text-sm font-medium text-slate-100">
+                电竞鼠标
+              </dd>
+            </div>
+            <div className="rounded-xl border border-white/10 bg-slate-900/45 p-4">
+              <dt className="text-xs uppercase tracking-[0.16em] text-slate-500">
+                分析对象
+              </dt>
+              <dd className="mt-3 flex flex-wrap gap-2">
+                {defaultCompetitors.map((competitor) => (
+                  <StatusBadge key={competitor} label={competitor} tone="neutral" />
+                ))}
+              </dd>
+            </div>
+          </dl>
+        </section>
+
+        <section className="rounded-2xl border border-white/10 bg-slate-950/70 p-5 shadow-[0_24px_70px_rgba(2,6,23,0.24)]">
           <div>
-            <p className="text-sm text-slate-400">当前行业</p>
-            <h3 className="mt-1 text-2xl font-semibold text-white">
-              电竞外设 / 电竞鼠标
+            <p className="text-sm font-medium text-cyan-300">分析配置</p>
+            <h3 className="mt-2 text-2xl font-semibold text-white">
+              定义目标品牌与使用场景
             </h3>
           </div>
-          <div className="flex flex-wrap gap-2">
-            <StatusBadge label={industryKey} tone="info" />
-            <StatusBadge label="Backend Start Enabled" tone="success" />
-          </div>
-        </div>
 
-        <div className="mt-6 grid gap-5 lg:grid-cols-[0.9fr_1.1fr]">
-          <div className="space-y-4">
-            <label className="block rounded-lg border border-slate-800 bg-slate-900/55 p-4">
+          <div className="mt-5 grid gap-4 md:grid-cols-3">
+            <label className="block rounded-xl border border-white/10 bg-slate-900/45 p-4">
               <span className="text-sm font-medium text-slate-300">
-                目标平台
+                目标品牌 / 重点品牌
               </span>
               <input
-                className="mt-3 w-full rounded-md border border-slate-700 bg-slate-950 px-3 py-2 text-sm text-slate-100 outline-none transition focus:border-cyan-300"
+                className="mt-3 w-full rounded-lg border border-white/10 bg-slate-950/80 px-3 py-2 text-sm text-slate-100 outline-none transition focus:border-cyan-300/70"
                 onChange={(event) => setTargetPlatform(event.target.value)}
                 value={targetPlatform}
               />
             </label>
 
-            <label className="block rounded-lg border border-slate-800 bg-slate-900/55 p-4">
+            <label className="block rounded-xl border border-white/10 bg-slate-900/45 p-4">
               <span className="text-sm font-medium text-slate-300">
                 目标用户
               </span>
               <input
-                className="mt-3 w-full rounded-md border border-slate-700 bg-slate-950 px-3 py-2 text-sm text-slate-100 outline-none transition focus:border-cyan-300"
+                className="mt-3 w-full rounded-lg border border-white/10 bg-slate-950/80 px-3 py-2 text-sm text-slate-100 outline-none transition focus:border-cyan-300/70"
                 onChange={(event) => setTargetUser(event.target.value)}
                 value={targetUser}
               />
             </label>
 
-            <label className="block rounded-lg border border-slate-800 bg-slate-900/55 p-4">
+            <label className="block rounded-xl border border-white/10 bg-slate-900/45 p-4">
               <span className="text-sm font-medium text-slate-300">
                 时间范围
               </span>
               <input
-                className="mt-3 w-full rounded-md border border-slate-700 bg-slate-950 px-3 py-2 text-sm text-slate-100 outline-none transition focus:border-cyan-300"
+                className="mt-3 w-full rounded-lg border border-white/10 bg-slate-950/80 px-3 py-2 text-sm text-slate-100 outline-none transition focus:border-cyan-300/70"
                 onChange={(event) => setTimeRange(event.target.value)}
                 value={timeRange}
               />
             </label>
           </div>
 
-          <div className="rounded-lg border border-slate-800 bg-slate-900/45 p-5">
-            <div>
-              <p className="text-sm font-medium text-slate-300">竞品</p>
-              <div className="mt-3 flex flex-wrap gap-2">
-                {defaultCompetitors.map((competitor) => (
-                  <span
-                    className="rounded-md border border-slate-700 bg-slate-950 px-3 py-2 text-sm text-slate-200"
-                    key={competitor}
-                  >
-                    {competitor}
-                  </span>
-                ))}
-              </div>
+          <div className="mt-5 rounded-xl border border-white/10 bg-slate-900/35 p-4">
+            <p className="text-sm font-medium text-slate-300">分析维度</p>
+            <div className="mt-3 flex flex-wrap gap-2">
+              {defaultDimensions.map((dimension) => (
+                <span
+                  className="rounded-lg border border-cyan-300/20 bg-cyan-300/10 px-3 py-2 text-sm text-cyan-100"
+                  key={dimension}
+                >
+                  {dimension}
+                </span>
+              ))}
             </div>
+          </div>
+        </section>
+      </div>
 
-            <div className="mt-6">
-              <p className="text-sm font-medium text-slate-300">分析维度</p>
-              <div className="mt-3 flex flex-wrap gap-2">
-                {defaultDimensions.map((dimension) => (
-                  <span
-                    className="rounded-md border border-cyan-300/25 bg-cyan-300/10 px-3 py-2 text-sm text-cyan-100"
-                    key={dimension}
-                  >
-                    {dimension}
-                  </span>
-                ))}
-              </div>
-            </div>
+      <section className="rounded-2xl border border-white/10 bg-slate-950/70 p-5 shadow-[0_24px_70px_rgba(2,6,23,0.24)]">
+        <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+          <div>
+            <p className="text-sm font-medium text-cyan-300">请求预览</p>
+            <h3 className="mt-2 text-xl font-semibold text-white">
+              任务创建参数
+            </h3>
+          </div>
+          <StatusBadge label="保持现有系统接口" tone="success" />
+        </div>
 
-            <div className="mt-6 rounded-lg border border-slate-800 bg-slate-950/70 p-4">
-              <p className="text-xs uppercase tracking-[0.18em] text-slate-500">
-                Request Payload
-              </p>
-              <p className="mt-2 text-sm text-slate-300">
-                POST /api/analysis/start
-              </p>
-              <p className="mt-1 text-sm text-cyan-200">
-                industry_key = {payload.industry_key}
-              </p>
-            </div>
+        <div className="mt-5 grid gap-3 md:grid-cols-3">
+          <div
+            className="rounded-xl border border-white/10 bg-slate-900/45 p-4"
+            title="POST /api/analysis/start"
+          >
+            <p className="text-xs uppercase tracking-[0.16em] text-slate-500">
+              执行流程
+            </p>
+            <p className="mt-2 text-sm font-medium text-cyan-700">
+              启动多 Agent 工作流
+            </p>
+          </div>
+          <div className="rounded-xl border border-white/10 bg-slate-900/45 p-4">
+            <p className="text-xs uppercase tracking-[0.16em] text-slate-500">
+              分析场景
+            </p>
+            <p className="mt-2 text-sm font-medium text-cyan-700">
+              {payload.industry_key}
+            </p>
+          </div>
+          <div className="rounded-xl border border-white/10 bg-slate-900/45 p-4">
+            <p className="text-xs uppercase tracking-[0.16em] text-slate-500">
+              分析维度
+            </p>
+            <p className="mt-2 text-sm text-slate-200">
+              {payload.focus_dimensions.length} 项
+            </p>
           </div>
         </div>
 
         {isStarting ? (
-          <p className="mt-5 rounded-md border border-cyan-300/25 bg-cyan-300/10 px-4 py-3 text-sm text-cyan-100">
-            Initializing digital research team...
+          <p className="mt-5 rounded-lg border border-cyan-300/25 bg-cyan-300/10 px-4 py-3 text-sm text-cyan-100">
+            正在创建分析任务并启动 Agent 工作流...
           </p>
         ) : null}
 
         {createdTaskId ? (
-          <p className="mt-5 rounded-md border border-emerald-400/30 bg-emerald-400/10 px-4 py-3 text-sm text-emerald-100">
-            Task created: {createdTaskId}
+          <p className="mt-5 rounded-lg border border-emerald-400/30 bg-emerald-400/10 px-4 py-3 text-sm text-emerald-100">
+            任务已创建：{displayTaskId || "新任务"}
           </p>
         ) : null}
 
         {error ? (
-          <p className="mt-5 rounded-md border border-rose-500/35 bg-rose-500/10 px-4 py-3 text-sm text-rose-100">
+          <p className="mt-5 rounded-lg border border-rose-500/35 bg-rose-500/10 px-4 py-3 text-sm text-rose-100">
             {error}
           </p>
         ) : null}
 
-        <div className="mt-7">
+        {/* 自动演示流程开关 */}
+        <div className="mt-6 flex flex-col gap-3 rounded-xl border border-cyan-300/25 bg-cyan-300/5 p-4 sm:flex-row sm:items-center sm:justify-between">
+          <div className="min-w-0">
+            <div className="flex items-center gap-2">
+              <p className="text-sm font-semibold text-slate-100">自动演示流程</p>
+              <span
+                className={`rounded-full px-2 py-0.5 text-xs font-medium ${
+                  autoDemoEnabled
+                    ? "bg-cyan-300/20 text-cyan-700"
+                    : "bg-slate-200 text-slate-500"
+                }`}
+              >
+                {autoDemoEnabled ? "已开启" : "已关闭"}
+              </span>
+            </div>
+            <p className="mt-1 text-xs leading-5 text-slate-400">
+              开启后，系统将在任务创建后自动按 Agent 工作流、证据中心、结论追踪、质量审查、最终报告和指标看板依次展示。
+            </p>
+          </div>
           <button
-            className="rounded-md bg-cyan-300 px-5 py-3 text-sm font-semibold text-slate-950 shadow-[0_0_28px_rgba(34,211,238,0.28)] transition hover:bg-cyan-200 disabled:cursor-not-allowed disabled:bg-slate-700 disabled:text-slate-400 disabled:shadow-none"
+            aria-pressed={autoDemoEnabled}
+            className={`relative inline-flex h-7 w-12 shrink-0 items-center rounded-full transition ${
+              autoDemoEnabled ? "bg-cyan-400" : "bg-slate-300"
+            }`}
+            onClick={() => onToggleAutoDemo(!autoDemoEnabled)}
+            role="switch"
+            type="button"
+          >
+            <span
+              className={`inline-block h-5 w-5 transform rounded-full bg-white shadow transition ${
+                autoDemoEnabled ? "translate-x-6" : "translate-x-1"
+              }`}
+            />
+          </button>
+        </div>
+
+        <div className="mt-6 flex justify-end">
+          <button
+            className="rounded-lg bg-cyan-300 px-6 py-3 text-sm font-semibold text-slate-950 shadow-[0_0_28px_rgba(34,211,238,0.24)] transition hover:bg-cyan-200 disabled:cursor-not-allowed disabled:bg-slate-700 disabled:text-slate-400 disabled:shadow-none"
             disabled={isStarting}
             onClick={handleStartAnalysis}
             type="button"
           >
-            {isStarting ? "Starting..." : "Start Agent Analysis"}
+            {isStarting ? "启动中..." : "开始分析"}
           </button>
         </div>
-      </div>
+      </section>
     </section>
   );
 }
