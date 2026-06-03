@@ -97,6 +97,17 @@ textarea {
   overflow: hidden;
 }
 
+/* 结果视图主滚动容器：点击侧栏导航时平滑滚动到对应 section。 */
+#app-main {
+  scroll-behavior: smooth;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  #app-main {
+    scroll-behavior: auto;
+  }
+}
+
 .app-background::before {
   animation: backgroundGridDrift 28s linear infinite;
   background-image:

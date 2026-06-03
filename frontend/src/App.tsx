@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { AppLayout } from "./components/layout/AppLayout";
 import type { NavItem } from "./components/layout/Sidebar";
 import { demoSteps } from "./utils/demoSteps";
@@ -63,6 +63,34 @@ const navItems: Array<NavItem & { key: PageKey }> = [
   { key: "metrics", label: "指标看板" },
 ];
 
+// 分析结果阶段的页面：合并成一条连续滚动视图，侧栏作为锚点导航。
+const RESULT_KEYS = [
+  "workflow",
+  "evidence",
+  "claims",
+  "quality",
+  "report",
+  "metrics",
+] as const;
+
+function isResultKey(key: string): key is (typeof RESULT_KEYS)[number] {
+  return (RESULT_KEYS as readonly string[]).includes(key);
+}
+
+// 滚动到结果视图中的某个 section（平滑动画由 #app-main 的 CSS scroll-behavior 提供）。
+function scrollMainToSection(key: string) {
+  const main = document.getElementById("app-main");
+  const element = document.getElementById(`sec-${key}`);
+  if (!main || !element) {
+    return;
+  }
+  const target =
+    main.scrollTop +
+    (element.getBoundingClientRect().top - main.getBoundingClientRect().top) -
+    8;
+  main.scrollTop = Math.max(0, target);
+}
+
 function isPageKey(key: string): key is PageKey {
   return navItems.some((item) => item.key === key);
 }
@@ -88,6 +116,10 @@ export default function App() {
   const [authToken, setAuthToken] = useState<string | null>(getStoredToken);
   const [currentUser, setCurrentUser] = useState<AuthUser | null>(getStoredUser);
   const [activePage, setActivePage] = useState<PageKey>(getPageKeyFromHash);
+  // 点击侧栏进入结果视图后，待滚动到的目标 section。
+  const [pendingScrollKey, setPendingScrollKey] = useState<string | null>(null);
+  const activePageRef = useRef(activePage);
+  activePageRef.current = activePage;
   const [taskId, setTaskId] = useState<string | null>(getStoredTaskId);
   const [displayTaskId, setDisplayTaskId] = useState<string | null>(() =>
     getDisplayTaskId(getStoredTaskId()),
@@ -98,8 +130,8 @@ export default function App() {
     null,
   );
 
-  // 自动演示模式状态
-  const [autoDemoEnabled, setAutoDemoEnabled] = useState(true);
+  // 自动演示模式状态（默认关闭：创建任务后不自动逐步推进，改为手动浏览）
+  const [autoDemoEnabled, setAutoDemoEnabled] = useState(false);
   const [demoRunning, setDemoRunning] = useState(false);
   const [demoPaused, setDemoPaused] = useState(false);
   const [demoStepIndex, setDemoStepIndex] = useState(0);
@@ -200,8 +232,61 @@ export default function App() {
       if (typeof window !== "undefined" && window.location.hash !== `#${key}`) {
         window.history.pushState(null, "", `#${key}`);
       }
+
+      // 结果阶段的项：进入连续滚动视图，并滚动到对应 section。
+      if (isResultKey(key)) {
+        setPendingScrollKey(key);
+      }
     }
   }
+
+  // 进入/切换结果视图后，平滑滚动到点击的 section。
+  useEffect(() => {
+    if (!pendingScrollKey || !isResultKey(activePage)) {
+      return;
+    }
+    const targetKey = pendingScrollKey;
+    const timer = window.setTimeout(() => {
+      scrollMainToSection(targetKey);
+      setPendingScrollKey(null);
+    }, 60);
+    return () => window.clearTimeout(timer);
+  }, [pendingScrollKey, activePage]);
+
+  // 结果视图内的滚动联动：滚到哪个 section，侧栏就高亮哪个。
+  const inResultsView = isResultKey(activePage);
+  useEffect(() => {
+    if (!inResultsView) {
+      return;
+    }
+    const mainElement = document.getElementById("app-main");
+    if (!mainElement) {
+      return;
+    }
+    const container = mainElement;
+
+    function handleScroll() {
+      const mainTop = container.getBoundingClientRect().top;
+      let current: string = RESULT_KEYS[0];
+      for (const key of RESULT_KEYS) {
+        const element = document.getElementById(`sec-${key}`);
+        if (!element) {
+          continue;
+        }
+        // section 顶部滚到主区顶部附近（<=100px）即视为当前所在段。
+        if (element.getBoundingClientRect().top - mainTop <= 100) {
+          current = key;
+        }
+      }
+      if (current !== activePageRef.current && isPageKey(current)) {
+        setActivePage(current);
+      }
+    }
+
+    container.addEventListener("scroll", handleScroll, { passive: true });
+    handleScroll();
+    return () => container.removeEventListener("scroll", handleScroll);
+  }, [inResultsView]);
 
   function handleLogin(token: string, user: AuthUser) {
     setAuthToken(token);
@@ -255,100 +340,70 @@ export default function App() {
     }
   }
 
-  function renderPage() {
-    switch (activePage) {
-      case "overview":
-        return (
-          <HomePage
-            onNavigate={handleNavigate}
-            onSelectionChange={handleHomeSelection}
-            selectedCategory={selectedCategory}
-            selectedDomain={selectedDomain}
-            selectedIndustryKey={selectedIndustryKey}
-            displayTaskId={displayTaskId ?? undefined}
-            taskId={taskId ?? undefined}
-            demoStatusLabel={demoStatusLabel}
-            currentDemoKey={currentDemoKey}
-            visitedKeys={visitedKeys}
-          />
-        );
-      case "new-analysis":
-        return (
-          <NewAnalysisPage
-            displayTaskId={displayTaskId ?? undefined}
-            onNavigate={handleNavigate}
-            onTaskCreated={handleTaskCreated}
-            selectedIndustryKey={selectedIndustryKey}
-            autoDemoEnabled={autoDemoEnabled}
-            onToggleAutoDemo={setAutoDemoEnabled}
-            onStartAutoDemo={startAutoDemo}
-          />
-        );
-      case "workflow":
-        return (
-          <WorkflowPage
-            displayTaskId={displayTaskId ?? undefined}
-            taskId={taskId ?? undefined}
-            onNavigate={handleNavigate}
-            autoDemoActive={demoRunning && !demoPaused}
-          />
-        );
-      case "evidence":
-        return (
-          <EvidencePage
-            displayTaskId={displayTaskId ?? undefined}
-            taskId={taskId ?? undefined}
-            onNavigate={handleNavigate}
-          />
-        );
-      case "claims":
-        return (
-          <ClaimsPage
-            displayTaskId={displayTaskId ?? undefined}
-            taskId={taskId ?? undefined}
-            onNavigate={handleNavigate}
-          />
-        );
-      case "quality":
-        return (
-          <QualityPage
-            displayTaskId={displayTaskId ?? undefined}
-            taskId={taskId ?? undefined}
-            onNavigate={handleNavigate}
-          />
-        );
-      case "report":
-        return (
-          <ReportPage
-            displayTaskId={displayTaskId ?? undefined}
-            taskId={taskId ?? undefined}
-            onNavigate={handleNavigate}
-          />
-        );
-      case "metrics":
-        return (
-          <MetricsPage
-            displayTaskId={displayTaskId ?? undefined}
-            taskId={taskId ?? undefined}
-            onNavigate={handleNavigate}
-          />
-        );
-      default:
-        return (
-          <HomePage
-            onNavigate={handleNavigate}
-            onSelectionChange={handleHomeSelection}
-            selectedCategory={selectedCategory}
-            selectedDomain={selectedDomain}
-            selectedIndustryKey={selectedIndustryKey}
-            displayTaskId={displayTaskId ?? undefined}
-            taskId={taskId ?? undefined}
-            demoStatusLabel={demoStatusLabel}
-            currentDemoKey={currentDemoKey}
-            visitedKeys={visitedKeys}
-          />
-        );
+  // 总览 / 新建分析：分析前的入口页，单页展示。
+  function renderSinglePage() {
+    if (activePage === "new-analysis") {
+      return (
+        <NewAnalysisPage
+          displayTaskId={displayTaskId ?? undefined}
+          onNavigate={handleNavigate}
+          onTaskCreated={handleTaskCreated}
+          selectedIndustryKey={selectedIndustryKey}
+          autoDemoEnabled={autoDemoEnabled}
+          onToggleAutoDemo={setAutoDemoEnabled}
+          onStartAutoDemo={startAutoDemo}
+        />
+      );
     }
+
+    return (
+      <HomePage
+        onNavigate={handleNavigate}
+        onSelectionChange={handleHomeSelection}
+        selectedCategory={selectedCategory}
+        selectedDomain={selectedDomain}
+        selectedIndustryKey={selectedIndustryKey}
+        displayTaskId={displayTaskId ?? undefined}
+        taskId={taskId ?? undefined}
+        demoStatusLabel={demoStatusLabel}
+        currentDemoKey={currentDemoKey}
+        visitedKeys={visitedKeys}
+      />
+    );
+  }
+
+  // 分析结果阶段：六个页面合并为一条连续滚动视图，每段一个锚点 section。
+  function renderResultsScroll() {
+    const common = {
+      displayTaskId: displayTaskId ?? undefined,
+      taskId: taskId ?? undefined,
+      onNavigate: handleNavigate,
+    };
+
+    return (
+      <div className="space-y-12">
+        <section id="sec-workflow" data-nav="workflow" className="scroll-mt-6">
+          <WorkflowPage {...common} autoDemoActive={demoRunning && !demoPaused} />
+        </section>
+        <section id="sec-evidence" data-nav="evidence" className="scroll-mt-6">
+          <EvidencePage {...common} />
+        </section>
+        <section id="sec-claims" data-nav="claims" className="scroll-mt-6">
+          <ClaimsPage {...common} />
+        </section>
+        <section id="sec-quality" data-nav="quality" className="scroll-mt-6">
+          <QualityPage {...common} />
+        </section>
+        <section id="sec-report" data-nav="report" className="scroll-mt-6">
+          <ReportPage {...common} />
+        </section>
+        <section id="sec-metrics" data-nav="metrics" className="scroll-mt-6">
+          <MetricsPage {...common} />
+        </section>
+        {/* 底部留白：让最后几个 section 也能滚动到顶部对齐。 */}
+        <div aria-hidden className="h-[55vh]" />
+      </div>
+    );
   }
 
   if (!authToken) {
@@ -382,9 +437,15 @@ export default function App() {
       onResumeDemo={resumeDemo}
       onStopDemo={stopDemo}
     >
-      <div className="page-enter" key={activePage}>
-        {renderPage()}
-      </div>
+      {inResultsView ? (
+        <div className="page-enter" key="results-scroll">
+          {renderResultsScroll()}
+        </div>
+      ) : (
+        <div className="page-enter" key={activePage}>
+          {renderSinglePage()}
+        </div>
+      )}
     </AppLayout>
   );
 }
