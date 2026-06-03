@@ -574,28 +574,7 @@ export function HomePage({
                 面向产品团队的竞品分析系统，从公开资料中抽取证据，生成可追溯的策略报告。
               </p>
 
-              <div className="mt-7 flex flex-wrap gap-3">
-                <button
-                  className="group relative inline-flex items-center gap-2 rounded-xl bg-gradient-to-r from-[#22d3ee] to-[#6366f1] px-6 py-3 text-sm font-semibold text-white shadow-[0_10px_36px_rgba(34,211,238,0.32)] transition duration-200 hover:-translate-y-0.5 hover:shadow-[0_16px_48px_rgba(99,102,241,0.5)]"
-                  onClick={handleEnterConfig}
-                  type="button"
-                >
-                  <span className="pointer-events-none absolute -inset-1 rounded-xl bg-gradient-to-r from-[#22d3ee] to-[#6366f1] opacity-0 blur-md transition duration-200 group-hover:opacity-50" />
-                  <span className="relative">开始分析</span>
-                  <span className="relative transition-transform duration-200 group-hover:translate-x-1">
-                    →
-                  </span>
-                </button>
-                <button
-                  className="rounded-xl border border-[#38bdf8]/40 bg-white/5 px-6 py-3 text-sm font-semibold text-[#7dd3fc] transition duration-200 hover:-translate-y-0.5 hover:border-[#7dd3fc] hover:bg-[#38bdf8]/10"
-                  onClick={() => onNavigate("workflow")}
-                  type="button"
-                >
-                  查看 Agent 工作流
-                </button>
-              </div>
-
-              <div className="mt-6 flex flex-wrap gap-2">
+              <div className="mt-7 flex flex-wrap gap-2">
                 <Pill
                   label={isLoading ? "正在读取分析场景" : "分析场景已连接"}
                   tone={isLoading ? "warning" : error ? "danger" : "success"}
@@ -923,19 +902,6 @@ export function HomePage({
                 </div>
               </div>
 
-              <div className="mt-6 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-                <p className="text-sm text-[#8aa0c6]">
-                  进入配置后将使用现有系统接口创建任务，不会改变请求路径或任务存储方式。
-                </p>
-                <button
-                  className="rounded-xl bg-gradient-to-r from-[#22d3ee] to-[#6366f1] px-5 py-3 text-sm font-semibold text-white shadow-[0_10px_36px_rgba(34,211,238,0.3)] transition hover:-translate-y-0.5 hover:shadow-[0_16px_48px_rgba(99,102,241,0.5)] disabled:cursor-not-allowed disabled:from-slate-600 disabled:to-slate-600 disabled:opacity-60 disabled:shadow-none"
-                  disabled={!canEnterConfig}
-                  onClick={handleEnterConfig}
-                  type="button"
-                >
-                  进入分析配置
-                </button>
-              </div>
             </section>
           ) : null}
         </div>

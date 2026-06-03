@@ -49,7 +49,7 @@ export function AppLayout({
 
   return (
     <div className="app-background min-h-screen bg-[#020617] text-slate-100">
-      <div className="relative z-10 flex min-h-screen flex-col md:flex-row">
+      <div className="relative z-10 flex min-h-screen flex-col md:h-screen md:flex-row">
         <Sidebar
           items={navItems}
           activeKey={activePage}
@@ -60,7 +60,7 @@ export function AppLayout({
           currentDemoKey={currentDemoKey}
           visitedKeys={visitedKeys}
         />
-        <div className="flex min-h-screen min-w-0 flex-1 flex-col">
+        <div className="flex min-h-screen min-w-0 flex-1 flex-col md:h-screen md:min-h-0">
           <TopBar
             taskId={taskId}
             displayTaskId={displayTaskId}
@@ -148,7 +148,10 @@ export function AppLayout({
             </div>
           ) : null}
 
-          <main className="flex-1 overflow-y-auto px-5 py-6 md:px-8 lg:px-10">
+          <main
+            id="app-main"
+            className="min-h-0 flex-1 overflow-y-auto px-5 py-6 md:px-8 lg:px-10"
+          >
             {children}
           </main>
         </div>
