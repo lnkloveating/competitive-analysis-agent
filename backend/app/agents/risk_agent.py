@@ -417,6 +417,54 @@ def _compliance_risks(evidence_list: List[Dict[str, Any]]) -> List[Dict[str, Any
     return risks
 
 
+def _faithfulness_risks(
+    faithfulness_report: Dict[str, Any],
+    claims: List[Dict[str, Any]],
+) -> List[Dict[str, Any]]:
+    if not isinstance(faithfulness_report, dict):
+        return []
+    unsupported_ids = [
+        _as_text(claim_id)
+        for claim_id in faithfulness_report.get("unsupported_claim_ids", [])
+        if _as_text(claim_id)
+    ]
+    if not unsupported_ids:
+        return []
+
+    claims_by_id = {
+        _as_text(claim.get("claim_id")): claim
+        for claim in claims
+        if isinstance(claim, dict) and claim.get("claim_id")
+    }
+    related_platforms: List[str] = []
+    related_dimensions: List[str] = []
+    related_evidence_ids: List[str] = []
+    for claim_id in unsupported_ids:
+        claim = claims_by_id.get(claim_id, {})
+        related_platforms.extend(_as_text(p) for p in claim.get("related_platforms", []) if _as_text(p))
+        if claim.get("dimension"):
+            related_dimensions.append(_as_text(claim.get("dimension")))
+        related_evidence_ids.extend(_evidence_ids(claim.get("evidence_ids")))
+
+    rate = faithfulness_report.get("faithfulness_rate", 1.0)
+    return [
+        _risk(
+            risk_type="faithfulness",
+            description=(
+                f"{len(unsupported_ids)} 条 claim 无法被其所引证据支撑（疑似幻觉，忠实率 {rate}）："
+                f"{'、'.join(unsupported_ids)}。已在最终报告中剔除。"
+            ),
+            # Kept at medium so the dedicated all_claims_faithful quality check stays the
+            # single gate for hallucination, rather than also tripping no_high_severity_risk.
+            severity="medium",
+            related_platforms=related_platforms,
+            related_dimensions=related_dimensions,
+            related_evidence_ids=related_evidence_ids,
+            suggestion="核对结论与证据的一致性，修正措辞或补充直接证据后再纳入策略。",
+        )
+    ]
+
+
 def _dedupe_and_number(risks: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
     deduped: List[Dict[str, Any]] = []
     seen: set[tuple[str, str, tuple[str, ...], tuple[str, ...]]] = set()
@@ -485,6 +533,7 @@ def risk_agent(state: dict) -> Dict[str, Any]:
         )
     )
     raw_risks.extend(_compliance_risks(evidence_list))
+    raw_risks.extend(_faithfulness_risks(state.get("faithfulness_report", {}), claims))
 
     risk_flags = _dedupe_and_number(raw_risks)
     RiskAgentOutput(

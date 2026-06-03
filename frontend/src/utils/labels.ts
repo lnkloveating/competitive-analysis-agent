@@ -85,6 +85,7 @@ export const agentMeta: Record<string, AgentMeta> = {
   EvidenceAgent: { role: "从调研资料中抽取结构化证据" },
   ProductAgent: { role: "生成产品分析矩阵与产品结论" },
   BusinessAgent: { role: "生成商业分析矩阵与商业结论" },
+  VerificationAgent: { role: "忠实性校验，剔除无法被证据支撑的结论（防幻觉）" },
   RiskAgent: { role: "识别风险项" },
   QualityAgent: { role: "质量门控审查" },
   StrategyAgent: { role: "生成最终竞品策略报告" },
@@ -93,4 +94,38 @@ export const agentMeta: Record<string, AgentMeta> = {
 
 export function getAgentRole(agentName: string): string {
   return agentMeta[agentName]?.role ?? "参与多 Agent 协作流程";
+}
+
+// 质量门控检查项的中文说明，用于检查项展示。
+export const checkedItemLabels: Record<string, string> = {
+  all_claims_have_evidence: "结论均有证据引用",
+  all_evidence_ids_valid: "引用的证据 ID 均有效",
+  all_claims_faithful: "结论均能被证据支撑（防幻觉）",
+  all_matrix_claims_faithful: "矩阵分析均能被证据支撑（防幻觉）",
+  all_competitors_covered: "覆盖全部竞品",
+  all_dimensions_covered: "覆盖全部维度",
+  product_matrix_not_empty: "产品矩阵非空",
+  business_matrix_not_empty: "商业矩阵非空",
+  no_high_severity_risk: "无高危风险",
+};
+
+export function getCheckedItemLabel(name: string): string {
+  return checkedItemLabels[name] ?? name;
+}
+
+// 风险类型的中文说明。
+export const riskTypeLabels: Record<string, string> = {
+  data_credibility: "数据可信度",
+  data_timeliness: "数据时效性",
+  evidence_gap: "证据缺口",
+  compliance: "合规风险",
+  faithfulness: "幻觉风险",
+};
+
+export function getRiskTypeLabel(value?: string): string {
+  if (!value) {
+    return "风险";
+  }
+
+  return riskTypeLabels[value] ?? value;
 }

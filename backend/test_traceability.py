@@ -18,7 +18,7 @@ os.environ["STRATEGY_AGENT_USE_LLM"] = "0"
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 load_dotenv(Path(__file__).resolve().parent / ".env")
 
-from agents.workflow import app
+from orchestration.workflow import app
 from test_workflow import initial_state
 
 
@@ -79,6 +79,7 @@ if __name__ == "__main__":
         "EvidenceAgent",
         "ProductAgent",
         "BusinessAgent",
+        "VerificationAgent",
         "RiskAgent",
         "QualityAgent",
     }
@@ -112,5 +113,10 @@ if __name__ == "__main__":
         }, "待人工审核状态下 final_report 不得标记为正式 approved"
     else:
         assert final_report.get("quality_status") == "approved", "质检通过时 final_report 应为 approved"
+
+    context_summary = final_state.get("context_summary", {})
+    assert isinstance(context_summary, dict) and context_summary, "state 应包含 context_summary"
+    assert "ProductAgent" in context_summary, "context_summary 缺少 ProductAgent"
+    assert "BusinessAgent" in context_summary, "context_summary 缺少 BusinessAgent"
 
     print("Traceability 测试通过")

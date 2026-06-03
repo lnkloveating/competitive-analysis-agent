@@ -78,6 +78,22 @@ def _risk_reject_target(risk: Dict[str, Any]) -> str:
     return "EvidenceAgent"
 
 
+def _matrix_issue_owner(issue: Dict[str, Any]) -> str:
+    matrix_name = _as_text(issue.get("matrix"))
+    if matrix_name == "product_matrix":
+        return "ProductAgent"
+    if matrix_name == "business_matrix":
+        return "BusinessAgent"
+    return "ProductAgent"
+
+
+def _claim_owner_by_id(claim_id: str, claims: List[Dict[str, Any]]) -> str:
+    for claim in claims:
+        if isinstance(claim, dict) and _as_text(claim.get("claim_id")) == claim_id:
+            return _claim_owner(claim)
+    return _claim_owner({"claim_id": claim_id})
+
+
 def _build_checked_items(
     evidence_list: List[Dict[str, Any]],
     claims: List[Dict[str, Any]],
@@ -86,6 +102,8 @@ def _build_checked_items(
     risk_flags: List[Dict[str, Any]],
     competitors: List[str],
     focus_dimensions: List[str],
+    unsupported_claim_ids: List[str],
+    matrix_issues: List[Dict[str, Any]],
 ) -> tuple[Dict[str, bool], List[str], List[str], List[str], str | None]:
     existing_evidence_ids = {
         _as_text(evidence.get("evidence_id"))
@@ -134,9 +152,16 @@ def _build_checked_items(
         if isinstance(risk, dict) and _as_text(risk.get("severity")).lower() == "high"
     ]
 
+    unsupported_claim_ids = [
+        claim_id for claim_id in unsupported_claim_ids if _as_text(claim_id)
+    ]
+    matrix_issues = [issue for issue in matrix_issues if isinstance(issue, dict)]
+
     checked_items = {
         "all_claims_have_evidence": not claims_without_evidence,
         "all_evidence_ids_valid": not claims_with_invalid_evidence,
+        "all_claims_faithful": not unsupported_claim_ids,
+        "all_matrix_claims_faithful": not matrix_issues,
         "all_competitors_covered": not missing_platforms,
         "all_dimensions_covered": not missing_dimensions,
         "product_matrix_not_empty": _matrix_not_empty(product_matrix),
@@ -154,6 +179,14 @@ def _build_checked_items(
     if claims_with_invalid_evidence:
         reject_to = reject_to or _claim_owner(claims_with_invalid_evidence[0])
         required_actions.append("修正 claims 中不存在的 evidence_ids。")
+
+    if unsupported_claim_ids:
+        reject_to = reject_to or _claim_owner_by_id(unsupported_claim_ids[0], claims)
+        required_actions.append("修正或移除 claims 中无法被所引证据支撑的结论（疑似幻觉）。")
+
+    if matrix_issues:
+        reject_to = reject_to or _matrix_issue_owner(matrix_issues[0])
+        required_actions.append("修正矩阵分析中无法被所引证据支撑的数字或描述。")
 
     if missing_platforms:
         reject_to = reject_to or "EvidenceAgent"
@@ -241,6 +274,15 @@ def quality_agent(state: dict) -> Dict[str, Any]:
         if _as_text(item)
     ]
     iteration_count = int(state.get("iteration_count", 0) or 0)
+    unsupported_claim_ids = [
+        _as_text(item) for item in state.get("unsupported_claim_ids", []) if _as_text(item)
+    ]
+    faithfulness_report = state.get("faithfulness_report", {})
+    if not isinstance(faithfulness_report, dict):
+        faithfulness_report = {}
+    matrix_issues = [
+        item for item in faithfulness_report.get("matrix_issues", []) if isinstance(item, dict)
+    ]
 
     (
         checked_items,
@@ -256,6 +298,8 @@ def quality_agent(state: dict) -> Dict[str, Any]:
         risk_flags=risk_flags,
         competitors=competitors,
         focus_dimensions=focus_dimensions,
+        unsupported_claim_ids=unsupported_claim_ids,
+        matrix_issues=matrix_issues,
     )
 
     approved = all(checked_items.values())
@@ -272,6 +316,7 @@ def quality_agent(state: dict) -> Dict[str, Any]:
         reject_reason=reject_reason,
         missing_dimensions=missing_dimensions,
         missing_platforms=missing_platforms,
+        matrix_issues=[] if approved else matrix_issues,
         required_actions=[] if approved else required_actions,
         checked_items=checked_items,
     )

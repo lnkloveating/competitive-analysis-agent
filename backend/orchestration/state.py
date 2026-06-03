@@ -48,6 +48,15 @@ def merge_trace_log(left: List[Dict], right: List[Dict]) -> List[Dict]:
     return merged
 
 
+def merge_dict(left: Dict, right: Dict) -> Dict:
+    merged: Dict = {}
+    if isinstance(left, dict):
+        merged.update(left)
+    if isinstance(right, dict):
+        merged.update(right)
+    return merged
+
+
 class CompetitiveAnalysisState(TypedDict):
     industry_key: str
     industry_name: str
@@ -63,8 +72,12 @@ class CompetitiveAnalysisState(TypedDict):
     product_matrix: Dict
     business_matrix: Dict
     risk_flags: List[Dict]
+    faithfulness_report: Dict
+    unsupported_claim_ids: List[str]
     quality_result: Dict
     final_report: Dict
+    context_summary: Annotated[Dict, merge_dict]
+    review_ticket: Annotated[Dict, merge_dict]
     used_claim_ids: List[str]
     used_evidence_ids: List[str]
     metrics: Dict
@@ -74,5 +87,5 @@ class CompetitiveAnalysisState(TypedDict):
     is_approved: bool
     needs_human_review: bool
     quality_status: str
-    error_log: List[str]
+    error_log: List[Dict]
     trace_log: Annotated[List[Dict], merge_trace_log]

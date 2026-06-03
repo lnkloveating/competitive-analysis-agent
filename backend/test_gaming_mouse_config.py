@@ -13,7 +13,7 @@ os.environ["RESEARCH_AGENT_USE_LLM"] = "0"
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 load_dotenv(Path(__file__).resolve().parent / ".env")
 
-from agents.industry_config import INDUSTRY_CONFIGS
+from orchestration.industry_config import INDUSTRY_CONFIGS
 from api.routes import app
 from app.schemas.research import RawResearchItem
 from app.services.mock_research_provider import MockResearchProvider
@@ -28,6 +28,7 @@ EXPECTED_DIMENSIONS = {
     "用户口碑",
     "价格定位",
     "电竞品牌影响力",
+    "握持手感与人体工学",
 }
 EXPECTED_PRODUCTS = {
     "G Pro X Superlight 2",

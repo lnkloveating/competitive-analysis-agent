@@ -63,7 +63,58 @@ export type AgentTrace = {
   input_summary?: string;
   output_summary?: string;
   duration_ms?: number;
+  context_selected_evidence_count?: number;
+  context_trimmed_evidence_count?: number;
+  review_ticket_id?: string;
   error?: string | null;
+};
+
+export type MatrixIssue = {
+  matrix?: string;
+  platform?: string;
+  dimension?: string;
+  missing_numbers?: string[];
+};
+
+export type ContextSummary = {
+  agent_name?: string;
+  total_evidence_count?: number;
+  selected_evidence_count?: number;
+  trimmed_evidence_count?: number;
+  selected_evidence_ids?: string[];
+  trimmed_evidence_ids?: string[];
+  dimension_counts?: Record<string, number>;
+  limits?: {
+    max_items?: number;
+    max_per_dimension?: number;
+    max_content_chars?: number;
+  };
+};
+
+export type ErrorLogItem = {
+  error_id?: string;
+  agent_name?: string;
+  error_type?: string;
+  message?: string;
+  recover_action?: string;
+  retry_count?: number;
+  created_at?: string;
+};
+
+export type ReviewTicket = {
+  ticket_id?: string;
+  status?: "open" | "resolved" | string;
+  reason?: string;
+  target_agent?: string | null;
+  failed_checks?: string[];
+  required_actions?: string[];
+  unsupported_claim_ids?: string[];
+  matrix_issues?: MatrixIssue[];
+  missing_dimensions?: string[];
+  missing_platforms?: string[];
+  risk_flags?: Array<Record<string, unknown>>;
+  suggested_next_steps?: string[];
+  created_at?: string;
 };
 
 export type QualityResult = {
@@ -77,6 +128,7 @@ export type QualityResult = {
   reject_reason?: string | null;
   missing_dimensions?: string[];
   missing_platforms?: string[];
+  matrix_issues?: MatrixIssue[];
   required_actions?: string[];
   required_fix?: string;
   checked_items?: Record<string, boolean>;
@@ -91,8 +143,36 @@ export type Metrics = {
   coverage_rate?: number;
   high_credibility_ratio?: number;
   low_credibility_ratio?: number;
+  faithfulness_rate?: number;
+  unsupported_claim_count?: number;
+  weak_claim_count?: number;
+  matrix_issue_count?: number;
+  context_trimmed_evidence_count?: number;
+  error_count?: number;
+  has_review_ticket?: boolean;
   quality_score?: number;
   iteration_count?: number;
+};
+
+export type FaithfulnessClaimResult = {
+  claim_id: string;
+  supported: boolean;
+  weak?: boolean;
+  grounding_score?: number;
+  reason?: string;
+  missing_numbers?: string[];
+};
+
+export type FaithfulnessReport = {
+  checked_claim_count?: number;
+  supported_claim_count?: number;
+  unsupported_claim_count?: number;
+  weak_claim_count?: number;
+  faithfulness_rate?: number;
+  unsupported_claim_ids?: string[];
+  weak_claim_ids?: string[];
+  claim_results?: FaithfulnessClaimResult[];
+  matrix_issues?: MatrixIssue[];
 };
 
 export type RiskFlag = {
@@ -110,6 +190,10 @@ export type ArtifactsSummary = {
   claim_count?: number;
   risk_count?: number;
   trace_count?: number;
+  context_agent_count?: number;
+  context_trimmed_evidence_count?: number;
+  error_count?: number;
+  has_review_ticket?: boolean;
   has_product_matrix?: boolean;
   has_business_matrix?: boolean;
   has_final_report?: boolean;

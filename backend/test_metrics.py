@@ -20,7 +20,7 @@ os.environ["STRATEGY_AGENT_USE_LLM"] = "0"
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 load_dotenv(Path(__file__).resolve().parent / ".env")
 
-from agents.workflow import app as workflow_app
+from orchestration.workflow import app as workflow_app
 from api.routes import app as fastapi_app
 
 
@@ -31,6 +31,13 @@ REQUIRED_METRIC_KEYS = {
     "coverage_rate",
     "high_credibility_ratio",
     "low_credibility_ratio",
+    "faithfulness_rate",
+    "unsupported_claim_count",
+    "weak_claim_count",
+    "matrix_issue_count",
+    "context_trimmed_evidence_count",
+    "error_count",
+    "has_review_ticket",
     "quality_score",
     "iteration_count",
 }
@@ -52,6 +59,7 @@ REQUEST_BODY = {
         "用户口碑",
         "价格定位",
         "电竞品牌影响力",
+        "握持手感与人体工学",
     ],
 }
 
@@ -76,8 +84,12 @@ if __name__ == "__main__":
         "product_matrix": {},
         "business_matrix": {},
         "risk_flags": [],
+        "faithfulness_report": {},
+        "unsupported_claim_ids": [],
         "quality_result": {},
         "final_report": {},
+        "context_summary": {},
+        "review_ticket": {},
         "trace_log": [],
         "metrics": {},
         "used_claim_ids": [],
@@ -88,6 +100,7 @@ if __name__ == "__main__":
         "is_approved": False,
         "needs_human_review": False,
         "quality_status": "",
+        "error_log": [],
     }
 
     final_state = workflow_app.invoke(initial_state, {"recursion_limit": 50})

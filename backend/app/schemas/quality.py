@@ -19,5 +19,6 @@ class QualityResult(BaseModel):
     reject_reason: Optional[str] = None
     missing_dimensions: List[str] = Field(default_factory=list)
     missing_platforms: List[str] = Field(default_factory=list)
+    matrix_issues: List[Dict] = Field(default_factory=list)
     required_actions: List[str] = Field(default_factory=list)
     checked_items: Dict[str, bool] = Field(default_factory=dict)

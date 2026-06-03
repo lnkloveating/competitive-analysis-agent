@@ -135,57 +135,73 @@ export function EvidencePage({
 
     const activeTaskId = taskId;
     let cancelled = false;
+    let timerId: number | undefined;
+    let inFlight = false;
 
-    async function loadEvidence() {
-      setIsLoading(true);
-      setError(null);
+    // 证据随 EvidenceAgent 产出；任务运行中先轮询，完成后停止。
+    async function refreshEvidence() {
+      if (inFlight) {
+        return;
+      }
+      inFlight = true;
 
-      try {
-        const [evidenceResult, claimsResult] = await Promise.allSettled([
-          analysisApi.getEvidence(activeTaskId),
-          analysisApi.getClaims(activeTaskId),
-        ]);
+      const [statusResult, evidenceResult, claimsResult] = await Promise.allSettled([
+        analysisApi.getStatus(activeTaskId),
+        analysisApi.getEvidence(activeTaskId),
+        analysisApi.getClaims(activeTaskId),
+      ]);
 
-        if (cancelled) {
-          return;
-        }
+      if (cancelled) {
+        inFlight = false;
+        return;
+      }
 
-        if (evidenceResult.status === "fulfilled") {
-          setEvidenceList(
-            Array.isArray(evidenceResult.value?.evidence_list)
-              ? evidenceResult.value.evidence_list
-              : [],
-          );
-        } else {
-          throw evidenceResult.reason instanceof Error
-            ? evidenceResult.reason
-            : new Error("证据数据加载失败。");
-        }
+      if (evidenceResult.status === "fulfilled") {
+        setEvidenceList(
+          Array.isArray(evidenceResult.value?.evidence_list)
+            ? evidenceResult.value.evidence_list
+            : [],
+        );
+        setError(null);
+      } else {
+        setError(
+          evidenceResult.reason instanceof Error
+            ? evidenceResult.reason.message
+            : "证据数据加载失败。",
+        );
+      }
 
+      if (claimsResult.status === "fulfilled") {
         setClaims(
-          claimsResult.status === "fulfilled" &&
-            Array.isArray(claimsResult.value?.claims)
+          Array.isArray(claimsResult.value?.claims)
             ? claimsResult.value.claims
             : [],
         );
-        setExpandedIds(new Set());
-      } catch (err) {
-        if (!cancelled) {
-          setError(err instanceof Error ? err.message : "证据数据加载失败。");
-          setEvidenceList([]);
-          setClaims([]);
-        }
-      } finally {
-        if (!cancelled) {
-          setIsLoading(false);
-        }
+      }
+
+      setIsLoading(false);
+      inFlight = false;
+
+      const taskStatus =
+        statusResult.status === "fulfilled"
+          ? String(statusResult.value?.status || "").toLowerCase()
+          : "";
+      if ((taskStatus === "completed" || taskStatus === "failed") && timerId) {
+        window.clearInterval(timerId);
+        timerId = undefined;
       }
     }
 
-    loadEvidence();
+    setIsLoading(true);
+    setError(null);
+    refreshEvidence();
+    timerId = window.setInterval(refreshEvidence, 1800);
 
     return () => {
       cancelled = true;
+      if (timerId) {
+        window.clearInterval(timerId);
+      }
     };
   }, [taskId]);
 

@@ -588,13 +588,23 @@ textarea {
 }
 
 .mission-node-6 {
-  right: 22%;
-  bottom: 9%;
+  right: 17%;
+  bottom: 11%;
 }
 
 .mission-node-7 {
-  left: 22%;
-  bottom: 9%;
+  left: 50%;
+  bottom: 6%;
+  transform: translateX(-50%);
+}
+
+.mission-node-7:hover {
+  transform: translateX(-50%) translateY(-7px);
+}
+
+.mission-node-8 {
+  left: 17%;
+  bottom: 11%;
 }
 
 @media (prefers-reduced-motion: reduce) {
@@ -652,7 +662,8 @@ textarea {
   .mission-node-4,
   .mission-node-5,
   .mission-node-6,
-  .mission-node-7 {
+  .mission-node-7,
+  .mission-node-8 {
     position: relative;
     inset: auto;
     width: 100%;
@@ -660,7 +671,8 @@ textarea {
   }
 
   .mission-chip:hover,
-  .mission-node-3:hover {
+  .mission-node-3:hover,
+  .mission-node-7:hover {
     transform: translateY(-5px);
   }
 }

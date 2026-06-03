@@ -8,8 +8,9 @@ from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
-from agents.industry_config import INDUSTRY_CONFIGS, get_state_dimensions, get_state_industry_name
-from agents.workflow import app as workflow_app
+from orchestration.industry_config import INDUSTRY_CONFIGS, get_state_dimensions, get_state_industry_name
+from orchestration.workflow import app as workflow_app
+from app.services.error_log_service import normalize_error_log
 
 
 app = FastAPI(title="竞品分析 Agent 系统", version="1.0.0")
@@ -37,12 +38,13 @@ TASKS: Dict[str, Dict[str, Any]] = {}
 TASK_LOCK = threading.Lock()
 
 AGENT_PROGRESS = {
-    "ResearchAgent": 14,
-    "EvidenceAgent": 28,
-    "ProductAgent": 42,
-    "BusinessAgent": 42,
-    "RiskAgent": 57,
-    "QualityAgent": 71,
+    "ResearchAgent": 12,
+    "EvidenceAgent": 25,
+    "ProductAgent": 40,
+    "BusinessAgent": 40,
+    "VerificationAgent": 55,
+    "RiskAgent": 68,
+    "QualityAgent": 80,
     "StrategyAgent": 100,
 }
 
@@ -69,8 +71,12 @@ def _build_initial_state(request: AnalysisRequest) -> Dict[str, Any]:
             "product_matrix": {},
             "business_matrix": {},
             "risk_flags": [],
+            "faithfulness_report": {},
+            "unsupported_claim_ids": [],
             "quality_result": {},
             "final_report": {},
+            "context_summary": {},
+            "review_ticket": {},
             "trace_log": [],
             "metrics": {},
             "used_claim_ids": [],
@@ -220,6 +226,7 @@ async def get_report(task_id: str):
         "status": task.get("status", "failed"),
         "final_report": state.get("final_report", {}),
         "quality_result": state.get("quality_result", {}),
+        "review_ticket": state.get("review_ticket", {}),
         "evidence_list": state.get("evidence_list", []),
         "error": task.get("error", ""),
     }
@@ -249,6 +256,9 @@ async def get_trace(task_id: str):
     return {
         "task_id": task_id,
         "trace_log": state.get("trace_log", []),
+        "context_summary": state.get("context_summary", {}),
+        "error_log": normalize_error_log(state.get("error_log", [])),
+        "review_ticket": state.get("review_ticket", {}),
     }
 
 
@@ -263,6 +273,18 @@ async def get_quality(task_id: str):
         "rejected_agents": state.get("rejected_agents", []),
         "needs_human_review": state.get("needs_human_review", False),
         "quality_status": state.get("quality_status", ""),
+        "review_ticket": state.get("review_ticket", {}),
+    }
+
+
+@app.get("/api/analysis/{task_id}/errors")
+async def get_errors(task_id: str):
+    state = _get_task_state(task_id)
+    errors = normalize_error_log(state.get("error_log", []))
+    return {
+        "task_id": task_id,
+        "error_log": errors,
+        "error_count": len(errors),
     }
 
 
@@ -284,6 +306,26 @@ async def get_risks(task_id: str):
     }
 
 
+@app.get("/api/analysis/{task_id}/faithfulness")
+async def get_faithfulness(task_id: str):
+    state = _get_task_state(task_id)
+    return {
+        "task_id": task_id,
+        "faithfulness_report": state.get("faithfulness_report", {}),
+        "unsupported_claim_ids": state.get("unsupported_claim_ids", []),
+    }
+
+
+@app.get("/api/analysis/{task_id}/review-ticket")
+async def get_review_ticket(task_id: str):
+    state = _get_task_state(task_id)
+    return {
+        "task_id": task_id,
+        "review_ticket": state.get("review_ticket", {}),
+        "needs_human_review": state.get("needs_human_review", False),
+    }
+
+
 @app.get("/api/analysis/{task_id}/artifacts")
 async def get_artifacts(task_id: str):
     state = _get_task_state(task_id)
@@ -292,6 +334,10 @@ async def get_artifacts(task_id: str):
     claims = state.get("claims", [])
     risk_flags = state.get("risk_flags", [])
     trace_log = state.get("trace_log", [])
+    context_summary = state.get("context_summary", {})
+    if not isinstance(context_summary, dict):
+        context_summary = {}
+    errors = normalize_error_log(state.get("error_log", []))
 
     return {
         "task_id": task_id,
@@ -300,6 +346,14 @@ async def get_artifacts(task_id: str):
         "claim_count": len(claims) if isinstance(claims, list) else 0,
         "risk_count": len(risk_flags) if isinstance(risk_flags, list) else 0,
         "trace_count": len(trace_log) if isinstance(trace_log, list) else 0,
+        "context_agent_count": len(context_summary),
+        "context_trimmed_evidence_count": sum(
+            int(item.get("trimmed_evidence_count", 0) or 0)
+            for item in context_summary.values()
+            if isinstance(item, dict)
+        ),
+        "error_count": len(errors),
+        "has_review_ticket": bool(state.get("review_ticket", {})),
         "has_product_matrix": bool(state.get("product_matrix", {})),
         "has_business_matrix": bool(state.get("business_matrix", {})),
         "has_final_report": bool(state.get("final_report", {})),

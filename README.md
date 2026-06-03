@@ -1,58 +1,58 @@
-# AI 驱动的竞品分析 Agent 协作系统
+﻿# AI 椹卞姩鐨勭珵鍝佸垎鏋?Agent 鍗忎綔绯荤粺
 
-这是一个面向竞品分析场景的多 Agent 后端项目，使用 FastAPI + LangGraph 编排多个专业 Agent，模拟一个结构化数字调研小组，从公开材料采集、证据抽取、产品/商业分析、风险识别、质量检查到最终报告生成，形成可追溯的分析链路。
+杩欐槸涓€涓潰鍚戠珵鍝佸垎鏋愬満鏅殑澶?Agent 鍚庣椤圭洰锛屼娇鐢?FastAPI + LangGraph 缂栨帓澶氫釜涓撲笟 Agent锛屾ā鎷熶竴涓粨鏋勫寲鏁板瓧璋冪爺灏忕粍锛屼粠鍏紑鏉愭枡閲囬泦銆佽瘉鎹娊鍙栥€佷骇鍝?鍟嗕笟鍒嗘瀽銆侀闄╄瘑鍒€佽川閲忔鏌ュ埌鏈€缁堟姤鍛婄敓鎴愶紝褰㈡垚鍙拷婧殑鍒嗘瀽閾捐矾銆?
 
-当前 Demo 第一阶段聚焦 `gaming_mouse` 电竞鼠标垂直场景，而不是泛电竞外设。
+褰撳墠 Demo 绗竴闃舵鑱氱劍 `gaming_mouse` 鐢电珵榧犳爣鍨傜洿鍦烘櫙锛岃€屼笉鏄硾鐢电珵澶栬銆?
 
-## Demo 场景
+## Demo 鍦烘櫙
 
-当前推荐 Demo 行业：
+褰撳墠鎺ㄨ崘 Demo 琛屼笟锛?
 
 ```text
 industry_key = "gaming_mouse"
-industry_name = "电竞鼠标"
+industry_name = "鐢电珵榧犳爣"
 ```
 
-覆盖品牌：
+瑕嗙洊鍝佺墝锛?
 
-| 品牌 | 代表型号 |
+| 鍝佺墝 | 浠ｈ〃鍨嬪彿 |
 |---|---|
-| 罗技 | G Pro X Superlight 2、G502 X Plus |
-| 雷蛇 | Viper V3 Pro、DeathAdder V3 Pro |
-| 海盗船 | M75 Air、SABRE RGB PRO Wireless |
+| 缃楁妧 | G Pro X Superlight 2銆丟502 X Plus |
+| 闆疯泧 | Viper V3 Pro銆丏eathAdder V3 Pro |
+| 娴风洍鑸?| M75 Air銆丼ABRE RGB PRO Wireless |
 
-覆盖维度：
+瑕嗙洊缁村害锛?
 
-- 性能参数
-- 轻量化设计
-- 无线与续航
-- 软件生态
-- 用户口碑
-- 价格定位
-- 电竞品牌影响力
+- 鎬ц兘鍙傛暟
+- 杞婚噺鍖栬璁?
+- 鏃犵嚎涓庣画鑸?
+- 杞欢鐢熸€?
+- 鐢ㄦ埛鍙ｇ
+- 浠锋牸瀹氫綅
+- 鐢电珵鍝佺墝褰卞搷鍔?
 
-选择电竞鼠标作为第一阶段 Demo 的原因：
+閫夋嫨鐢电珵榧犳爣浣滀负绗竴闃舵 Demo 鐨勫師鍥狅細
 
-- 鼠标参数明确，适合结构化对比；
-- 公开数据和评测资料充足，适合 evidence-grounded 分析；
-- 用户评论丰富，适合展示 Evidence -> Claim -> Report 溯源链路；
-- 场景足够垂直，便于前端做清晰的 Agent 工作台演示。
+- 榧犳爣鍙傛暟鏄庣‘锛岄€傚悎缁撴瀯鍖栧姣旓紱
+- 鍏紑鏁版嵁鍜岃瘎娴嬭祫鏂欏厖瓒筹紝閫傚悎 evidence-grounded 鍒嗘瀽锛?
+- 鐢ㄦ埛璇勮涓板瘜锛岄€傚悎灞曠ず Evidence -> Claim -> Report 婧簮閾捐矾锛?
+- 鍦烘櫙瓒冲鍨傜洿锛屼究浜庡墠绔仛娓呮櫚鐨?Agent 宸ヤ綔鍙版紨绀恒€?
 
-`gaming_peripherals` 泛电竞外设配置仍然保留，后续可以继续扩展到键盘、耳机、手柄等外设品类。
+`gaming_peripherals` 娉涚數绔炲璁鹃厤缃粛鐒朵繚鐣欙紝鍚庣画鍙互缁х画鎵╁睍鍒伴敭鐩樸€佽€虫満銆佹墜鏌勭瓑澶栬鍝佺被銆?
 
-## 系统能力
+## 绯荤粺鑳藉姏
 
-- 多 Agent 协作竞品分析 workflow
-- 行业配置驱动，支持多行业扩展
-- ResearchProvider 抽象，当前使用 MockResearchProvider，未来可替换真实爬虫
-- 每个 Agent 输出经过 Pydantic Schema 校验
-- ProductAgent / BusinessAgent 生成结构化 claims
-- StrategyAgent 最终报告必须引用已有 claim_id 和 evidence_id
-- QualityAgent 支持结构化打回和三次失败后人工审核
-- trace_log 记录 Agent 执行轨迹，便于前端展示和答辩说明
-- FastAPI 提供任务启动、状态查询、报告查询和只读中间产物接口
+- 澶?Agent 鍗忎綔绔炲搧鍒嗘瀽 workflow
+- 琛屼笟閰嶇疆椹卞姩锛屾敮鎸佸琛屼笟鎵╁睍
+- ResearchProvider 鎶借薄锛屽綋鍓嶄娇鐢?MockResearchProvider锛屾湭鏉ュ彲鏇挎崲鐪熷疄鐖櫕
+- 姣忎釜 Agent 杈撳嚭缁忚繃 Pydantic Schema 鏍￠獙
+- ProductAgent / BusinessAgent 鐢熸垚缁撴瀯鍖?claims
+- StrategyAgent 鏈€缁堟姤鍛婂繀椤诲紩鐢ㄥ凡鏈?claim_id 鍜?evidence_id
+- QualityAgent 鏀寔缁撴瀯鍖栨墦鍥炲拰涓夋澶辫触鍚庝汉宸ュ鏍?
+- trace_log 璁板綍 Agent 鎵ц杞ㄨ抗锛屼究浜庡墠绔睍绀哄拰绛旇京璇存槑
+- FastAPI 鎻愪緵浠诲姟鍚姩銆佺姸鎬佹煡璇€佹姤鍛婃煡璇㈠拰鍙涓棿浜х墿鎺ュ彛
 
-## Agent 工作流
+## Agent 宸ヤ綔娴?
 
 ```text
 ResearchAgent
@@ -68,30 +68,30 @@ ResearchAgent
      final_report
 ```
 
-质量检查失败时：
+璐ㄩ噺妫€鏌ュけ璐ユ椂锛?
 
 ```text
 QualityAgent -> reject_to target Agent
 ```
 
-三次自动修复后仍失败：
+涓夋鑷姩淇鍚庝粛澶辫触锛?
 
 ```text
 QualityAgent -> HumanReviewRequired
 ```
 
-系统不会在证据不足时 force pass，也不会让 StrategyAgent 生成没有证据支撑的正式报告。
+绯荤粺涓嶄細鍦ㄨ瘉鎹笉瓒虫椂 force pass锛屼篃涓嶄細璁?StrategyAgent 鐢熸垚娌℃湁璇佹嵁鏀拺鐨勬寮忔姤鍛娿€?
 
-## 技术栈
+## 鎶€鏈爤
 
-- 后端：Python + FastAPI + LangGraph
-- Agent 状态约束：TypedDict + Pydantic Schema
-- LLM 接入：Doubao / Ark 客户端封装
-- 当前数据入口：MockResearchProvider
-- 后续数据入口：CrawlerResearchProvider，读取爬虫 JSON 并校验为 `RawResearchItem`
-- 前端：React + Vite + TailwindCSS
+- 鍚庣锛歅ython + FastAPI + LangGraph
+- Agent 鐘舵€佺害鏉燂細TypedDict + Pydantic Schema
+- LLM 鎺ュ叆锛欴oubao / Ark 瀹㈡埛绔皝瑁?
+- 褰撳墠鏁版嵁鍏ュ彛锛歁ockResearchProvider
+- 鍚庣画鏁版嵁鍏ュ彛锛欳rawlerResearchProvider锛岃鍙栫埇铏?JSON 骞舵牎楠屼负 `RawResearchItem`
+- 鍓嶇锛歊eact + Vite + TailwindCSS
 
-## 后端目录结构
+## 鍚庣鐩綍缁撴瀯
 
 ```text
 backend/
@@ -131,26 +131,17 @@ backend/
       mock_research_provider.py
       llm_client.py
       metrics_service.py
-    workflow/
-      graph.py
-      state.py
-      routing.py
-
-  agents/
-    research_agent.py      # compatibility wrapper
-    evidence_agent.py      # compatibility wrapper
-    product_agent.py       # compatibility wrapper
-    business_agent.py      # compatibility wrapper
-    risk_agent.py          # compatibility wrapper
-    quality_agent.py       # compatibility wrapper
-    strategy_agent.py      # compatibility wrapper
+  orchestration/
+    workflow.py            # LangGraph DAG and routing
+    state.py               # workflow state and reducers
+    industry_config.py     # industry presets
 ```
 
-`backend/agents` 保留为旧 workflow 的 compatibility wrapper。真实业务实现已经迁移到 `backend/app/agents`。
+`backend/orchestration` is the workflow orchestration layer. Real agent implementations live in `backend/app/agents`.
 
-## 快速开始
+## 蹇€熷紑濮?
 
-### 后端
+### 鍚庣
 
 ```bash
 cd backend
@@ -159,19 +150,19 @@ cp .env.example .env
 python main.py
 ```
 
-默认服务地址：
+榛樿鏈嶅姟鍦板潃锛?
 
 ```text
 http://localhost:8000
 ```
 
-健康检查：
+鍋ュ悍妫€鏌ワ細
 
 ```text
 GET /health
 ```
 
-### 前端
+### 鍓嶇
 
 ```bash
 cd frontend
@@ -179,41 +170,41 @@ npm install
 npm run dev
 ```
 
-## Demo 请求示例
+## Demo 璇锋眰绀轰緥
 
 ```json
 {
-  "target_platform": "罗技",
-  "competitors": ["罗技", "雷蛇", "海盗船"],
-  "analysis_scene": "电竞鼠标竞品分析",
-  "target_user": "产品经理",
-  "time_range": "近两年",
+  "target_platform": "缃楁妧",
+  "competitors": ["缃楁妧", "闆疯泧", "娴风洍鑸?],
+  "analysis_scene": "鐢电珵榧犳爣绔炲搧鍒嗘瀽",
+  "target_user": "浜у搧缁忕悊",
+  "time_range": "杩戜袱骞?,
   "focus_dimensions": [
-    "性能参数",
-    "轻量化设计",
-    "无线与续航",
-    "软件生态",
-    "用户口碑",
-    "价格定位",
-    "电竞品牌影响力"
+    "鎬ц兘鍙傛暟",
+    "杞婚噺鍖栬璁?,
+    "鏃犵嚎涓庣画鑸?,
+    "杞欢鐢熸€?,
+    "鐢ㄦ埛鍙ｇ",
+    "浠锋牸瀹氫綅",
+    "鐢电珵鍝佺墝褰卞搷鍔?
   ],
   "industry_key": "gaming_mouse"
 }
 ```
 
-调用：
+璋冪敤锛?
 
 ```text
 POST /api/analysis/start
 ```
 
-拿到 `task_id` 后轮询：
+鎷垮埌 `task_id` 鍚庤疆璇細
 
 ```text
 GET /api/analysis/{task_id}/status
 ```
 
-完成后读取：
+瀹屾垚鍚庤鍙栵細
 
 ```text
 GET /api/analysis/{task_id}/report
@@ -222,9 +213,9 @@ GET /api/analysis/{task_id}/evidence
 GET /api/analysis/{task_id}/claims
 ```
 
-## FastAPI 接口
+## FastAPI 鎺ュ彛
 
-核心接口：
+鏍稿績鎺ュ彛锛?
 
 - `POST /api/analysis/start`
 - `GET /api/analysis/{task_id}/status`
@@ -232,7 +223,7 @@ GET /api/analysis/{task_id}/claims
 - `GET /api/industries`
 - `GET /health`
 
-Agent 工作台只读接口：
+Agent 宸ヤ綔鍙板彧璇绘帴鍙ｏ細
 
 - `GET /api/analysis/{task_id}/evidence`
 - `GET /api/analysis/{task_id}/claims`
@@ -242,13 +233,13 @@ Agent 工作台只读接口：
 - `GET /api/analysis/{task_id}/risks`
 - `GET /api/analysis/{task_id}/artifacts`
 
-完整接口说明见：
+瀹屾暣鎺ュ彛璇存槑瑙侊細
 
 ```text
 docs/api.md
 ```
 
-Agent 协议说明见：
+Agent 鍗忚璇存槑瑙侊細
 
 ```text
 docs/agent_protocol.md
@@ -256,22 +247,22 @@ docs/agent_protocol.md
 
 ## MockResearchProvider
 
-当前没有接真实爬虫。`MockResearchProvider` 会根据 `industry_key` 生成 mock raw research。
+褰撳墠娌℃湁鎺ョ湡瀹炵埇铏€俙MockResearchProvider` 浼氭牴鎹?`industry_key` 鐢熸垚 mock raw research銆?
 
-当 `industry_key = "gaming_mouse"` 时，mock 数据会围绕电竞鼠标生成，并覆盖：
+褰?`industry_key = "gaming_mouse"` 鏃讹紝mock 鏁版嵁浼氬洿缁曠數绔為紶鏍囩敓鎴愶紝骞惰鐩栵細
 
-- 罗技、雷蛇、海盗船三个品牌；
-- 代表型号；
-- 七个核心维度；
-- `official`、`review`、`ecommerce`、`user_review`、`news`、`report` 等 source type；
-- `mock://gaming_mouse/...` 风格 URL；
-- `dimension`、`related_dimension`、`product_name`、`category` 兼容字段。
+- 缃楁妧銆侀浄铔囥€佹捣鐩楄埞涓変釜鍝佺墝锛?
+- 浠ｈ〃鍨嬪彿锛?
+- 涓冧釜鏍稿績缁村害锛?
+- `official`銆乣review`銆乣ecommerce`銆乣user_review`銆乣news`銆乣report` 绛?source type锛?
+- `mock://gaming_mouse/...` 椋庢牸 URL锛?
+- `dimension`銆乣related_dimension`銆乣product_name`銆乣category` 鍏煎瀛楁銆?
 
-后续接真实爬虫时，只需要实现新的 `CrawlerResearchProvider`，让它输出符合 `RawResearchItem` schema 的数据即可。
+鍚庣画鎺ョ湡瀹炵埇铏椂锛屽彧闇€瑕佸疄鐜版柊鐨?`CrawlerResearchProvider`锛岃瀹冭緭鍑虹鍚?`RawResearchItem` schema 鐨勬暟鎹嵆鍙€?
 
-## 测试
+## 娴嬭瘯
 
-常用后端测试：
+甯哥敤鍚庣娴嬭瘯锛?
 
 ```bash
 backend\venv\Scripts\python.exe backend\test_workflow.py
@@ -281,15 +272,15 @@ backend\venv\Scripts\python.exe backend\test_api_readonly.py
 backend\venv\Scripts\python.exe backend\test_gaming_mouse_config.py
 ```
 
-`test_gaming_mouse_config.py` 会检查：
+`test_gaming_mouse_config.py` 浼氭鏌ワ細
 
-- 行业配置包含 `gaming_mouse`；
-- 品牌覆盖罗技、雷蛇、海盗船；
-- 维度覆盖七个电竞鼠标核心维度；
-- MockResearchProvider 返回符合 `RawResearchItem` 的数据；
-- mock 数据覆盖三个品牌和代表型号。
+- 琛屼笟閰嶇疆鍖呭惈 `gaming_mouse`锛?
+- 鍝佺墝瑕嗙洊缃楁妧銆侀浄铔囥€佹捣鐩楄埞锛?
+- 缁村害瑕嗙洊涓冧釜鐢电珵榧犳爣鏍稿績缁村害锛?
+- MockResearchProvider 杩斿洖绗﹀悎 `RawResearchItem` 鐨勬暟鎹紱
+- mock 鏁版嵁瑕嗙洊涓変釜鍝佺墝鍜屼唬琛ㄥ瀷鍙枫€?
 
-## 设计原则
+## 璁捐鍘熷垯
 
 - Schema-first Agent communication
 - Evidence-grounded claims
@@ -300,4 +291,4 @@ backend\venv\Scripts\python.exe backend\test_gaming_mouse_config.py
 - Traceable and frontend-readable intermediate artifacts
 - Industry-config driven extensibility
 
-当前系统不是普通 LLM 报告生成器，而是 evidence-grounded、schema-validated、quality-controlled 的多 Agent 竞品分析工作流。
+褰撳墠绯荤粺涓嶆槸鏅€?LLM 鎶ュ憡鐢熸垚鍣紝鑰屾槸 evidence-grounded銆乻chema-validated銆乹uality-controlled 鐨勫 Agent 绔炲搧鍒嗘瀽宸ヤ綔娴併€?

@@ -15,6 +15,7 @@ from langchain_openai import ChatOpenAI
 
 from app.schemas.claim import Claim
 from app.schemas.product import ProductAgentOutput
+from app.services.context_manager import select_evidence_context
 
 
 BASE_URL = "https://ark.cn-beijing.volces.com/api/v3"
@@ -314,6 +315,7 @@ def _build_prompt(
     evidence_list: List[Dict[str, Any]],
     competitors: List[str],
     dimensions: List[str],
+    prompt_evidence: List[Dict[str, Any]],
 ) -> str:
     platforms = _get_platforms(evidence_list, competitors)
     return f"""
@@ -355,8 +357,8 @@ def _build_prompt(
 
 分析对象：{json.dumps(platforms, ensure_ascii=False)}
 分析维度：{json.dumps(dimensions, ensure_ascii=False)}
-evidence_list：
-{json.dumps(evidence_list, ensure_ascii=False)}
+evidence_list（已按可信度筛选，仅可引用以下 evidence_id）：
+{json.dumps(prompt_evidence, ensure_ascii=False)}
 """.strip()
 
 
@@ -365,10 +367,11 @@ def _generate_with_llm(
     evidence_list: List[Dict[str, Any]],
     competitors: List[str],
     dimensions: List[str],
+    prompt_evidence: List[Dict[str, Any]],
 ) -> Any:
     if llm is None:
         return None
-    response = llm.invoke(_build_prompt(evidence_list, competitors, dimensions))
+    response = llm.invoke(_build_prompt(evidence_list, competitors, dimensions, prompt_evidence))
     return _parse_response(_response_to_text(response))
 
 
@@ -529,7 +532,11 @@ def _normalize_llm_claims(
     return claims or fallback_claims
 
 
-def _append_trace(state: dict, product_claims: List[Dict[str, Any]]) -> None:
+def _append_trace(
+    state: dict,
+    product_claims: List[Dict[str, Any]],
+    context_summary: Dict[str, Any],
+) -> None:
     trace_log = state.setdefault("trace_log", [])
     trace_log.append(
         {
@@ -537,6 +544,8 @@ def _append_trace(state: dict, product_claims: List[Dict[str, Any]]) -> None:
             "agent_name": "ProductAgent",
             "status": "success",
             "output_summary": f"generated product_matrix and {len(product_claims)} product claims",
+            "context_selected_evidence_count": context_summary.get("selected_evidence_count", 0),
+            "context_trimmed_evidence_count": context_summary.get("trimmed_evidence_count", 0),
             "error": None,
         }
     )
@@ -565,6 +574,7 @@ def product_agent(state: dict) -> Dict[str, Any]:
     fallback_matrix = _build_fallback_matrix(evidence_list, competitors, dimensions)
     fallback_claims = _build_fallback_claims(existing_claims, evidence_list, competitors, dimensions)
     valid_ids = _valid_evidence_ids(evidence_list)
+    prompt_evidence, context_summary = select_evidence_context("ProductAgent", evidence_list)
 
     llm: ChatOpenAI | None = None
     if _llm_enabled() and os.getenv("ARK_EP") and os.getenv("ARK_API_KEY"):
@@ -574,7 +584,7 @@ def product_agent(state: dict) -> Dict[str, Any]:
             llm = None
 
     try:
-        llm_payload = _generate_with_llm(llm, evidence_list, competitors, dimensions)
+        llm_payload = _generate_with_llm(llm, evidence_list, competitors, dimensions, prompt_evidence)
         product_matrix = _normalize_llm_matrix(
             payload=llm_payload,
             fallback=fallback_matrix,
@@ -603,8 +613,12 @@ def product_agent(state: dict) -> Dict[str, Any]:
         "current_agent": "ProductAgent",
         "product_matrix": output.product_matrix,
         "claims": [*existing_claims, *product_claim_dicts],
+        "context_summary": {
+            **state.get("context_summary", {}),
+            "ProductAgent": context_summary,
+        },
     }
-    _append_trace(next_state, product_claim_dicts)
+    _append_trace(next_state, product_claim_dicts, context_summary)
 
     dimension_count = len(output.product_matrix.get("dimensions", {}))
     print(f"[ProductAgent] 产品矩阵生成完成，共 {dimension_count} 个维度")

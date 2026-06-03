@@ -38,7 +38,12 @@ def _claim_confidence(claim: Dict[str, Any]) -> float:
     return 0.7
 
 
-def _valid_claims(claims: List[Dict[str, Any]], existing_evidence_ids: set[str]) -> List[Dict[str, Any]]:
+def _valid_claims(
+    claims: List[Dict[str, Any]],
+    existing_evidence_ids: set[str],
+    excluded_claim_ids: set[str] | None = None,
+) -> List[Dict[str, Any]]:
+    excluded_claim_ids = excluded_claim_ids or set()
     valid_claims: List[Dict[str, Any]] = []
     seen: set[str] = set()
 
@@ -46,7 +51,7 @@ def _valid_claims(claims: List[Dict[str, Any]], existing_evidence_ids: set[str])
         if not isinstance(claim, dict):
             continue
         claim_id = _as_text(claim.get("claim_id"))
-        if not claim_id or claim_id in seen:
+        if not claim_id or claim_id in seen or claim_id in excluded_claim_ids:
             continue
         evidence_ids = [
             _as_text(evidence_id)
@@ -443,13 +448,20 @@ def strategy_agent(state: dict) -> Dict[str, Any]:
     ]
     metrics = calculate_report_metrics(state)
     needs_human_review = bool(state.get("needs_human_review", False))
+    faithfulness_report = state.get("faithfulness_report", {})
+    if not isinstance(faithfulness_report, dict):
+        faithfulness_report = {}
+    unsupported_claim_ids = {
+        _as_text(item) for item in state.get("unsupported_claim_ids", []) if _as_text(item)
+    }
 
     existing_evidence_ids = {
         _as_text(evidence.get("evidence_id"))
         for evidence in evidence_list
         if evidence.get("evidence_id")
     }
-    valid_claims = _valid_claims(claims, existing_evidence_ids)
+    # Exclude claims flagged as unfaithful so hallucinated conclusions never reach the report.
+    valid_claims = _valid_claims(claims, existing_evidence_ids, unsupported_claim_ids)
 
     is_rejected = (
         needs_human_review
@@ -479,6 +491,9 @@ def strategy_agent(state: dict) -> Dict[str, Any]:
             metrics=metrics,
             existing_evidence_ids=existing_evidence_ids,
         )
+
+    if isinstance(final_report, dict):
+        final_report["faithfulness_report"] = faithfulness_report
 
     output = StrategyAgentOutput(
         final_report=final_report,

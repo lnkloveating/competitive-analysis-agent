@@ -17,8 +17,8 @@ os.environ["STRATEGY_AGENT_USE_LLM"] = "0"
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 load_dotenv(Path(__file__).resolve().parent / ".env")
 
-from agents.workflow import app
-from agents.state import CompetitiveAnalysisState
+from orchestration.workflow import app
+from orchestration.state import CompetitiveAnalysisState
 
 
 initial_state: CompetitiveAnalysisState = {
@@ -29,18 +29,29 @@ initial_state: CompetitiveAnalysisState = {
     "analysis_scene": "电竞鼠标产品竞争格局与增长策略分析",
     "target_user": "电竞鼠标产品经理",
     "time_range": "近 12 个月",
-    "focus_dimensions": ["性能参数", "轻量化设计", "无线与续航", "软件生态", "用户口碑", "价格定位", "电竞品牌影响力"],
+    "focus_dimensions": ["性能参数", "轻量化设计", "无线与续航", "软件生态", "用户口碑", "价格定位", "电竞品牌影响力", "握持手感与人体工学"],
     "raw_research": [],
     "evidence_list": [],
+    "claims": [],
     "product_matrix": {},
     "business_matrix": {},
     "risk_flags": [],
+    "faithfulness_report": {},
+    "unsupported_claim_ids": [],
     "quality_result": {},
     "final_report": {},
+    "context_summary": {},
+    "review_ticket": {},
+    "trace_log": [],
+    "metrics": {},
+    "used_claim_ids": [],
+    "used_evidence_ids": [],
     "current_agent": "",
     "iteration_count": 0,
     "rejected_agents": [],
     "is_approved": False,
+    "needs_human_review": False,
+    "quality_status": "",
     "error_log": [],
 }
 

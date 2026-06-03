@@ -576,43 +576,67 @@ export function ReportPage({
 
     const activeTaskId = taskId;
     let cancelled = false;
+    let timerId: number | undefined;
+    let inFlight = false;
 
-    async function loadReport() {
-      setIsLoading(true);
-      setError(null);
+    // 最终报告在 StrategyAgent / 人工复核阶段才生成；任务运行中先轮询，完成后停止。
+    async function refreshReport() {
+      if (inFlight) {
+        return;
+      }
+      inFlight = true;
 
-      try {
-        const [reportResult, risksResult] = await Promise.all([
-          analysisApi.getReport(activeTaskId),
-          analysisApi.getRisks(activeTaskId),
-        ]);
+      const [statusResult, reportResult, risksResult] = await Promise.allSettled([
+        analysisApi.getStatus(activeTaskId),
+        analysisApi.getReport(activeTaskId),
+        analysisApi.getRisks(activeTaskId),
+      ]);
 
-        if (cancelled) {
-          return;
-        }
+      if (cancelled) {
+        inFlight = false;
+        return;
+      }
 
-        const risksRecord = asRecord(risksResult);
+      if (reportResult.status === "fulfilled") {
+        setReportResponse(reportResult.value);
+        setError(null);
+      } else {
+        setError(
+          reportResult.reason instanceof Error
+            ? reportResult.reason.message
+            : "报告加载失败。",
+        );
+      }
+
+      if (risksResult.status === "fulfilled") {
+        const risksRecord = asRecord(risksResult.value);
         const riskSource = risksRecord.risk_flags ?? risksRecord.risks;
-
-        setReportResponse(reportResult);
         setRiskFlags(Array.isArray(riskSource) ? (riskSource as RiskFlag[]) : []);
-      } catch (err) {
-        if (!cancelled) {
-          setError(err instanceof Error ? err.message : "报告加载失败。");
-          setReportResponse(null);
-          setRiskFlags([]);
-        }
-      } finally {
-        if (!cancelled) {
-          setIsLoading(false);
-        }
+      }
+
+      setIsLoading(false);
+      inFlight = false;
+
+      const taskStatus =
+        statusResult.status === "fulfilled"
+          ? String(statusResult.value?.status || "").toLowerCase()
+          : "";
+      if ((taskStatus === "completed" || taskStatus === "failed") && timerId) {
+        window.clearInterval(timerId);
+        timerId = undefined;
       }
     }
 
-    loadReport();
+    setIsLoading(true);
+    setError(null);
+    refreshReport();
+    timerId = window.setInterval(refreshReport, 1800);
 
     return () => {
       cancelled = true;
+      if (timerId) {
+        window.clearInterval(timerId);
+      }
     };
   }, [taskId]);
 
