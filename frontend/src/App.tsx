@@ -436,6 +436,7 @@ export default function App() {
       onPauseDemo={pauseDemo}
       onResumeDemo={resumeDemo}
       onStopDemo={stopDemo}
+      showAmbientParticles={!inResultsView}
     >
       {inResultsView ? (
         <div className="page-enter" key="results-scroll">

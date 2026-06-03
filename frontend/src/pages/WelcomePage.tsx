@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import { authApi, type AuthUser } from "../api/authApi";
+import { ParticleField } from "../components/common/ParticleField";
 
 type WelcomePageProps = {
   onLogin: (token: string, user: AuthUser) => void;
@@ -172,11 +173,13 @@ export function WelcomePage({ onLogin }: WelcomePageProps) {
       onMouseMove={handlePointerMove}
       style={{
         background:
-          "radial-gradient(1200px 600px at 18% 12%, rgba(37,99,235,0.18), transparent 55%)," +
-          "radial-gradient(1000px 700px at 85% 80%, rgba(129,140,248,0.16), transparent 55%)," +
-          "linear-gradient(135deg, #050912 0%, #0a1326 52%, #070b18 100%)",
+          "radial-gradient(1100px 560px at 50% -6%, rgba(56,130,246,0.12), transparent 60%)," +
+          "linear-gradient(180deg, #05070e 0%, #060a16 55%, #03040c 100%)",
       }}
     >
+      {/* 自研 canvas 粒子背景 */}
+      <ParticleField className="pointer-events-none absolute inset-0" />
+
       {/* 动态网格 */}
       <div
         className="welcome-grid pointer-events-none absolute inset-[-60px] opacity-60"
