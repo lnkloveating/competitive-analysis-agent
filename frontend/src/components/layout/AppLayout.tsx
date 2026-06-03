@@ -1,6 +1,7 @@
 import type { ReactNode } from "react";
 import { Sidebar, type NavItem } from "./Sidebar";
 import { TopBar } from "./TopBar";
+import { ParticleField } from "../common/ParticleField";
 import type { DemoStep } from "../../utils/demoSteps";
 import type { AuthUser } from "../../api/authApi";
 
@@ -23,6 +24,8 @@ type AppLayoutProps = {
   onPauseDemo: () => void;
   onResumeDemo: () => void;
   onStopDemo: () => void;
+  /** 分析前界面显示自研粒子背景；进入分析后关闭，给 3D 留干净舞台。 */
+  showAmbientParticles?: boolean;
 };
 
 export function AppLayout({
@@ -44,11 +47,15 @@ export function AppLayout({
   onPauseDemo,
   onResumeDemo,
   onStopDemo,
+  showAmbientParticles = false,
 }: AppLayoutProps) {
   const currentStep = demoSteps[demoStepIndex];
 
   return (
     <div className="app-background min-h-screen bg-[#020617] text-slate-100">
+      {showAmbientParticles ? (
+        <ParticleField className="pointer-events-none fixed inset-0 z-0" />
+      ) : null}
       <div className="relative z-10 flex min-h-screen flex-col md:h-screen md:flex-row">
         <Sidebar
           items={navItems}
