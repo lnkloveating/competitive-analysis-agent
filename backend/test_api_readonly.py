@@ -30,7 +30,7 @@ REQUEST_BODY = {
     "analysis_scene": "电竞鼠标竞品分析",
     "target_user": "产品经理",
     "time_range": "近12个月",
-    "focus_dimensions": ["性能参数", "轻量化设计", "无线与续航", "软件生态", "用户口碑", "价格定位", "电竞品牌影响力"],
+    "focus_dimensions": ["性能参数", "轻量化设计", "无线与续航", "软件生态", "用户口碑", "价格定位", "电竞品牌影响力", "握持手感与人体工学"],
 }
 
 
@@ -59,6 +59,9 @@ if __name__ == "__main__":
         "/quality",
         "/metrics",
         "/risks",
+        "/faithfulness",
+        "/errors",
+        "/review-ticket",
         "/artifacts",
     ]
     for path in readonly_paths:

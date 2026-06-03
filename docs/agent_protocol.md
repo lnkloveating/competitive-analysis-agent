@@ -1,10 +1,10 @@
-# Agent Protocol
+﻿# Agent Protocol
 
 ## 1. Overview
 
-本系统是一个多 Agent 协作的竞品分析后端，使用 LangGraph 编排 7 个 Agent，模拟一个结构化数字调研小组。
+鏈郴缁熸槸涓€涓 Agent 鍗忎綔鐨勭珵鍝佸垎鏋愬悗绔紝浣跨敤 LangGraph 缂栨帓 7 涓?Agent锛屾ā鎷熶竴涓粨鏋勫寲鏁板瓧璋冪爺灏忕粍銆?
 
-当前主流程：
+褰撳墠涓绘祦绋嬶細
 
 ```text
 ResearchAgent
@@ -15,22 +15,22 @@ ResearchAgent
   -> StrategyAgent
 ```
 
-其中 `ProductAgent` 和 `BusinessAgent` 可以并行执行，最终通过 state reducer 合并 `claims` 和 `trace_log`。
+鍏朵腑 `ProductAgent` 鍜?`BusinessAgent` 鍙互骞惰鎵ц锛屾渶缁堥€氳繃 state reducer 鍚堝苟 `claims` 鍜?`trace_log`銆?
 
-核心约束：
+鏍稿績绾︽潫锛?
 
-- Agent 之间不是自由聊天，而是通过结构化 `state` 传递信息。
-- 每个 Agent 有明确职责边界，只读写自己负责的字段。
-- 每个核心输出都经过 Pydantic Schema 校验。
-- 最终报告必须引用已有 `claims` 和 `evidence_ids`。
-- `QualityAgent` 可以结构化定向打回，例如打回 `EvidenceAgent`、`ProductAgent` 或 `BusinessAgent`。
-- 三次自动修复失败后进入 `HumanReviewRequired`，不会 force pass。
+- Agent 涔嬮棿涓嶆槸鑷敱鑱婂ぉ锛岃€屾槸閫氳繃缁撴瀯鍖?`state` 浼犻€掍俊鎭€?
+- 姣忎釜 Agent 鏈夋槑纭亴璐ｈ竟鐣岋紝鍙鍐欒嚜宸辫礋璐ｇ殑瀛楁銆?
+- 姣忎釜鏍稿績杈撳嚭閮界粡杩?Pydantic Schema 鏍￠獙銆?
+- 鏈€缁堟姤鍛婂繀椤诲紩鐢ㄥ凡鏈?`claims` 鍜?`evidence_ids`銆?
+- `QualityAgent` 鍙互缁撴瀯鍖栧畾鍚戞墦鍥烇紝渚嬪鎵撳洖 `EvidenceAgent`銆乣ProductAgent` 鎴?`BusinessAgent`銆?
+- 涓夋鑷姩淇澶辫触鍚庤繘鍏?`HumanReviewRequired`锛屼笉浼?force pass銆?
 
-当前系统不是普通 LLM 报告生成器，而是 evidence-grounded、schema-validated、quality-controlled 的多 Agent 竞品分析工作流。
+褰撳墠绯荤粺涓嶆槸鏅€?LLM 鎶ュ憡鐢熸垚鍣紝鑰屾槸 evidence-grounded銆乻chema-validated銆乹uality-controlled 鐨勫 Agent 绔炲搧鍒嗘瀽宸ヤ綔娴併€?
 
 ## 2. Agent Workflow
 
-正常路径：
+姝ｅ父璺緞锛?
 
 ```text
 ResearchAgent
@@ -47,7 +47,7 @@ ResearchAgent
      final_report
 ```
 
-质量打回路径：
+璐ㄩ噺鎵撳洖璺緞锛?
 
 ```text
 QualityAgent
@@ -55,7 +55,7 @@ QualityAgent
   -> rerun downstream workflow
 ```
 
-三次失败后的人工审核路径：
+涓夋澶辫触鍚庣殑浜哄伐瀹℃牳璺緞锛?
 
 ```text
 QualityAgent
@@ -63,7 +63,7 @@ QualityAgent
   -> human-review draft final_report
 ```
 
-`QualityAgent` 输出 `reject_to`，可选目标包括：
+`QualityAgent` 杈撳嚭 `reject_to`锛屽彲閫夌洰鏍囧寘鎷細
 
 - `ResearchAgent`
 - `EvidenceAgent`
@@ -72,7 +72,7 @@ QualityAgent
 - `RiskAgent`
 - `StrategyAgent`
 
-如果 `iteration_count >= 3` 后仍然 rejected，系统进入 human review mode，并设置：
+濡傛灉 `iteration_count >= 3` 鍚庝粛鐒?rejected锛岀郴缁熻繘鍏?human review mode锛屽苟璁剧疆锛?
 
 ```text
 needs_human_review = True
@@ -82,105 +82,94 @@ is_approved = False
 
 ## 3. State Contract
 
-workflow state 是 Agent 间唯一可信的数据交换协议。核心字段如下：
+workflow state 鏄?Agent 闂村敮涓€鍙俊鐨勬暟鎹氦鎹㈠崗璁€傛牳蹇冨瓧娈靛涓嬶細
 
 | Field | Type | Description |
 |---|---|---|
-| `raw_research` | `list[dict]` | `ResearchAgent` 采集或 mock 的原始调研材料 |
-| `evidence_list` | `list[dict]` | `EvidenceAgent` 生成的结构化证据 |
-| `product_matrix` | `dict` | `ProductAgent` 生成的产品维度矩阵 |
-| `business_matrix` | `dict` | `BusinessAgent` 生成的商业维度矩阵 |
-| `claims` | `list[dict]` | `ProductAgent` / `BusinessAgent` 生成的结构化结论 |
-| `risk_flags` | `list[dict]` | `RiskAgent` 生成的风险标记 |
-| `quality_result` | `dict` | `QualityAgent` 生成的质检结果 |
-| `final_report` | `dict` | `StrategyAgent` 或 `HumanReviewRequired` 生成的报告 |
-| `trace_log` | `list[dict]` | Agent 执行轨迹 |
-| `metrics` | `dict` | 报告质量指标，当前可能为空对象 |
-| `used_claim_ids` | `list[str]` | `final_report` 使用过的 `claim_id` |
-| `used_evidence_ids` | `list[str]` | `final_report` 使用过的 `evidence_id` |
-| `current_agent` | `str` | 当前 Agent 或最近完成的 Agent |
-| `iteration_count` | `int` | `QualityAgent` 自动打回次数 |
-| `rejected_agents` | `list[str]` | 被打回过的 Agent |
-| `is_approved` | `bool` | 当前 workflow 是否通过质量检查 |
-| `needs_human_review` | `bool` | 是否需要人工审核 |
-| `quality_status` | `str` | `approved` / `rejected_after_max_iterations` 等状态 |
+| `raw_research` | `list[dict]` | `ResearchAgent` 閲囬泦鎴?mock 鐨勫師濮嬭皟鐮旀潗鏂?|
+| `evidence_list` | `list[dict]` | `EvidenceAgent` 鐢熸垚鐨勭粨鏋勫寲璇佹嵁 |
+| `product_matrix` | `dict` | `ProductAgent` 鐢熸垚鐨勪骇鍝佺淮搴︾煩闃?|
+| `business_matrix` | `dict` | `BusinessAgent` 鐢熸垚鐨勫晢涓氱淮搴︾煩闃?|
+| `claims` | `list[dict]` | `ProductAgent` / `BusinessAgent` 鐢熸垚鐨勭粨鏋勫寲缁撹 |
+| `risk_flags` | `list[dict]` | `RiskAgent` 鐢熸垚鐨勯闄╂爣璁?|
+| `quality_result` | `dict` | `QualityAgent` 鐢熸垚鐨勮川妫€缁撴灉 |
+| `final_report` | `dict` | `StrategyAgent` 鎴?`HumanReviewRequired` 鐢熸垚鐨勬姤鍛?|
+| `trace_log` | `list[dict]` | Agent 鎵ц杞ㄨ抗 |
+| `metrics` | `dict` | 鎶ュ憡璐ㄩ噺鎸囨爣锛屽綋鍓嶅彲鑳戒负绌哄璞?|
+| `used_claim_ids` | `list[str]` | `final_report` 浣跨敤杩囩殑 `claim_id` |
+| `used_evidence_ids` | `list[str]` | `final_report` 浣跨敤杩囩殑 `evidence_id` |
+| `current_agent` | `str` | 褰撳墠 Agent 鎴栨渶杩戝畬鎴愮殑 Agent |
+| `iteration_count` | `int` | `QualityAgent` 鑷姩鎵撳洖娆℃暟 |
+| `rejected_agents` | `list[str]` | 琚墦鍥炶繃鐨?Agent |
+| `is_approved` | `bool` | 褰撳墠 workflow 鏄惁閫氳繃璐ㄩ噺妫€鏌?|
+| `needs_human_review` | `bool` | 鏄惁闇€瑕佷汉宸ュ鏍?|
+| `quality_status` | `str` | `approved` / `rejected_after_max_iterations` 绛夌姸鎬?|
 
-并行分支说明：
+骞惰鍒嗘敮璇存槑锛?
 
-- `ProductAgent` 和 `BusinessAgent` 都会追加 `claims`。
-- `ProductAgent` 和 `BusinessAgent` 都会追加 `trace_log`。
-- workflow state 已通过 reducer 合并这两个字段，避免并行分支覆盖彼此输出。
+- `ProductAgent` 鍜?`BusinessAgent` 閮戒細杩藉姞 `claims`銆?
+- `ProductAgent` 鍜?`BusinessAgent` 閮戒細杩藉姞 `trace_log`銆?
+- workflow state 宸查€氳繃 reducer 鍚堝苟杩欎袱涓瓧娈碉紝閬垮厤骞惰鍒嗘敮瑕嗙洊褰兼杈撳嚭銆?
 
-## 4. Agent Compatibility Layer
+## 4. Orchestration Layer
 
-当前目录结构：
+褰撳墠鐩綍缁撴瀯锛?
 
 ```text
-backend/agents/
-  research_agent.py      # compatibility wrapper
-  evidence_agent.py      # compatibility wrapper
-  product_agent.py       # compatibility wrapper
-  business_agent.py      # compatibility wrapper
-  risk_agent.py          # compatibility wrapper
-  quality_agent.py       # compatibility wrapper
-  strategy_agent.py      # compatibility wrapper
+backend/orchestration/
+  workflow.py            # LangGraph DAG, routing, retry/human review handoff
+  state.py               # shared workflow state and merge reducers
+  industry_config.py     # industry presets and dimensions
 
 backend/app/agents/
   research_agent.py      # real implementation
   evidence_agent.py      # real implementation
   product_agent.py       # real implementation
   business_agent.py      # real implementation
+  verification_agent.py  # real implementation
   risk_agent.py          # real implementation
   quality_agent.py       # real implementation
   strategy_agent.py      # real implementation
 ```
 
-`backend/agents` 保留是为了兼容旧 workflow 的 import 路径。新业务逻辑都在 `backend/app/agents`。
-
-当前不删除 wrapper，是为了保证：
-
-- 旧 workflow 稳定运行；
-- 旧测试无需大规模改动；
-- 后续迁移可以逐步推进。
-
-如果未来 workflow 直接改为 import `app.agents`，可以再考虑删除 wrapper。
+`backend/orchestration` only owns workflow assembly, routing, state reducers, and industry presets. Agent business logic stays in `backend/app/agents`.
 
 ## Gaming Mouse Demo Scenario
 
-当前 Demo 第一阶段聚焦 `gaming_mouse` 电竞鼠标垂直场景，而不是泛电竞外设。
+褰撳墠 Demo 绗竴闃舵鑱氱劍 `gaming_mouse` 鐢电珵榧犳爣鍨傜洿鍦烘櫙锛岃€屼笉鏄硾鐢电珵澶栬銆?
 
-选择电竞鼠标的原因：
+閫夋嫨鐢电珵榧犳爣鐨勫師鍥狅細
 
-- 鼠标参数明确，适合结构化对比，例如传感器、DPI、回报率、重量、无线续航。
-- 公开数据充足，适合 evidence-grounded 分析。
-- 用户评论和评测内容丰富，适合展示 Evidence -> Claim -> Report 溯源链路。
-- 后端仍然通过 `industry_config` 支持多行业扩展，`gaming_peripherals` 没有删除。
+- 榧犳爣鍙傛暟鏄庣‘锛岄€傚悎缁撴瀯鍖栧姣旓紝渚嬪浼犳劅鍣ㄣ€丏PI銆佸洖鎶ョ巼銆侀噸閲忋€佹棤绾跨画鑸€?
+- 鍏紑鏁版嵁鍏呰冻锛岄€傚悎 evidence-grounded 鍒嗘瀽銆?
+- 鐢ㄦ埛璇勮鍜岃瘎娴嬪唴瀹逛赴瀵岋紝閫傚悎灞曠ず Evidence -> Claim -> Report 婧簮閾捐矾銆?
+- 鍚庣浠嶇劧閫氳繃 `industry_config` 鏀寔澶氳涓氭墿灞曪紝`gaming_peripherals` 娌℃湁鍒犻櫎銆?
 
-当前 `gaming_mouse` 覆盖品牌：
+褰撳墠 `gaming_mouse` 瑕嗙洊鍝佺墝锛?
 
-- 罗技
-- 雷蛇
-- 海盗船
+- 缃楁妧
+- 闆疯泧
+- 娴风洍鑸?
 
-代表型号：
+浠ｈ〃鍨嬪彿锛?
 
-| 品牌 | 代表型号 |
+| 鍝佺墝 | 浠ｈ〃鍨嬪彿 |
 |---|---|
-| 罗技 | `G Pro X Superlight 2`、`G502 X Plus` |
-| 雷蛇 | `Viper V3 Pro`、`DeathAdder V3 Pro` |
-| 海盗船 | `M75 Air`、`SABRE RGB PRO Wireless` |
+| 缃楁妧 | `G Pro X Superlight 2`銆乣G502 X Plus` |
+| 闆疯泧 | `Viper V3 Pro`銆乣DeathAdder V3 Pro` |
+| 娴风洍鑸?| `M75 Air`銆乣SABRE RGB PRO Wireless` |
 
-核心维度：
+鏍稿績缁村害锛?
 
-- 性能参数
-- 轻量化设计
-- 无线与续航
-- 软件生态
-- 用户口碑
-- 价格定位
-- 电竞品牌影响力
+- 鎬ц兘鍙傛暟
+- 杞婚噺鍖栬璁?
+- 鏃犵嚎涓庣画鑸?
+- 杞欢鐢熸€?
+- 鐢ㄦ埛鍙ｇ
+- 浠锋牸瀹氫綅
+- 鐢电珵鍝佺墝褰卞搷鍔?
 
-Mock 数据来源类型覆盖：
+Mock 鏁版嵁鏉ユ簮绫诲瀷瑕嗙洊锛?
 
 - `official`
 - `review`
@@ -189,26 +178,26 @@ Mock 数据来源类型覆盖：
 - `news`
 - `report`
 
-Mock URL 使用 `mock://gaming_mouse/...` 风格，并包含 `dimension`、`related_dimension`、`product_name`、`category` 兼容字段，方便后续 Agent 识别行业、产品和维度。
+Mock URL 浣跨敤 `mock://gaming_mouse/...` 椋庢牸锛屽苟鍖呭惈 `dimension`銆乣related_dimension`銆乣product_name`銆乣category` 鍏煎瀛楁锛屾柟渚垮悗缁?Agent 璇嗗埆琛屼笟銆佷骇鍝佸拰缁村害銆?
 
 ## 5. Agent Protocol Details
 
 ### 5.1 ResearchAgent
 
 **Implementation:** `backend/app/agents/research_agent.py`  
-**Compatibility wrapper:** `backend/agents/research_agent.py`
+**Orchestrated by:** `backend/orchestration/workflow.py`
 
 #### Responsibility
 
-负责采集竞品公开信息。当前通过 `MockResearchProvider` 生成 LLM mock 或 deterministic mock 数据。未来接真实爬虫时，可以扩展为 `CrawlerResearchProvider`。
+璐熻矗閲囬泦绔炲搧鍏紑淇℃伅銆傚綋鍓嶉€氳繃 `MockResearchProvider` 鐢熸垚 LLM mock 鎴?deterministic mock 鏁版嵁銆傛湭鏉ユ帴鐪熷疄鐖櫕鏃讹紝鍙互鎵╁睍涓?`CrawlerResearchProvider`銆?
 
-当 `industry_key = "gaming_mouse"` 时，`MockResearchProvider` 会生成电竞鼠标 mock 数据，覆盖：
+褰?`industry_key = "gaming_mouse"` 鏃讹紝`MockResearchProvider` 浼氱敓鎴愮數绔為紶鏍?mock 鏁版嵁锛岃鐩栵細
 
-- 罗技 `G Pro X Superlight 2`、`G502 X Plus`
-- 雷蛇 `Viper V3 Pro`、`DeathAdder V3 Pro`
-- 海盗船 `M75 Air`、`SABRE RGB PRO Wireless`
+- 缃楁妧 `G Pro X Superlight 2`銆乣G502 X Plus`
+- 闆疯泧 `Viper V3 Pro`銆乣DeathAdder V3 Pro`
+- 娴风洍鑸?`M75 Air`銆乣SABRE RGB PRO Wireless`
 
-并覆盖 source type：
+骞惰鐩?source type锛?
 
 - `official`
 - `review`
@@ -232,13 +221,13 @@ Mock URL 使用 `mock://gaming_mouse/...` 风格，并包含 `dimension`、`rela
 
 - `state["raw_research"]`
 - `state["current_agent"] = "ResearchAgent"`
-- `trace_log` 追加 `ResearchAgent` 执行记录
+- `trace_log` 杩藉姞 `ResearchAgent` 鎵ц璁板綍
 
 #### Schema
 
 `RawResearchItem`
 
-字段包括：
+瀛楁鍖呮嫭锛?
 
 - `item_id`
 - `platform`
@@ -252,36 +241,36 @@ Mock URL 使用 `mock://gaming_mouse/...` 风格，并包含 `dimension`、`rela
 
 #### Forbidden Behaviors
 
-- 不生成 `evidence_list`
-- 不生成 `claims`
-- 不生成 `product_matrix`
-- 不生成 `business_matrix`
-- 不生成 `final_report`
+- 涓嶇敓鎴?`evidence_list`
+- 涓嶇敓鎴?`claims`
+- 涓嶇敓鎴?`product_matrix`
+- 涓嶇敓鎴?`business_matrix`
+- 涓嶇敓鎴?`final_report`
 
 #### Notes
 
-- 当前 mock URL 使用 `mock://...`。
-- `crawl_method = "llm_mock"`。
-- 真实爬虫只需要实现 `ResearchProvider.collect(state)` 接口。
+- 褰撳墠 mock URL 浣跨敤 `mock://...`銆?
+- `crawl_method = "llm_mock"`銆?
+- 鐪熷疄鐖櫕鍙渶瑕佸疄鐜?`ResearchProvider.collect(state)` 鎺ュ彛銆?
 
 ### 5.2 EvidenceAgent
 
 **Implementation:** `backend/app/agents/evidence_agent.py`  
-**Compatibility wrapper:** `backend/agents/evidence_agent.py`
+**Orchestrated by:** `backend/orchestration/workflow.py`
 
 #### Responsibility
 
-将 `raw_research` 转换为结构化证据。
+灏?`raw_research` 杞崲涓虹粨鏋勫寲璇佹嵁銆?
 
-在 `gaming_mouse` 场景下，重点识别这些维度：
+鍦?`gaming_mouse` 鍦烘櫙涓嬶紝閲嶇偣璇嗗埆杩欎簺缁村害锛?
 
-- 性能参数
-- 轻量化设计
-- 无线与续航
-- 软件生态
-- 用户口碑
-- 价格定位
-- 电竞品牌影响力
+- 鎬ц兘鍙傛暟
+- 杞婚噺鍖栬璁?
+- 鏃犵嚎涓庣画鑸?
+- 杞欢鐢熸€?
+- 鐢ㄦ埛鍙ｇ
+- 浠锋牸瀹氫綅
+- 鐢电珵鍝佺墝褰卞搷鍔?
 
 #### Inputs
 
@@ -293,13 +282,13 @@ Mock URL 使用 `mock://gaming_mouse/...` 风格，并包含 `dimension`、`rela
 
 - `state["evidence_list"]`
 - `state["current_agent"] = "EvidenceAgent"`
-- `trace_log` 追加 `EvidenceAgent` 执行记录
+- `trace_log` 杩藉姞 `EvidenceAgent` 鎵ц璁板綍
 
 #### Schema
 
 `EvidenceItem`
 
-字段包括：
+瀛楁鍖呮嫭锛?
 
 - `evidence_id`
 - `platform`
@@ -314,7 +303,7 @@ Mock URL 使用 `mock://gaming_mouse/...` 风格，并包含 `dimension`、`rela
 - `raw_content`
 - `confidence_score`
 
-兼容字段：
+鍏煎瀛楁锛?
 
 - `dimension`
 - `content`
@@ -324,33 +313,33 @@ Mock URL 使用 `mock://gaming_mouse/...` 风格，并包含 `dimension`、`rela
 
 #### Forbidden Behaviors
 
-- 不生成 `final_report`
-- 不生成 `product_matrix`
-- 不生成 `business_matrix`
-- 不新增与 `raw_research` 无关的证据
+- 涓嶇敓鎴?`final_report`
+- 涓嶇敓鎴?`product_matrix`
+- 涓嶇敓鎴?`business_matrix`
+- 涓嶆柊澧炰笌 `raw_research` 鏃犲叧鐨勮瘉鎹?
 
 #### Notes
 
-- `evidence_id` 使用稳定序号：`EV001`、`EV002`、`EV003`。
-- 每条 evidence 都需要能通过 `EvidenceItem` schema 校验。
+- `evidence_id` 浣跨敤绋冲畾搴忓彿锛歚EV001`銆乣EV002`銆乣EV003`銆?
+- 姣忔潯 evidence 閮介渶瑕佽兘閫氳繃 `EvidenceItem` schema 鏍￠獙銆?
 
 ### 5.3 ProductAgent
 
 **Implementation:** `backend/app/agents/product_agent.py`  
-**Compatibility wrapper:** `backend/agents/product_agent.py`
+**Orchestrated by:** `backend/orchestration/workflow.py`
 
 #### Responsibility
 
-基于 `evidence_list` 生成产品维度分析，输出 `product_matrix`，并生成 `PCL` 开头的 product claims。
+鍩轰簬 `evidence_list` 鐢熸垚浜у搧缁村害鍒嗘瀽锛岃緭鍑?`product_matrix`锛屽苟鐢熸垚 `PCL` 寮€澶寸殑 product claims銆?
 
-在 `gaming_mouse` 场景下，`ProductAgent` 重点关注：
+鍦?`gaming_mouse` 鍦烘櫙涓嬶紝`ProductAgent` 閲嶇偣鍏虫敞锛?
 
-- 传感器 / DPI / 回报率 / 延迟
-- 重量 / 轻量化
-- 外形 / 手感 / 人体工学
-- 无线连接 / 续航
-- 驱动软件 / 配置能力
-- 用户体验和常见问题
+- 浼犳劅鍣?/ DPI / 鍥炴姤鐜?/ 寤惰繜
+- 閲嶉噺 / 杞婚噺鍖?
+- 澶栧舰 / 鎵嬫劅 / 浜轰綋宸ュ
+- 鏃犵嚎杩炴帴 / 缁埅
+- 椹卞姩杞欢 / 閰嶇疆鑳藉姏
+- 鐢ㄦ埛浣撻獙鍜屽父瑙侀棶棰?
 
 #### Inputs
 
@@ -363,32 +352,32 @@ Mock URL 使用 `mock://gaming_mouse/...` 风格，并包含 `dimension`、`rela
 - `state["product_matrix"]`
 - append `state["claims"]`
 - `state["current_agent"] = "ProductAgent"`
-- `trace_log` 追加 `ProductAgent` 执行记录
+- `trace_log` 杩藉姞 `ProductAgent` 鎵ц璁板綍
 
 #### Schema
 
 - `ProductAgentOutput`
 - `Claim`
 
-`product_matrix` 兼容结构：
+`product_matrix` 鍏煎缁撴瀯锛?
 
 ```text
 dimensions -> dimension -> platform -> score / summary / evidence_ids
 ```
 
-新增字段：
+鏂板瀛楁锛?
 
 - `analysis`
 - `confidence_score`
 
-Claim 示例：
+Claim 绀轰緥锛?
 
 ```json
 {
   "claim_id": "PCL001",
-  "content": "罗技在性能参数维度有较多证据支持。",
-  "dimension": "性能参数",
-  "related_platforms": ["罗技"],
+  "content": "缃楁妧鍦ㄦ€ц兘鍙傛暟缁村害鏈夎緝澶氳瘉鎹敮鎸併€?,
+  "dimension": "鎬ц兘鍙傛暟",
+  "related_platforms": ["缃楁妧"],
   "evidence_ids": ["EV001"],
   "confidence_score": 0.8,
   "generated_by": "ProductAgent"
@@ -397,32 +386,32 @@ Claim 示例：
 
 #### Forbidden Behaviors
 
-- 不生成新的 evidence
-- 不生成 `BusinessAgent` 的商业结论
-- 不生成 `final_report`
-- 不创建没有 `evidence_ids` 的 claim
-- 不引用不存在的 `evidence_id`
+- 涓嶇敓鎴愭柊鐨?evidence
+- 涓嶇敓鎴?`BusinessAgent` 鐨勫晢涓氱粨璁?
+- 涓嶇敓鎴?`final_report`
+- 涓嶅垱寤烘病鏈?`evidence_ids` 鐨?claim
+- 涓嶅紩鐢ㄤ笉瀛樺湪鐨?`evidence_id`
 
 #### Notes
 
-`claim_id` 使用 `PCL001`、`PCL002` 等稳定序号。
+`claim_id` 浣跨敤 `PCL001`銆乣PCL002` 绛夌ǔ瀹氬簭鍙枫€?
 
 ### 5.4 BusinessAgent
 
 **Implementation:** `backend/app/agents/business_agent.py`  
-**Compatibility wrapper:** `backend/agents/business_agent.py`
+**Orchestrated by:** `backend/orchestration/workflow.py`
 
 #### Responsibility
 
-基于 `evidence_list` 生成商业维度分析，输出 `business_matrix`，并生成 `BCL` 开头的 business claims。
+鍩轰簬 `evidence_list` 鐢熸垚鍟嗕笟缁村害鍒嗘瀽锛岃緭鍑?`business_matrix`锛屽苟鐢熸垚 `BCL` 寮€澶寸殑 business claims銆?
 
-在 `gaming_mouse` 场景下，`BusinessAgent` 重点关注：
+鍦?`gaming_mouse` 鍦烘櫙涓嬶紝`BusinessAgent` 閲嶇偣鍏虫敞锛?
 
-- 价格定位
-- 电竞品牌影响力
-- 产品线策略
-- 目标用户定位
-- 渠道和销售策略
+- 浠锋牸瀹氫綅
+- 鐢电珵鍝佺墝褰卞搷鍔?
+- 浜у搧绾跨瓥鐣?
+- 鐩爣鐢ㄦ埛瀹氫綅
+- 娓犻亾鍜岄攢鍞瓥鐣?
 
 #### Inputs
 
@@ -435,32 +424,32 @@ Claim 示例：
 - `state["business_matrix"]`
 - append `state["claims"]`
 - `state["current_agent"] = "BusinessAgent"`
-- `trace_log` 追加 `BusinessAgent` 执行记录
+- `trace_log` 杩藉姞 `BusinessAgent` 鎵ц璁板綍
 
 #### Schema
 
 - `BusinessAgentOutput`
 - `Claim`
 
-`business_matrix` 兼容结构：
+`business_matrix` 鍏煎缁撴瀯锛?
 
 ```text
 dimensions -> dimension -> platform -> score / summary / evidence_ids
 ```
 
-新增字段：
+鏂板瀛楁锛?
 
 - `analysis`
 - `confidence_score`
 
-Claim 示例：
+Claim 绀轰緥锛?
 
 ```json
 {
   "claim_id": "BCL001",
-  "content": "雷蛇在价格定位上更偏向高端电竞用户。",
-  "dimension": "价格定位",
-  "related_platforms": ["雷蛇"],
+  "content": "闆疯泧鍦ㄤ环鏍煎畾浣嶄笂鏇村亸鍚戦珮绔數绔炵敤鎴枫€?,
+  "dimension": "浠锋牸瀹氫綅",
+  "related_platforms": ["闆疯泧"],
   "evidence_ids": ["EV006"],
   "confidence_score": 0.76,
   "generated_by": "BusinessAgent"
@@ -469,25 +458,25 @@ Claim 示例：
 
 #### Forbidden Behaviors
 
-- 不生成新的 evidence
-- 不生成 `ProductAgent` 的技术细节结论
-- 不生成 `final_report`
-- 不创建没有 `evidence_ids` 的 claim
-- 不引用不存在的 `evidence_id`
+- 涓嶇敓鎴愭柊鐨?evidence
+- 涓嶇敓鎴?`ProductAgent` 鐨勬妧鏈粏鑺傜粨璁?
+- 涓嶇敓鎴?`final_report`
+- 涓嶅垱寤烘病鏈?`evidence_ids` 鐨?claim
+- 涓嶅紩鐢ㄤ笉瀛樺湪鐨?`evidence_id`
 
 #### Notes
 
-- `claim_id` 使用 `BCL001`、`BCL002` 等稳定序号。
-- `ProductAgent` 和 `BusinessAgent` 并行时，`claims` 会通过 reducer 合并。
+- `claim_id` 浣跨敤 `BCL001`銆乣BCL002` 绛夌ǔ瀹氬簭鍙枫€?
+- `ProductAgent` 鍜?`BusinessAgent` 骞惰鏃讹紝`claims` 浼氶€氳繃 reducer 鍚堝苟銆?
 
 ### 5.5 RiskAgent
 
 **Implementation:** `backend/app/agents/risk_agent.py`  
-**Compatibility wrapper:** `backend/agents/risk_agent.py`
+**Orchestrated by:** `backend/orchestration/workflow.py`
 
 #### Responsibility
 
-基于 evidence、claims、product matrix、business matrix 识别风险，输出结构化 `risk_flags`。
+鍩轰簬 evidence銆乧laims銆乸roduct matrix銆乥usiness matrix 璇嗗埆椋庨櫓锛岃緭鍑虹粨鏋勫寲 `risk_flags`銆?
 
 #### Inputs
 
@@ -502,21 +491,21 @@ Claim 示例：
 
 - `state["risk_flags"]`
 - `state["current_agent"] = "RiskAgent"`
-- `trace_log` 追加 `RiskAgent` 执行记录
+- `trace_log` 杩藉姞 `RiskAgent` 鎵ц璁板綍
 
 #### Schema
 
 - `RiskAgentOutput`
 - `RiskFlag`
 
-`risk_type` 只允许：
+`risk_type` 鍙厑璁革細
 
 - `data_credibility`
 - `data_timeliness`
 - `evidence_gap`
 - `compliance`
 
-兼容字段：
+鍏煎瀛楁锛?
 
 - `risk_id`
 - `affected_platform`
@@ -526,40 +515,40 @@ Claim 示例：
 
 #### Implemented Rules
 
-- low credibility 占比过高
-- claim 仅由 low evidence 支撑
-- `publish_time` 缺失较多
-- 证据超过 2 年 / 3 年
-- 竞品缺证据
-- 维度缺证据
-- matrix cell 缺 `evidence_ids`
-- `user_review` 中疑似包含用户名、`user_id`、`profile`、头像、主页、email、手机号等隐私信息
+- low credibility 鍗犳瘮杩囬珮
+- claim 浠呯敱 low evidence 鏀拺
+- `publish_time` 缂哄け杈冨
+- 璇佹嵁瓒呰繃 2 骞?/ 3 骞?
+- 绔炲搧缂鸿瘉鎹?
+- 缁村害缂鸿瘉鎹?
+- matrix cell 缂?`evidence_ids`
+- `user_review` 涓枒浼煎寘鍚敤鎴峰悕銆乣user_id`銆乣profile`銆佸ご鍍忋€佷富椤点€乪mail銆佹墜鏈哄彿绛夐殣绉佷俊鎭?
 
 #### Forbidden Behaviors
 
-- 不生成 evidence
-- 不生成 claims
-- 不修改 `product_matrix`
-- 不修改 `business_matrix`
-- 不决定是否 approved
-- 不生成 `final_report`
+- 涓嶇敓鎴?evidence
+- 涓嶇敓鎴?claims
+- 涓嶄慨鏀?`product_matrix`
+- 涓嶄慨鏀?`business_matrix`
+- 涓嶅喅瀹氭槸鍚?approved
+- 涓嶇敓鎴?`final_report`
 
 #### Notes
 
-`RiskAgent` 只负责识别风险。是否打回由 `QualityAgent` 决定。
+`RiskAgent` 鍙礋璐ｈ瘑鍒闄┿€傛槸鍚︽墦鍥炵敱 `QualityAgent` 鍐冲畾銆?
 
 ### 5.6 QualityAgent
 
 **Implementation:** `backend/app/agents/quality_agent.py`  
-**Compatibility wrapper:** `backend/agents/quality_agent.py`
+**Orchestrated by:** `backend/orchestration/workflow.py`
 
 #### Responsibility
 
-对 workflow 中间产物进行结构化质量检查，判断是否 approved。如果 rejected，输出 `reject_to`、`reject_reason`、`required_actions`。三次失败后进入 human review mode。
+瀵?workflow 涓棿浜х墿杩涜缁撴瀯鍖栬川閲忔鏌ワ紝鍒ゆ柇鏄惁 approved銆傚鏋?rejected锛岃緭鍑?`reject_to`銆乣reject_reason`銆乣required_actions`銆備笁娆″け璐ュ悗杩涘叆 human review mode銆?
 
-当前 `QualityAgent` 已检查 competitor / dimension / evidence_ids / matrix / high risk 等通用质量规则。
+褰撳墠 `QualityAgent` 宸叉鏌?competitor / dimension / evidence_ids / matrix / high risk 绛夐€氱敤璐ㄩ噺瑙勫垯銆?
 
-`gaming_mouse` 的代表型号覆盖检查暂未加入 `QualityAgent` 强规则。目前通过 `MockResearchProvider` 的 mock 数据和 `backend/test_gaming_mouse_config.py` 保证三个品牌、七个维度和代表型号覆盖。这一项可作为 future extension。
+`gaming_mouse` 鐨勪唬琛ㄥ瀷鍙疯鐩栨鏌ユ殏鏈姞鍏?`QualityAgent` 寮鸿鍒欍€傜洰鍓嶉€氳繃 `MockResearchProvider` 鐨?mock 鏁版嵁鍜?`backend/test_gaming_mouse_config.py` 淇濊瘉涓変釜鍝佺墝銆佷竷涓淮搴﹀拰浠ｈ〃鍨嬪彿瑕嗙洊銆傝繖涓€椤瑰彲浣滀负 future extension銆?
 
 #### Inputs
 
@@ -581,23 +570,23 @@ Claim 示例：
 - `state["needs_human_review"]`
 - `state["quality_status"]`
 - `state["current_agent"] = "QualityAgent"`
-- `trace_log` 追加 `QualityAgent` 执行记录
+- `trace_log` 杩藉姞 `QualityAgent` 鎵ц璁板綍
 
 #### Schema
 
 `QualityResult`
 
-核心检查：
+鏍稿績妫€鏌ワ細
 
-- claims 是否都有 `evidence_ids`
-- claim 引用的 `evidence_ids` 是否真实存在
-- 每个 competitor 是否有 evidence 覆盖
-- 每个 `focus_dimension` 是否有 evidence 覆盖
-- `product_matrix` 是否为空
-- `business_matrix` 是否为空
-- 是否存在 high severity risk
+- claims 鏄惁閮芥湁 `evidence_ids`
+- claim 寮曠敤鐨?`evidence_ids` 鏄惁鐪熷疄瀛樺湪
+- 姣忎釜 competitor 鏄惁鏈?evidence 瑕嗙洊
+- 姣忎釜 `focus_dimension` 鏄惁鏈?evidence 瑕嗙洊
+- `product_matrix` 鏄惁涓虹┖
+- `business_matrix` 鏄惁涓虹┖
+- 鏄惁瀛樺湪 high severity risk
 
-Rejected 输出包括：
+Rejected 杈撳嚭鍖呮嫭锛?
 
 - `reject_to`
 - `reject_reason`
@@ -606,7 +595,7 @@ Rejected 输出包括：
 - `missing_platforms`
 - `checked_items`
 
-兼容字段：
+鍏煎瀛楁锛?
 
 - `status`
 - `quality_score`
@@ -616,21 +605,21 @@ Rejected 输出包括：
 
 #### Forbidden Behaviors
 
-- 不生成 evidence
-- 不生成 claims
-- 不生成 `final_report`
-- 不把 rejected 状态强制标记为 approved
-- 不让 LLM 在证据不足时编造内容
+- 涓嶇敓鎴?evidence
+- 涓嶇敓鎴?claims
+- 涓嶇敓鎴?`final_report`
+- 涓嶆妸 rejected 鐘舵€佸己鍒舵爣璁颁负 approved
+- 涓嶈 LLM 鍦ㄨ瘉鎹笉瓒虫椂缂栭€犲唴瀹?
 
 #### Notes
 
-Human review 触发条件：
+Human review 瑙﹀彂鏉′欢锛?
 
 ```text
 iteration_count >= 3 and still rejected
 ```
 
-触发后设置：
+瑙﹀彂鍚庤缃細
 
 ```text
 needs_human_review = True
@@ -641,11 +630,11 @@ is_approved = False
 ### 5.7 StrategyAgent
 
 **Implementation:** `backend/app/agents/strategy_agent.py`  
-**Compatibility wrapper:** `backend/agents/strategy_agent.py`
+**Orchestrated by:** `backend/orchestration/workflow.py`
 
 #### Responsibility
 
-在 `QualityAgent` approved 后生成正式 `final_report`。报告基于 claims、product matrix、business matrix、risk flags、quality result 生成，并保证报告中的 claim/evidence 引用真实存在。
+鍦?`QualityAgent` approved 鍚庣敓鎴愭寮?`final_report`銆傛姤鍛婂熀浜?claims銆乸roduct matrix銆乥usiness matrix銆乺isk flags銆乹uality result 鐢熸垚锛屽苟淇濊瘉鎶ュ憡涓殑 claim/evidence 寮曠敤鐪熷疄瀛樺湪銆?
 
 #### Inputs
 
@@ -663,19 +652,19 @@ is_approved = False
 - `state["used_claim_ids"]`
 - `state["used_evidence_ids"]`
 - `state["current_agent"] = "StrategyAgent"`
-- `trace_log` 追加 `StrategyAgent` 执行记录
+- `trace_log` 杩藉姞 `StrategyAgent` 鎵ц璁板綍
 
 #### Schema
 
 `StrategyAgentOutput`
 
-`final_report` 旧字段兼容：
+`final_report` 鏃у瓧娈靛吋瀹癸細
 
 - `executive_summary`
 - `competitive_ranking`
 - `swot_analysis`
 
-新增标准字段：
+鏂板鏍囧噯瀛楁锛?
 
 - `competitor_ranking`
 - `swot`
@@ -688,28 +677,28 @@ is_approved = False
 
 #### Rules
 
-- `used_claim_ids` 必须全部来自 `state["claims"]`
-- `used_evidence_ids` 必须全部来自 `state["evidence_list"]`
-- `strategic_recommendations[].supporting_claim_ids` 必须真实存在
-- `strategic_recommendations[].supporting_evidence_ids` 必须真实存在
-- 不存在的 ID 会被过滤，不允许进入 `final_report`
+- `used_claim_ids` 蹇呴』鍏ㄩ儴鏉ヨ嚜 `state["claims"]`
+- `used_evidence_ids` 蹇呴』鍏ㄩ儴鏉ヨ嚜 `state["evidence_list"]`
+- `strategic_recommendations[].supporting_claim_ids` 蹇呴』鐪熷疄瀛樺湪
+- `strategic_recommendations[].supporting_evidence_ids` 蹇呴』鐪熷疄瀛樺湪
+- 涓嶅瓨鍦ㄧ殑 ID 浼氳杩囨护锛屼笉鍏佽杩涘叆 `final_report`
 
 #### Forbidden Behaviors
 
-- 不生成新的 evidence
-- 不生成新的 claims
-- 不引用不存在的 `claim_id`
-- 不引用不存在的 `evidence_id`
-- 不在 rejected / `needs_human_review` 状态下生成正式报告
-- 不隐藏 `risk_flags` 和 `quality_result`
+- 涓嶇敓鎴愭柊鐨?evidence
+- 涓嶇敓鎴愭柊鐨?claims
+- 涓嶅紩鐢ㄤ笉瀛樺湪鐨?`claim_id`
+- 涓嶅紩鐢ㄤ笉瀛樺湪鐨?`evidence_id`
+- 涓嶅湪 rejected / `needs_human_review` 鐘舵€佷笅鐢熸垚姝ｅ紡鎶ュ憡
+- 涓嶉殣钘?`risk_flags` 鍜?`quality_result`
 
 #### Notes
 
-如果 `needs_human_review = True` 或 `quality_result.approved = False`，`StrategyAgent` 只生成待人工审核草稿，不生成正式报告。
+濡傛灉 `needs_human_review = True` 鎴?`quality_result.approved = False`锛宍StrategyAgent` 鍙敓鎴愬緟浜哄伐瀹℃牳鑽夌锛屼笉鐢熸垚姝ｅ紡鎶ュ憡銆?
 
 ## 6. Claim and Evidence Traceability
 
-Traceability 链路：
+Traceability 閾捐矾锛?
 
 ```text
 RawResearchItem
@@ -719,7 +708,7 @@ RawResearchItem
   -> Final Report
 ```
 
-ID 规则：
+ID 瑙勫垯锛?
 
 | Type | ID Format |
 |---|---|
@@ -727,29 +716,29 @@ ID 规则：
 | Product Claim ID | `PCL001`, `PCL002` |
 | Business Claim ID | `BCL001`, `BCL002` |
 
-校验规则：
+鏍￠獙瑙勫垯锛?
 
-- `Claim.evidence_ids` 必须存在于 `evidence_list`
-- `final_report.used_claim_ids` 必须存在于 `claims`
-- `final_report.used_evidence_ids` 必须存在于 `evidence_list`
-- `strategic_recommendations[].supporting_claim_ids` 必须存在于 `claims`
-- `strategic_recommendations[].supporting_evidence_ids` 必须存在于 `evidence_list`
+- `Claim.evidence_ids` 蹇呴』瀛樺湪浜?`evidence_list`
+- `final_report.used_claim_ids` 蹇呴』瀛樺湪浜?`claims`
+- `final_report.used_evidence_ids` 蹇呴』瀛樺湪浜?`evidence_list`
+- `strategic_recommendations[].supporting_claim_ids` 蹇呴』瀛樺湪浜?`claims`
+- `strategic_recommendations[].supporting_evidence_ids` 蹇呴』瀛樺湪浜?`evidence_list`
 
-当前已有 `backend/test_traceability.py` 检查这些引用链，确保最终报告不引用不存在的 claim 或 evidence。
+褰撳墠宸叉湁 `backend/test_traceability.py` 妫€鏌ヨ繖浜涘紩鐢ㄩ摼锛岀‘淇濇渶缁堟姤鍛婁笉寮曠敤涓嶅瓨鍦ㄧ殑 claim 鎴?evidence銆?
 
 ## 7. Quality Feedback Loop
 
-`QualityAgent` 不是只返回 pass/fail，而是输出结构化质检结果：
+`QualityAgent` 涓嶆槸鍙繑鍥?pass/fail锛岃€屾槸杈撳嚭缁撴瀯鍖栬川妫€缁撴灉锛?
 
 ```json
 {
   "approved": false,
   "score": 70,
   "reject_to": "EvidenceAgent",
-  "reject_reason": "部分分析维度缺少证据。",
-  "missing_dimensions": ["价格定位"],
+  "reject_reason": "閮ㄥ垎鍒嗘瀽缁村害缂哄皯璇佹嵁銆?,
+  "missing_dimensions": ["浠锋牸瀹氫綅"],
   "missing_platforms": [],
-  "required_actions": ["补充价格定位相关 evidence"],
+  "required_actions": ["琛ュ厖浠锋牸瀹氫綅鐩稿叧 evidence"],
   "checked_items": {
     "all_claims_have_evidence": true,
     "all_evidence_ids_valid": true,
@@ -759,28 +748,28 @@ ID 规则：
 }
 ```
 
-`reject_to` 的路由含义：
+`reject_to` 鐨勮矾鐢卞惈涔夛細
 
 | Problem | Typical reject_to |
 |---|---|
-| Evidence 缺失 | `EvidenceAgent` |
-| Product matrix 问题 | `ProductAgent` |
-| Business matrix 问题 | `BusinessAgent` |
-| Risk 高风险 | `EvidenceAgent` / `RiskAgent` / `ResearchAgent` |
+| Evidence 缂哄け | `EvidenceAgent` |
+| Product matrix 闂 | `ProductAgent` |
+| Business matrix 闂 | `BusinessAgent` |
+| Risk 楂橀闄?| `EvidenceAgent` / `RiskAgent` / `ResearchAgent` |
 
-实际路由由 `quality_router` 根据 `quality_result` 和 `iteration_count` 决定。
+瀹為檯璺敱鐢?`quality_router` 鏍规嵁 `quality_result` 鍜?`iteration_count` 鍐冲畾銆?
 
 ## 8. Human Review Mode
 
-如果 `QualityAgent` 自动打回 3 次后仍然失败，系统不会 force pass，也不会让 LLM 编造正式报告。
+濡傛灉 `QualityAgent` 鑷姩鎵撳洖 3 娆″悗浠嶇劧澶辫触锛岀郴缁熶笉浼?force pass锛屼篃涓嶄細璁?LLM 缂栭€犳寮忔姤鍛娿€?
 
-系统进入：
+绯荤粺杩涘叆锛?
 
 ```text
 HumanReviewRequired
 ```
 
-状态字段：
+鐘舵€佸瓧娈碉細
 
 ```text
 needs_human_review = True
@@ -788,7 +777,7 @@ quality_status = "rejected_after_max_iterations"
 is_approved = False
 ```
 
-此时 `final_report` 会变成待人工审核草稿，包含：
+姝ゆ椂 `final_report` 浼氬彉鎴愬緟浜哄伐瀹℃牳鑽夌锛屽寘鍚細
 
 - `quality_result`
 - `risk_flags`
@@ -800,11 +789,11 @@ is_approved = False
 - `draft_claims`
 - `disclaimer`
 
-前端应将该状态展示为“待人工审核”，不要展示为正式 approved 报告。
+鍓嶇搴斿皢璇ョ姸鎬佸睍绀轰负鈥滃緟浜哄伐瀹℃牳鈥濓紝涓嶈灞曠ず涓烘寮?approved 鎶ュ憡銆?
 
 ## 9. Trace Log Protocol
 
-`trace_log` 中每条记录大致包括：
+`trace_log` 涓瘡鏉¤褰曞ぇ鑷村寘鎷細
 
 ```json
 {
@@ -817,13 +806,13 @@ is_approved = False
 }
 ```
 
-说明：
+璇存槑锛?
 
-- `duration_ms` 是可选字段，不是每个当前 Agent 都一定写入。
-- `error` 正常为 `null`。
-- `status` 常见值包括 `success`、`rejected`、`failed`、`schema_failed`。
+- `duration_ms` 鏄彲閫夊瓧娈碉紝涓嶆槸姣忎釜褰撳墠 Agent 閮戒竴瀹氬啓鍏ャ€?
+- `error` 姝ｅ父涓?`null`銆?
+- `status` 甯歌鍊煎寘鎷?`success`銆乣rejected`銆乣failed`銆乣schema_failed`銆?
 
-`trace_log` 覆盖：
+`trace_log` 瑕嗙洊锛?
 
 - `ResearchAgent`
 - `EvidenceAgent`
@@ -834,16 +823,16 @@ is_approved = False
 - `StrategyAgent`
 - `HumanReviewRequired`
 
-用途：
+鐢ㄩ€旓細
 
-- 前端 Workflow 页面
+- 鍓嶇 Workflow 椤甸潰
 - Agent Replay
 - Debug
-- 答辩展示
+- 绛旇京灞曠ず
 
 ## 10. Frontend-facing Readonly APIs
 
-当前 FastAPI 已提供以下只读接口，供 Agent 工作台展示中间产物：
+褰撳墠 FastAPI 宸叉彁渚涗互涓嬪彧璇绘帴鍙ｏ紝渚?Agent 宸ヤ綔鍙板睍绀轰腑闂翠骇鐗╋細
 
 ```text
 GET /api/analysis/{task_id}/evidence
@@ -855,42 +844,42 @@ GET /api/analysis/{task_id}/risks
 GET /api/analysis/{task_id}/artifacts
 ```
 
-接口约束：
+鎺ュ彛绾︽潫锛?
 
-- 不会触发 workflow。
-- 只读取已有 task state。
-- `task_id` 不存在返回 404。
-- 字段缺失时返回空数组或空对象。
-- 用于前端 Agent 工作台展示 evidence、claims、trace、quality、risks 和产物摘要。
+- 涓嶄細瑙﹀彂 workflow銆?
+- 鍙鍙栧凡鏈?task state銆?
+- `task_id` 涓嶅瓨鍦ㄨ繑鍥?404銆?
+- 瀛楁缂哄け鏃惰繑鍥炵┖鏁扮粍鎴栫┖瀵硅薄銆?
+- 鐢ㄤ簬鍓嶇 Agent 宸ヤ綔鍙板睍绀?evidence銆乧laims銆乼race銆乹uality銆乺isks 鍜屼骇鐗╂憳瑕併€?
 
-完整 API 说明见 `docs/api.md`。
+瀹屾暣 API 璇存槑瑙?`docs/api.md`銆?
 
 ## 11. Design Principles
 
-本系统遵循以下设计原则：
+鏈郴缁熼伒寰互涓嬭璁″師鍒欙細
 
 1. **Schema-first Agent communication**  
-   Agent 之间通过结构化 state 和 Pydantic Schema 传递信息。
+   Agent 涔嬮棿閫氳繃缁撴瀯鍖?state 鍜?Pydantic Schema 浼犻€掍俊鎭€?
 
 2. **Evidence-grounded claims**  
-   Product / Business claims 必须绑定真实存在的 `evidence_ids`。
+   Product / Business claims 蹇呴』缁戝畾鐪熷疄瀛樺湪鐨?`evidence_ids`銆?
 
 3. **No unsupported final report**  
-   StrategyAgent 不允许生成没有 claim/evidence 支撑的正式结论。
+   StrategyAgent 涓嶅厑璁哥敓鎴愭病鏈?claim/evidence 鏀拺鐨勬寮忕粨璁恒€?
 
 4. **Quality rejection before strategy generation**  
-   QualityAgent 先做结构化质检，只有 approved 才进入正式 StrategyAgent 报告。
+   QualityAgent 鍏堝仛缁撴瀯鍖栬川妫€锛屽彧鏈?approved 鎵嶈繘鍏ユ寮?StrategyAgent 鎶ュ憡銆?
 
 5. **Human review instead of force pass**  
-   三次自动修复失败后进入人工审核，不强制通过。
+   涓夋鑷姩淇澶辫触鍚庤繘鍏ヤ汉宸ュ鏍革紝涓嶅己鍒堕€氳繃銆?
 
 6. **Backward compatibility during migration**  
-   `backend/agents` wrapper 保留旧 import 路径，真实实现迁移到 `backend/app/agents`。
+   `backend/orchestration` owns DAG wiring and routing, while real implementations stay in `backend/app/agents`.
 
 7. **Traceable and frontend-readable intermediate artifacts**  
-   中间产物通过只读 API 暴露，便于前端展示、调试和答辩说明。
+   涓棿浜х墿閫氳繃鍙 API 鏆撮湶锛屼究浜庡墠绔睍绀恒€佽皟璇曞拰绛旇京璇存槑銆?
 
 8. **Industry-config driven extensibility**  
-   当前 Demo 聚焦 `gaming_mouse`，但行业信息仍通过配置驱动，后续可以扩展到泛电竞外设、智能手机、耳机、摄影器材等场景。
+   褰撳墠 Demo 鑱氱劍 `gaming_mouse`锛屼絾琛屼笟淇℃伅浠嶉€氳繃閰嶇疆椹卞姩锛屽悗缁彲浠ユ墿灞曞埌娉涚數绔炲璁俱€佹櫤鑳芥墜鏈恒€佽€虫満銆佹憚褰卞櫒鏉愮瓑鍦烘櫙銆?
 
-当前系统不是普通 LLM 报告生成器，而是 evidence-grounded、schema-validated、quality-controlled 的多 Agent 竞品分析工作流。
+褰撳墠绯荤粺涓嶆槸鏅€?LLM 鎶ュ憡鐢熸垚鍣紝鑰屾槸 evidence-grounded銆乻chema-validated銆乹uality-controlled 鐨勫 Agent 绔炲搧鍒嗘瀽宸ヤ綔娴併€?

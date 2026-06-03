@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { Fragment, useEffect, useMemo, useState } from "react";
 import { EmptyState } from "../components/common/EmptyState";
 import { LoadingState } from "../components/common/LoadingState";
 import { StatusBadge } from "../components/common/StatusBadge";
@@ -9,8 +9,11 @@ import type {
   AgentTrace,
   AnalysisStatus,
   ArtifactsSummary,
+  ContextSummary,
+  ErrorLogItem,
   Metrics,
   QualityResult,
+  ReviewTicket,
 } from "../types/analysis";
 
 type WorkflowPageProps = {
@@ -42,6 +45,7 @@ type QualityPayload = {
   rejected_agents?: string[];
   needs_human_review?: boolean;
   quality_status?: string;
+  review_ticket?: ReviewTicket;
 };
 
 type WorkflowTrace = AgentTrace & {
@@ -54,6 +58,9 @@ type WorkflowTrace = AgentTrace & {
   reject_reason?: string | null;
   reason?: string | null;
   required_actions?: string[];
+  context_selected_evidence_count?: number;
+  context_trimmed_evidence_count?: number;
+  review_ticket_id?: string;
 };
 
 const agentNodes: AgentNode[] = [
@@ -76,6 +83,11 @@ const agentNodes: AgentNode[] = [
     name: "BusinessAgent",
     label: "商业",
     subtitle: "商业矩阵",
+  },
+  {
+    name: "VerificationAgent",
+    label: "校验",
+    subtitle: "忠实性校验",
   },
   {
     name: "RiskAgent",
@@ -146,6 +158,16 @@ function normalizeTrace(traceLog: unknown): WorkflowTrace[] {
       input_summary: typeof item.input_summary === "string" ? item.input_summary : undefined,
       output_summary: typeof item.output_summary === "string" ? item.output_summary : undefined,
       duration_ms: typeof item.duration_ms === "number" ? item.duration_ms : undefined,
+      context_selected_evidence_count:
+        typeof item.context_selected_evidence_count === "number"
+          ? item.context_selected_evidence_count
+          : undefined,
+      context_trimmed_evidence_count:
+        typeof item.context_trimmed_evidence_count === "number"
+          ? item.context_trimmed_evidence_count
+          : undefined,
+      review_ticket_id:
+        typeof item.review_ticket_id === "string" ? item.review_ticket_id : undefined,
       error:
         typeof item.error === "string" || item.error === null
           ? item.error
@@ -435,6 +457,9 @@ export function WorkflowPage({
   const [qualityPayload, setQualityPayload] = useState<QualityPayload | null>(null);
   const [artifacts, setArtifacts] = useState<ArtifactsSummary | null>(null);
   const [metrics, setMetrics] = useState<Metrics | null>(null);
+  const [contextSummary, setContextSummary] = useState<Record<string, ContextSummary>>({});
+  const [errorLog, setErrorLog] = useState<ErrorLogItem[]>([]);
+  const [reviewTicket, setReviewTicket] = useState<ReviewTicket | null>(null);
   const [selectedAgentName, setSelectedAgentName] = useState("ResearchAgent");
   const [isInitialLoading, setIsInitialLoading] = useState(false);
   const [isRefreshing, setIsRefreshing] = useState(false);
@@ -452,6 +477,9 @@ export function WorkflowPage({
       setQualityPayload(null);
       setArtifacts(null);
       setMetrics(null);
+      setContextSummary({});
+      setErrorLog([]);
+      setReviewTicket(null);
       setError(null);
       setLastUpdated(null);
       return;
@@ -496,12 +524,20 @@ export function WorkflowPage({
 
       if (traceResult.status === "fulfilled") {
         setTraceLog(normalizeTrace(traceResult.value?.trace_log));
+        setContextSummary(traceResult.value?.context_summary ?? {});
+        setErrorLog(
+          Array.isArray(traceResult.value?.error_log) ? traceResult.value.error_log : [],
+        );
+        setReviewTicket(traceResult.value?.review_ticket ?? null);
       } else {
         failedEndpoints.push("trace");
       }
 
       if (qualityResult.status === "fulfilled") {
         setQualityPayload(qualityResult.value);
+        if (qualityResult.value?.review_ticket?.ticket_id) {
+          setReviewTicket(qualityResult.value.review_ticket);
+        }
       } else {
         failedEndpoints.push("quality");
       }
@@ -624,6 +660,13 @@ export function WorkflowPage({
         .map(([agentName]) => agentName),
     );
   }, [traceHistoryByAgent]);
+  const contextEntries = useMemo(
+    () =>
+      Object.entries(contextSummary).filter(
+        ([, summary]) => summary && typeof summary === "object",
+      ),
+    [contextSummary],
+  );
 
   const selectedAgent =
     visibleAgentNodes.find((agent) => agent.name === selectedAgentName) ??
@@ -680,6 +723,14 @@ export function WorkflowPage({
       case "BusinessAgent":
         return outputSummary ||
           (artifacts?.has_business_matrix ? "商业分析矩阵已生成" : "暂无");
+      case "VerificationAgent": {
+        if (typeof metrics?.faithfulness_rate === "number") {
+          const rate = Math.round(metrics.faithfulness_rate * 100);
+          const unsupported = metrics?.unsupported_claim_count ?? 0;
+          return `忠实率 ${rate}%｜未支撑 ${unsupported} 条`;
+        }
+        return outputSummary || "暂无";
+      }
       case "RiskAgent":
         return typeof artifacts?.risk_count === "number"
           ? `${artifacts.risk_count} 条风险`
@@ -705,6 +756,29 @@ export function WorkflowPage({
         return outputSummary || "暂无";
     }
   }
+
+  // 可视化列：Product 与 Business 并行展示为同一列的两行，其余各占一列；
+  // 需要人工复核时在 Strategy 前插入人工复核列。
+  const flowColumns: Array<{ key: string; nodes: AgentNode[] }> = [
+    { key: "research", nodes: [agentNodes[0]] },
+    { key: "evidence", nodes: [agentNodes[1]] },
+    { key: "product-business", nodes: [agentNodes[2], agentNodes[3]] },
+    { key: "verification", nodes: [agentNodes[4]] },
+    { key: "risk", nodes: [agentNodes[5]] },
+    { key: "quality", nodes: [agentNodes[6]] },
+    ...(isHumanReviewRequired
+      ? [{ key: "human", nodes: [humanReviewNode] }]
+      : []),
+    { key: "strategy", nodes: [agentNodes[7]] },
+  ];
+  const orderedNodeNames = flowColumns.flatMap((column) =>
+    column.nodes.map((node) => node.name),
+  );
+  const stepIndexOf = (name: string) => orderedNodeNames.indexOf(name);
+  const columnTone = (column: { nodes: AgentNode[] }) =>
+    flowToneFromStatus(
+      derivedStatuses[column.nodes[column.nodes.length - 1].name] ?? "pending",
+    );
 
   if (!taskId) {
     return (
@@ -791,120 +865,45 @@ export function WorkflowPage({
 
           <div className="-mx-1 w-full max-w-full overflow-x-auto overflow-y-hidden px-1 pb-2">
             <div className="flex min-w-max items-center gap-4">
-              <div className="w-[210px] shrink-0">
-                <AgentCard
-                  agent={agentNodes[0]}
-                  badges={getNodeBadges(agentNodes[0].name)}
-                  index={0}
-                  isSelected={selectedAgentName === agentNodes[0].name}
-                  onSelect={() => setSelectedAgentName(agentNodes[0].name)}
-                  status={derivedStatuses[agentNodes[0].name] ?? "pending"}
-                  produce={getAgentProduce(agentNodes[0].name)}
-                />
-              </div>
-              <FlowConnector
-                tone={flowToneFromStatus(derivedStatuses[agentNodes[0].name] ?? "pending")}
-              />
-              <div className="w-[210px] shrink-0">
-                <AgentCard
-                  agent={agentNodes[1]}
-                  badges={getNodeBadges(agentNodes[1].name)}
-                  index={1}
-                  isSelected={selectedAgentName === agentNodes[1].name}
-                  onSelect={() => setSelectedAgentName(agentNodes[1].name)}
-                  status={derivedStatuses[agentNodes[1].name] ?? "pending"}
-                  produce={getAgentProduce(agentNodes[1].name)}
-                />
-              </div>
-              <FlowConnector
-                tone={flowToneFromStatus(derivedStatuses[agentNodes[1].name] ?? "pending")}
-              />
-              <div className="grid w-[230px] shrink-0 gap-3">
-                <AgentCard
-                  agent={agentNodes[2]}
-                  badges={getNodeBadges(agentNodes[2].name)}
-                  index={2}
-                  isSelected={selectedAgentName === agentNodes[2].name}
-                  onSelect={() => setSelectedAgentName(agentNodes[2].name)}
-                  status={derivedStatuses[agentNodes[2].name] ?? "pending"}
-                  produce={getAgentProduce(agentNodes[2].name)}
-                />
-                <AgentCard
-                  agent={agentNodes[3]}
-                  badges={getNodeBadges(agentNodes[3].name)}
-                  index={3}
-                  isSelected={selectedAgentName === agentNodes[3].name}
-                  onSelect={() => setSelectedAgentName(agentNodes[3].name)}
-                  status={derivedStatuses[agentNodes[3].name] ?? "pending"}
-                  produce={getAgentProduce(agentNodes[3].name)}
-                />
-              </div>
-              <FlowConnector
-                tone={flowToneFromStatus(derivedStatuses[agentNodes[3].name] ?? "pending")}
-              />
-              <div className="w-[210px] shrink-0">
-                <AgentCard
-                  agent={agentNodes[4]}
-                  badges={getNodeBadges(agentNodes[4].name)}
-                  index={4}
-                  isSelected={selectedAgentName === agentNodes[4].name}
-                  onSelect={() => setSelectedAgentName(agentNodes[4].name)}
-                  status={derivedStatuses[agentNodes[4].name] ?? "pending"}
-                  produce={getAgentProduce(agentNodes[4].name)}
-                />
-              </div>
-              <FlowConnector
-                tone={flowToneFromStatus(derivedStatuses[agentNodes[4].name] ?? "pending")}
-              />
-              <div className="w-[210px] shrink-0">
-                <AgentCard
-                  agent={agentNodes[5]}
-                  badges={getNodeBadges(agentNodes[5].name)}
-                  index={5}
-                  isSelected={selectedAgentName === agentNodes[5].name}
-                  onSelect={() => setSelectedAgentName(agentNodes[5].name)}
-                  status={derivedStatuses[agentNodes[5].name] ?? "pending"}
-                  produce={getAgentProduce(agentNodes[5].name)}
-                />
-              </div>
-              {isHumanReviewRequired ? (
-                <>
-                  <FlowConnector
-                    tone={flowToneFromStatus(
-                      derivedStatuses[agentNodes[5].name] ?? "pending",
-                    )}
-                  />
-                  <div className="w-[210px] shrink-0">
-                    <AgentCard
-                      agent={humanReviewNode}
-                      badges={[{ label: "人工复核", tone: "warning" }]}
-                      index={6}
-                      isSelected={selectedAgentName === humanReviewNode.name}
-                      onSelect={() => setSelectedAgentName(humanReviewNode.name)}
-                      status="required"
-                      produce={getAgentProduce(humanReviewNode.name)}
-                    />
-                  </div>
-                </>
-              ) : null}
-              <FlowConnector
-                tone={flowToneFromStatus(
-                  isHumanReviewRequired
-                    ? "required"
-                    : derivedStatuses[agentNodes[5].name] ?? "pending",
-                )}
-              />
-              <div className="w-[210px] shrink-0">
-                <AgentCard
-                  agent={agentNodes[6]}
-                  badges={getNodeBadges(agentNodes[6].name)}
-                  index={isHumanReviewRequired ? 7 : 6}
-                  isSelected={selectedAgentName === agentNodes[6].name}
-                  onSelect={() => setSelectedAgentName(agentNodes[6].name)}
-                  status={derivedStatuses[agentNodes[6].name] ?? "pending"}
-                  produce={getAgentProduce(agentNodes[6].name)}
-                />
-              </div>
+              {flowColumns.map((column, columnIndex) => (
+                <Fragment key={column.key}>
+                  {column.nodes.length > 1 ? (
+                    <div className="grid w-[230px] shrink-0 gap-3">
+                      {column.nodes.map((node) => (
+                        <AgentCard
+                          agent={node}
+                          badges={getNodeBadges(node.name)}
+                          index={stepIndexOf(node.name)}
+                          isSelected={selectedAgentName === node.name}
+                          key={node.name}
+                          onSelect={() => setSelectedAgentName(node.name)}
+                          status={derivedStatuses[node.name] ?? "pending"}
+                          produce={getAgentProduce(node.name)}
+                        />
+                      ))}
+                    </div>
+                  ) : (
+                    <div className="w-[210px] shrink-0">
+                      <AgentCard
+                        agent={column.nodes[0]}
+                        badges={
+                          column.nodes[0].name === humanReviewNode.name
+                            ? [{ label: "人工复核", tone: "warning" }]
+                            : getNodeBadges(column.nodes[0].name)
+                        }
+                        index={stepIndexOf(column.nodes[0].name)}
+                        isSelected={selectedAgentName === column.nodes[0].name}
+                        onSelect={() => setSelectedAgentName(column.nodes[0].name)}
+                        status={derivedStatuses[column.nodes[0].name] ?? "pending"}
+                        produce={getAgentProduce(column.nodes[0].name)}
+                      />
+                    </div>
+                  )}
+                  {columnIndex < flowColumns.length - 1 ? (
+                    <FlowConnector tone={columnTone(column)} />
+                  ) : null}
+                </Fragment>
+              ))}
             </div>
           </div>
         </section>
@@ -954,6 +953,142 @@ export function WorkflowPage({
             <p className="mt-2 text-sm font-medium text-slate-100">
               {rejectTo ? `已打回 ${rejectTo}` : "本次流程未触发打回"}
             </p>
+          </div>
+        </section>
+
+        <section className="grid min-w-0 gap-4 xl:grid-cols-3">
+          <div className="min-w-0 rounded-lg border border-slate-800 bg-slate-950/70 p-5">
+            <div className="flex items-start justify-between gap-3">
+              <div>
+                <h3 className="text-lg font-semibold text-white">上下文管理</h3>
+                <p className="mt-1 text-sm text-slate-400">
+                  展示进入大模型 prompt 前的证据裁剪结果。
+                </p>
+              </div>
+              <StatusBadge label={`${contextEntries.length} 个 Agent`} tone="info" />
+            </div>
+            <div className="mt-4 space-y-3">
+              {contextEntries.length > 0 ? (
+                contextEntries.map(([agentName, summary]) => (
+                  <div
+                    className="rounded-lg border border-slate-800 bg-slate-900/45 p-4"
+                    key={agentName}
+                  >
+                    <div className="flex flex-wrap items-center justify-between gap-2">
+                      <span className="text-sm font-semibold text-slate-100">
+                        {agentName}
+                      </span>
+                      <StatusBadge
+                        label={`裁剪 ${summary.trimmed_evidence_count ?? 0} 条`}
+                        tone={(summary.trimmed_evidence_count ?? 0) > 0 ? "warning" : "success"}
+                      />
+                    </div>
+                    <p className="mt-2 text-sm text-slate-400">
+                      原始 {summary.total_evidence_count ?? 0} 条，进入 prompt{" "}
+                      {summary.selected_evidence_count ?? 0} 条
+                    </p>
+                    {summary.selected_evidence_ids?.length ? (
+                      <p className="mt-2 break-words font-mono text-xs text-slate-500">
+                        {summary.selected_evidence_ids.slice(0, 8).join(" · ")}
+                      </p>
+                    ) : null}
+                  </div>
+                ))
+              ) : (
+                <p className="rounded-md border border-slate-800 bg-slate-900/45 px-4 py-3 text-sm text-slate-400">
+                  暂无上下文摘要。
+                </p>
+              )}
+            </div>
+          </div>
+
+          <div className="min-w-0 rounded-lg border border-slate-800 bg-slate-950/70 p-5">
+            <div className="flex items-start justify-between gap-3">
+              <div>
+                <h3 className="text-lg font-semibold text-white">错误恢复</h3>
+                <p className="mt-1 text-sm text-slate-400">
+                  Agent 异常会记录恢复动作，流程继续降级执行。
+                </p>
+              </div>
+              <StatusBadge
+                label={`${errorLog.length} 条`}
+                tone={errorLog.length > 0 ? "warning" : "success"}
+              />
+            </div>
+            <div className="mt-4 space-y-3">
+              {errorLog.length > 0 ? (
+                errorLog.slice(0, 4).map((item, index) => (
+                  <div
+                    className="rounded-lg border border-amber-400/25 bg-amber-400/10 p-4"
+                    key={item.error_id ?? `${item.agent_name}-${index}`}
+                  >
+                    <div className="flex flex-wrap items-center gap-2">
+                      <StatusBadge label={item.agent_name ?? "UnknownAgent"} tone="warning" />
+                      <span className="break-words text-sm text-amber-100">
+                        {item.error_type ?? "error"}
+                      </span>
+                    </div>
+                    <p className="mt-2 break-words text-sm leading-6 text-slate-200">
+                      {item.message || "无错误详情"}
+                    </p>
+                    <p className="mt-2 text-xs text-slate-500">
+                      恢复动作：{item.recover_action || "record_only"}
+                    </p>
+                  </div>
+                ))
+              ) : (
+                <p className="rounded-md border border-emerald-400/25 bg-emerald-400/10 px-4 py-3 text-sm text-emerald-100">
+                  本次流程未出现需要降级恢复的错误。
+                </p>
+              )}
+            </div>
+          </div>
+
+          <div className="min-w-0 rounded-lg border border-slate-800 bg-slate-950/70 p-5">
+            <div className="flex items-start justify-between gap-3">
+              <div>
+                <h3 className="text-lg font-semibold text-white">人工审核单</h3>
+                <p className="mt-1 text-sm text-slate-400">
+                  三次自动修复仍失败时生成 ReviewTicket。
+                </p>
+              </div>
+              <StatusBadge
+                label={reviewTicket?.ticket_id ? "已生成" : "未触发"}
+                tone={reviewTicket?.ticket_id ? "warning" : "neutral"}
+              />
+            </div>
+            {reviewTicket?.ticket_id ? (
+              <dl className="mt-4 space-y-3 text-sm">
+                <div>
+                  <dt className="text-slate-500">Ticket ID</dt>
+                  <dd className="mt-1 break-words font-mono text-slate-100">
+                    {reviewTicket.ticket_id}
+                  </dd>
+                </div>
+                <div>
+                  <dt className="text-slate-500">目标 Agent</dt>
+                  <dd className="mt-1 text-slate-100">
+                    {reviewTicket.target_agent || "未指定"}
+                  </dd>
+                </div>
+                <div>
+                  <dt className="text-slate-500">失败检查项</dt>
+                  <dd className="mt-2 flex flex-wrap gap-2">
+                    {(reviewTicket.failed_checks ?? []).length > 0 ? (
+                      reviewTicket.failed_checks?.map((item) => (
+                        <StatusBadge key={item} label={item} tone="warning" />
+                      ))
+                    ) : (
+                      <span className="text-slate-400">无</span>
+                    )}
+                  </dd>
+                </div>
+              </dl>
+            ) : (
+              <p className="mt-4 rounded-md border border-slate-800 bg-slate-900/45 px-4 py-3 text-sm text-slate-400">
+                质量门控尚未触发人工审核。
+              </p>
+            )}
           </div>
         </section>
 

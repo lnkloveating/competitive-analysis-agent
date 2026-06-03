@@ -254,8 +254,8 @@ const capabilityCards = [
   {
     key: "workflow",
     title: "多 Agent 协作",
-    desc: "调研、证据、产品、商业、风险、质检与策略 Agent 联动执行。",
-    detail: "7 个 Agent 按 DAG 顺序协作，可在 Agent 工作流查看执行路径。",
+    desc: "调研、证据、产品、商业、校验、风险、质检与策略 Agent 联动执行。",
+    detail: "8 个 Agent 按 DAG 顺序协作，可在 Agent 工作流查看执行路径。",
     tone: "from-[#22d3ee]/20",
     border: "border-[#38bdf8]/30",
   },
@@ -270,8 +270,8 @@ const capabilityCards = [
   {
     key: "quality",
     title: "质量门控审查",
-    desc: "QualityAgent 检查覆盖率、证据完整性和风险水位，不通过可打回重试。",
-    detail: "未通过自动打回重试，达到上限则转入人工审核。",
+    desc: "VerificationAgent 与 QualityAgent 联合检查证据支撑、覆盖率和风险水位。",
+    detail: "未通过自动打回重试，达到上限则转入人工审核并生成 ReviewTicket。",
     tone: "from-[#818cf8]/20",
     border: "border-[#818cf8]/30",
   },
@@ -294,9 +294,9 @@ const analysisFlowSteps = [
     code: "02",
     label: "Agent 工作流",
     subtitle: "AGENT DAG",
-    desc: "展示 Research、Evidence、Product、Business、Risk、Quality、Strategy 多 Agent 协作过程。",
+    desc: "展示 Research、Evidence、Product、Business、Verification、Risk、Quality、Strategy 多 Agent 协作过程。",
     input: "任务配置",
-    process: "7 个 Agent 协同执行",
+    process: "8 个 Agent 协同执行",
     output: "执行记录 Trace",
     positionClass: "mission-node-2",
   },
@@ -323,37 +323,49 @@ const analysisFlowSteps = [
     positionClass: "mission-node-4",
   },
   {
-    key: "quality",
+    key: "verification",
+    navigateKey: "quality",
     code: "05",
-    label: "质量审查",
-    subtitle: "QUALITY GATE",
-    desc: "检查证据完整性、维度覆盖率、风险水位和是否需要打回重试。",
-    input: "Evidence + Claims + Risk",
-    process: "QualityAgent 检查覆盖率、证据完整性和风险水位",
-    output: "Approved / Retry / Human Review",
+    label: "忠实校验",
+    subtitle: "FAITHFULNESS",
+    desc: "校验每条结论和矩阵数字能否被引用证据支撑，抑制幻觉。",
+    input: "Evidence + Claims + Matrix",
+    process: "VerificationAgent 校验证据支撑关系",
+    output: "Faithfulness Report / Matrix Issues",
     positionClass: "mission-node-5",
   },
   {
-    key: "report",
+    key: "quality",
     code: "06",
+    label: "质量审查",
+    subtitle: "QUALITY GATE",
+    desc: "检查证据完整性、维度覆盖率、风险水位和是否需要打回重试或人工审核。",
+    input: "Faithfulness + Evidence + Claims + Risk",
+    process: "QualityAgent 检查覆盖率、证据完整性和风险水位",
+    output: "Approved / Retry / Human Review",
+    positionClass: "mission-node-6",
+  },
+  {
+    key: "report",
+    code: "07",
     label: "最终报告",
     subtitle: "STRATEGY REPORT",
     desc: "展示通过质量门控后的竞品策略报告和引用追踪。",
     input: "通过质量门控的 Claim",
     process: "StrategyAgent 生成策略建议",
     output: "可追溯竞品策略报告",
-    positionClass: "mission-node-6",
+    positionClass: "mission-node-7",
   },
   {
     key: "metrics",
-    code: "07",
+    code: "08",
     label: "指标看板",
     subtitle: "METRICS",
-    desc: "展示证据数量、结论数量、质量得分、引用率和覆盖率等指标。",
+    desc: "展示证据数量、结论数量、质量得分、引用率、上下文裁剪和错误恢复等指标。",
     input: "全流程结果",
     process: "统计证据、结论、质量和引用指标",
-    output: "Citation Rate / Coverage Rate / Quality Score",
-    positionClass: "mission-node-7",
+    output: "Citation / Coverage / Faithfulness / Recovery",
+    positionClass: "mission-node-8",
   },
 ];
 
@@ -740,8 +752,7 @@ export function HomePage({
                       const isVisited = visitedKeys?.has(step.key) ?? false;
                       const isPreviewActive = index === activeFlowIndex;
                       const isActive = isCurrent || isPreviewActive;
-                      const hasPassedInPreview =
-                        index < activeFlowIndex && !currentDemoKey;
+                      const hasPassedInPreview = index < activeFlowIndex;
                       const isComplete =
                         missionCompleted || isVisited || hasPassedInPreview;
                       const output =
@@ -759,7 +770,7 @@ export function HomePage({
                                 : "mission-chip-idle"
                           }`}
                           key={step.key}
-                          onClick={() => onNavigate(step.key)}
+                          onClick={() => onNavigate(step.navigateKey ?? step.key)}
                           title={`${step.label}：${step.desc}`}
                           type="button"
                         >

@@ -12,7 +12,7 @@ from urllib.parse import quote
 from dotenv import load_dotenv
 from langchain_openai import ChatOpenAI
 
-from agents.industry_config import (
+from orchestration.industry_config import (
     get_industry_config,
     get_state_data_sources,
     get_state_dimensions,
@@ -398,6 +398,10 @@ def _gaming_mouse_content(
         "电竞品牌影响力": (
             f"{platform} {product_name} 的电竞品牌影响力来自职业战队、主播玩家、赛事曝光和社群讨论，"
             f"这些公开信号能够反映品牌在核心电竞人群中的心智占位和新品扩散效率。"
+        ),
+        "握持手感与人体工学": (
+            f"{platform} {product_name} 在握持手感与人体工学维度关注外形曲线、侧键位置、按键手感和不同手型适配，"
+            f"相关公开反馈可用于判断长时间 FPS 训练、MOBA 操作和日常使用中的舒适度与疲劳风险。"
         ),
     }
     return content_map.get(

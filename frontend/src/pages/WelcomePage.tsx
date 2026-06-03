@@ -20,12 +20,13 @@ const agentLabels: Array<Omit<AgentNode, "x" | "y">> = [
   { key: "evidence", zh: "证据", en: "Evidence", role: "抽取结构化证据并标记可信度" },
   { key: "product", zh: "产品", en: "Product", role: "生成产品维度分析矩阵" },
   { key: "business", zh: "商业", en: "Business", role: "分析定位、价格与市场策略" },
+  { key: "verification", zh: "校验", en: "Verification", role: "忠实性校验，剔除无证据支撑的结论" },
   { key: "risk", zh: "风险", en: "Risk", role: "识别数据缺口与潜在风险" },
   { key: "quality", zh: "质检", en: "Quality", role: "检查证据覆盖与结论可靠性" },
   { key: "strategy", zh: "策略", en: "Strategy", role: "生成最终竞品策略报告" },
 ];
 
-// 在以 (50,50) 为圆心、半径 36 的圆上均匀分布 7 个 Agent 节点（viewBox 0-100 单位）。
+// 在以 (50,50) 为圆心、半径 36 的圆上均匀分布 Agent 节点（数量由 agentLabels 决定，viewBox 0-100 单位）。
 const CENTER = 50;
 const RADIUS = 36;
 const agentNodes: AgentNode[] = agentLabels.map((label, index) => {
@@ -59,6 +60,7 @@ const agentSummary: Array<{ en: string; zh: string }> = [
   { en: "Evidence", zh: "证据抽取" },
   { en: "Product", zh: "产品分析" },
   { en: "Business", zh: "商业分析" },
+  { en: "Verification", zh: "忠实性校验" },
   { en: "Risk", zh: "风险识别" },
   { en: "Quality", zh: "质量审查" },
   { en: "Strategy", zh: "报告生成" },
@@ -362,8 +364,8 @@ export function WelcomePage({ onLogin }: WelcomePageProps) {
             className="welcome-fade-up mt-10 grid max-w-md grid-cols-3 gap-4"
             style={{ animationDelay: "0.68s" }}
           >
-            <StatCard value="7" label="个协作 Agent">
-              <p className="text-xs font-semibold text-[#7dd3fc]">7 个协作 Agent</p>
+            <StatCard value="8" label="个协作 Agent">
+              <p className="text-xs font-semibold text-[#7dd3fc]">8 个协作 Agent</p>
               <div className="mt-2 grid grid-cols-2 gap-x-3 gap-y-1.5">
                 {agentSummary.map((agent) => (
                   <div key={agent.en} className="flex items-baseline gap-1.5">

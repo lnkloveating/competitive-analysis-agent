@@ -5,7 +5,11 @@ import { LoadingState } from "../components/common/LoadingState";
 import { MetricCard } from "../components/common/MetricCard";
 import { StatusBadge } from "../components/common/StatusBadge";
 import { analysisApi } from "../api/analysisApi";
-import { getCredibilityExplain, getCredibilityLabel } from "../utils/labels";
+import {
+  getCredibilityExplain,
+  getCredibilityLabel,
+  getRiskTypeLabel,
+} from "../utils/labels";
 import type {
   ArtifactsSummary,
   Claim,
@@ -146,74 +150,86 @@ export function MetricsPage({
 
     const activeTaskId = taskId;
     let cancelled = false;
+    let timerId: number | undefined;
+    let inFlight = false;
 
-    async function loadMetrics() {
-      setIsLoading(true);
-      setError(null);
+    // 指标在 StrategyAgent / 人工复核阶段才生成；任务运行中先轮询，完成后停止。
+    async function refreshMetrics() {
+      if (inFlight) {
+        return;
+      }
+      inFlight = true;
 
-      try {
-        const [metricsResult, artifactsResult, risksResult, evidenceResult, claimsResult] =
-          await Promise.allSettled([
-            analysisApi.getMetrics(activeTaskId),
-            analysisApi.getArtifacts(activeTaskId),
-            analysisApi.getRisks(activeTaskId),
-            analysisApi.getEvidence(activeTaskId),
-            analysisApi.getClaims(activeTaskId),
-          ]);
+      const [statusResult, metricsResult, artifactsResult, risksResult, evidenceResult, claimsResult] =
+        await Promise.allSettled([
+          analysisApi.getStatus(activeTaskId),
+          analysisApi.getMetrics(activeTaskId),
+          analysisApi.getArtifacts(activeTaskId),
+          analysisApi.getRisks(activeTaskId),
+          analysisApi.getEvidence(activeTaskId),
+          analysisApi.getClaims(activeTaskId),
+        ]);
 
-        if (cancelled) {
-          return;
-        }
+      if (cancelled) {
+        inFlight = false;
+        return;
+      }
 
-        if (metricsResult.status === "fulfilled") {
-          setMetrics(metricsResult.value?.metrics ?? {});
-        } else {
-          throw metricsResult.reason instanceof Error
-            ? metricsResult.reason
-            : new Error("指标数据加载失败。");
-        }
-
-        setArtifacts(
-          artifactsResult.status === "fulfilled" ? artifactsResult.value : null,
+      if (metricsResult.status === "fulfilled") {
+        setMetrics(metricsResult.value?.metrics ?? {});
+        setError(null);
+      } else {
+        setError(
+          metricsResult.reason instanceof Error
+            ? metricsResult.reason.message
+            : "指标数据加载失败。",
         );
-        setRiskFlags(
-          risksResult.status === "fulfilled" &&
-            Array.isArray(risksResult.value?.risk_flags)
-            ? risksResult.value.risk_flags
-            : [],
-        );
-        setEvidenceList(
-          evidenceResult.status === "fulfilled" &&
-            Array.isArray(evidenceResult.value?.evidence_list)
-            ? evidenceResult.value.evidence_list
-            : [],
-        );
-        setClaims(
-          claimsResult.status === "fulfilled" &&
-            Array.isArray(claimsResult.value?.claims)
-            ? claimsResult.value.claims
-            : [],
-        );
-      } catch (err) {
-        if (!cancelled) {
-          setError(err instanceof Error ? err.message : "指标数据加载失败。");
-          setMetrics(null);
-          setArtifacts(null);
-          setRiskFlags([]);
-          setEvidenceList([]);
-          setClaims([]);
-        }
-      } finally {
-        if (!cancelled) {
-          setIsLoading(false);
-        }
+      }
+
+      setArtifacts(
+        artifactsResult.status === "fulfilled" ? artifactsResult.value : null,
+      );
+      setRiskFlags(
+        risksResult.status === "fulfilled" &&
+          Array.isArray(risksResult.value?.risk_flags)
+          ? risksResult.value.risk_flags
+          : [],
+      );
+      setEvidenceList(
+        evidenceResult.status === "fulfilled" &&
+          Array.isArray(evidenceResult.value?.evidence_list)
+          ? evidenceResult.value.evidence_list
+          : [],
+      );
+      setClaims(
+        claimsResult.status === "fulfilled" &&
+          Array.isArray(claimsResult.value?.claims)
+          ? claimsResult.value.claims
+          : [],
+      );
+      setIsLoading(false);
+      inFlight = false;
+
+      const taskStatus =
+        statusResult.status === "fulfilled"
+          ? String(statusResult.value?.status || "").toLowerCase()
+          : "";
+      if ((taskStatus === "completed" || taskStatus === "failed") && timerId) {
+        window.clearInterval(timerId);
+        timerId = undefined;
       }
     }
 
-    loadMetrics();
+    setIsLoading(true);
+    setError(null);
+    refreshMetrics();
+    timerId = window.setInterval(refreshMetrics, 1800);
 
     return () => {
       cancelled = true;
+      if (timerId) {
+        window.clearInterval(timerId);
+      }
     };
   }, [taskId]);
 
@@ -373,6 +389,58 @@ export function MetricsPage({
               />
             </div>
 
+            <section className="rounded-lg border border-slate-800 bg-slate-950/70 p-5">
+              <div className="mb-4 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+                <div>
+                  <h3 className="text-lg font-semibold text-white">
+                    可信输出与恢复指标
+                  </h3>
+                  <p className="mt-1 text-sm text-slate-400">
+                    对应上下文管理、幻觉抑制、错误恢复和人工审核闭环。
+                  </p>
+                </div>
+                <StatusBadge
+                  label={metrics?.has_review_ticket ? "已进入人工审核" : "自动流程可用"}
+                  tone={metrics?.has_review_ticket ? "warning" : "success"}
+                />
+              </div>
+              <div className="grid gap-3 md:grid-cols-3 xl:grid-cols-6">
+                <MetricCard
+                  label="未支撑结论"
+                  value={formatMetric(metrics?.unsupported_claim_count)}
+                  helper="claim 幻觉"
+                />
+                <MetricCard
+                  label="弱支撑结论"
+                  value={formatMetric(metrics?.weak_claim_count)}
+                  helper="软风险"
+                />
+                <MetricCard
+                  label="矩阵问题"
+                  value={formatMetric(metrics?.matrix_issue_count)}
+                  helper="matrix 幻觉"
+                />
+                <MetricCard
+                  label="上下文裁剪"
+                  value={formatMetric(
+                    metrics?.context_trimmed_evidence_count ??
+                      artifacts?.context_trimmed_evidence_count,
+                  )}
+                  helper="prompt 控制"
+                />
+                <MetricCard
+                  label="错误恢复"
+                  value={formatMetric(metrics?.error_count ?? artifacts?.error_count)}
+                  helper="error log"
+                />
+                <MetricCard
+                  label="审核单"
+                  value={metrics?.has_review_ticket || artifacts?.has_review_ticket ? "已生成" : "未触发"}
+                  helper="ReviewTicket"
+                />
+              </div>
+            </section>
+
             <div className="grid gap-5 lg:grid-cols-[360px_minmax(0,1fr)]">
               <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-1">
                 <ProgressRing
@@ -382,6 +450,10 @@ export function MetricsPage({
                 <ProgressRing
                   label="覆盖率"
                   percent={ratioPercent(metrics?.coverage_rate)}
+                />
+                <ProgressRing
+                  label="结论忠实率（防幻觉）"
+                  percent={ratioPercent(metrics?.faithfulness_rate)}
                 />
               </div>
 
@@ -405,6 +477,11 @@ export function MetricsPage({
                   label="覆盖率"
                   percent={ratioPercent(metrics?.coverage_rate)}
                 />
+                <BarMetric
+                  label="结论忠实率（防幻觉）"
+                  percent={ratioPercent(metrics?.faithfulness_rate)}
+                  tone="emerald"
+                />
                 <div className="grid gap-3 pt-2 sm:grid-cols-2">
                   <div className="rounded-lg border border-slate-800 bg-slate-900/45 p-4">
                     <p className="text-sm text-slate-400">引用完整率</p>
@@ -416,6 +493,18 @@ export function MetricsPage({
                     <p className="text-sm text-slate-400">覆盖率</p>
                     <p className="mt-2 text-2xl font-semibold text-slate-50">
                       {formatMetric(metrics?.coverage_rate, "ratio")}
+                    </p>
+                  </div>
+                  <div className="rounded-lg border border-slate-800 bg-slate-900/45 p-4">
+                    <p className="text-sm text-slate-400">结论忠实率</p>
+                    <p className="mt-2 text-2xl font-semibold text-slate-50">
+                      {formatMetric(metrics?.faithfulness_rate, "ratio")}
+                    </p>
+                  </div>
+                  <div className="rounded-lg border border-slate-800 bg-slate-900/45 p-4">
+                    <p className="text-sm text-slate-400">未支撑结论数</p>
+                    <p className="mt-2 text-2xl font-semibold text-slate-50">
+                      {formatMetric(metrics?.unsupported_claim_count)}
                     </p>
                   </div>
                 </div>
@@ -468,6 +557,22 @@ export function MetricsPage({
                 />
                 <MetricCard label="结论产物" value={artifacts?.claim_count ?? "N/A"} />
                 <MetricCard label="风险数量" value={artifacts?.risk_count ?? "N/A"} />
+                <MetricCard
+                  label="上下文 Agent"
+                  value={artifacts?.context_agent_count ?? "N/A"}
+                />
+                <MetricCard
+                  label="上下文裁剪"
+                  value={artifacts?.context_trimmed_evidence_count ?? "N/A"}
+                />
+                <MetricCard
+                  label="错误记录"
+                  value={artifacts?.error_count ?? "N/A"}
+                />
+                <MetricCard
+                  label="执行轨迹"
+                  value={artifacts?.trace_count ?? "N/A"}
+                />
               </div>
               <div className="mt-4 flex flex-wrap gap-2">
                 <StatusBadge
@@ -487,6 +592,12 @@ export function MetricsPage({
                     artifacts?.has_final_report ? "已生成" : "缺失"
                   }`}
                   tone={artifacts?.has_final_report ? "success" : "neutral"}
+                />
+                <StatusBadge
+                  label={`ReviewTicket ${
+                    artifacts?.has_review_ticket ? "已生成" : "未触发"
+                  }`}
+                  tone={artifacts?.has_review_ticket ? "warning" : "neutral"}
                 />
               </div>
             </section>
@@ -508,7 +619,7 @@ export function MetricsPage({
                           tone={riskTone[String(risk.severity).toLowerCase()] ?? "neutral"}
                         />
                         <span className="text-sm font-semibold text-white">
-                          {risk.risk_type}
+                          {getRiskTypeLabel(risk.risk_type)}
                         </span>
                       </div>
                       <p className="mt-3 text-sm leading-6 text-slate-300">

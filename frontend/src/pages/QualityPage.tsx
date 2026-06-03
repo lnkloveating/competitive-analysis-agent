@@ -5,8 +5,14 @@ import { LoadingState } from "../components/common/LoadingState";
 import { MetricCard } from "../components/common/MetricCard";
 import { ScoreRing } from "../components/common/ScoreRing";
 import { StatusBadge } from "../components/common/StatusBadge";
-import { getCoverageFieldLabel } from "../utils/labels";
-import type { AgentTrace, QualityResult } from "../types/analysis";
+import { getCheckedItemLabel, getCoverageFieldLabel } from "../utils/labels";
+import type {
+  AgentTrace,
+  FaithfulnessReport,
+  MatrixIssue,
+  QualityResult,
+  ReviewTicket,
+} from "../types/analysis";
 
 type QualityPageProps = {
   taskId?: string;
@@ -22,6 +28,7 @@ type QualityPayload = {
   rejected_agents?: string[];
   needs_human_review?: boolean;
   quality_status?: string;
+  review_ticket?: ReviewTicket;
 };
 
 type QualityTrace = AgentTrace & {
@@ -154,6 +161,39 @@ function getQualityApproved(payload: QualityPayload | null): boolean | undefined
 
 function formatValue(value?: number) {
   return typeof value === "number" ? value.toFixed(1) : "N/A";
+}
+
+function faithReasonLabel(reason?: string): string {
+  if (!reason) {
+    return "未支撑";
+  }
+
+  if (reason.startsWith("unsupported_numbers")) {
+    const numbers = reason.split(":")[1] ?? "";
+    return numbers ? `引用证据中不存在的数字：${numbers}` : "存在未被证据支撑的数字";
+  }
+
+  const map: Record<string, string> = {
+    no_cited_evidence_text: "所引证据无可用文本",
+    weak_lexical_grounding: "与证据词汇重合度低",
+    grounded: "已被证据支撑",
+  };
+  return map[reason] ?? reason;
+}
+
+function matrixIssueLabel(issue: MatrixIssue): string {
+  const matrixLabel =
+    issue.matrix === "product_matrix"
+      ? "产品矩阵"
+      : issue.matrix === "business_matrix"
+        ? "商业矩阵"
+        : issue.matrix || "矩阵";
+  const numbers = issue.missing_numbers?.length
+    ? `未支撑数字：${issue.missing_numbers.join("、")}`
+    : "存在未被证据支撑的内容";
+  return `${matrixLabel} · ${issue.platform || "未知品牌"} · ${
+    issue.dimension || "未知维度"
+  }｜${numbers}`;
 }
 
 function normalizeCheckStatus(value: unknown): CheckStatus {
@@ -386,6 +426,9 @@ export function QualityPage({
     null,
   );
   const [traceLog, setTraceLog] = useState<QualityTrace[]>([]);
+  const [faithfulness, setFaithfulness] = useState<FaithfulnessReport | null>(
+    null,
+  );
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -393,68 +436,81 @@ export function QualityPage({
     if (!taskId) {
       setQualityPayload(null);
       setTraceLog([]);
+      setFaithfulness(null);
       setError(null);
       return;
     }
 
     const activeTaskId = taskId;
     let cancelled = false;
+    let timerId: number | undefined;
+    let inFlight = false;
 
-    async function loadQuality() {
-      setIsLoading(true);
-      setError(null);
+    // 任务可能还在运行，质检结果尚未生成。轮询刷新直到任务完成，避免停留在中间空态。
+    async function refreshQuality() {
+      if (inFlight) {
+        return;
+      }
+      inFlight = true;
 
-      try {
-        const [qualityResult, traceResult] = await Promise.allSettled([
+      const [statusResult, qualityResult, traceResult, faithfulnessResult] =
+        await Promise.allSettled([
+          analysisApi.getStatus(activeTaskId),
           analysisApi.getQuality(activeTaskId),
           analysisApi.getTrace(activeTaskId),
+          analysisApi.getFaithfulness(activeTaskId),
         ]);
 
-        if (cancelled) {
-          return;
-        }
+      if (cancelled) {
+        inFlight = false;
+        return;
+      }
 
-        if (qualityResult.status === "fulfilled") {
-          setQualityPayload(qualityResult.value);
-        } else {
-          setQualityPayload(null);
-        }
+      if (qualityResult.status === "fulfilled") {
+        setQualityPayload(qualityResult.value);
+      }
 
-        if (traceResult.status === "fulfilled") {
-          setTraceLog(normalizeTrace(traceResult.value?.trace_log));
-        } else {
-          setTraceLog([]);
-        }
+      if (traceResult.status === "fulfilled") {
+        setTraceLog(normalizeTrace(traceResult.value?.trace_log));
+      }
 
-        const failedEndpoints = [
-          qualityResult.status === "rejected" ? "quality" : null,
-          traceResult.status === "rejected" ? "trace" : null,
-        ].filter((endpoint): endpoint is string => Boolean(endpoint));
+      if (faithfulnessResult.status === "fulfilled") {
+        setFaithfulness(faithfulnessResult.value?.faithfulness_report ?? null);
+      }
 
-        setError(
-          failedEndpoints.length > 0
-            ? `无法加载 ${failedEndpoints.join(", ")} 接口。`
-            : null,
-        );
-      } catch (err) {
-        if (!cancelled) {
-          setError(
-            err instanceof Error ? err.message : "质量结果加载失败。",
-          );
-          setQualityPayload(null);
-          setTraceLog([]);
-        }
-      } finally {
-        if (!cancelled) {
-          setIsLoading(false);
-        }
+      const failedEndpoints = [
+        qualityResult.status === "rejected" ? "quality" : null,
+        traceResult.status === "rejected" ? "trace" : null,
+      ].filter((endpoint): endpoint is string => Boolean(endpoint));
+
+      setError(
+        failedEndpoints.length > 0
+          ? `无法加载 ${failedEndpoints.join(", ")} 接口。`
+          : null,
+      );
+      setIsLoading(false);
+      inFlight = false;
+
+      const taskStatus =
+        statusResult.status === "fulfilled"
+          ? normalizeStatus(statusResult.value?.status)
+          : "";
+      if ((taskStatus === "completed" || taskStatus === "failed") && timerId) {
+        window.clearInterval(timerId);
+        timerId = undefined;
       }
     }
 
-    loadQuality();
+    setIsLoading(true);
+    setError(null);
+    refreshQuality();
+    timerId = window.setInterval(refreshQuality, 1800);
 
     return () => {
       cancelled = true;
+      if (timerId) {
+        window.clearInterval(timerId);
+      }
     };
   }, [taskId]);
 
@@ -498,6 +554,10 @@ export function QualityPage({
     qualityRecord.required_actions,
     qualityRecord.required_fix,
   );
+  const matrixIssues: MatrixIssue[] = Array.isArray(qualityRecord.matrix_issues)
+    ? (qualityRecord.matrix_issues as MatrixIssue[])
+    : faithfulness?.matrix_issues ?? [];
+  const reviewTicket = qualityPayload?.review_ticket;
   const rejectedAgents = Array.isArray(qualityPayload?.rejected_agents)
     ? qualityPayload.rejected_agents
     : [];
@@ -742,7 +802,7 @@ export function QualityPage({
                         style={{ animationDelay: `${index * 80}ms` }}
                       >
                         <span className="min-w-0 break-words text-sm text-slate-200">
-                          {item.name}
+                          {getCheckedItemLabel(item.name)}
                         </span>
                         <StatusBadge
                           label={
@@ -773,7 +833,7 @@ export function QualityPage({
                   <div className="mt-3">
                     <CheckList
                       emptyLabel="暂无通过检查项"
-                      items={passedChecks}
+                      items={passedChecks.map(getCheckedItemLabel)}
                       tone="success"
                     />
                   </div>
@@ -786,11 +846,184 @@ export function QualityPage({
                   <div className="mt-3">
                     <CheckList
                       emptyLabel="暂无失败检查项"
-                      items={failedChecks}
+                      items={failedChecks.map(getCheckedItemLabel)}
                       tone="danger"
                     />
                   </div>
                 </section>
+              </div>
+            </section>
+
+            <section className="rounded-lg border border-slate-800 bg-slate-950/70 p-5">
+              <div className="mb-4 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+                <div>
+                  <h3 className="text-lg font-semibold text-white">
+                    忠实性校验（防幻觉）
+                  </h3>
+                  <p className="mt-1 text-sm text-slate-400">
+                    VerificationAgent 校验每条结论能否被其引用的证据支撑，未支撑结论会触发质量打回并从最终报告中剔除。
+                  </p>
+                </div>
+                <StatusBadge
+                  label={
+                    typeof faithfulness?.faithfulness_rate === "number"
+                      ? `忠实率 ${Math.round(faithfulness.faithfulness_rate * 100)}%`
+                      : "暂无"
+                  }
+                  tone={
+                    typeof faithfulness?.faithfulness_rate === "number"
+                      ? faithfulness.faithfulness_rate >= 0.9
+                        ? "success"
+                        : faithfulness.faithfulness_rate >= 0.6
+                          ? "warning"
+                          : "danger"
+                      : "neutral"
+                  }
+                />
+              </div>
+
+              {faithfulness ? (
+                <>
+                  <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+                    <MetricCard
+                      label="校验结论数"
+                      value={faithfulness.checked_claim_count ?? "N/A"}
+                    />
+                    <MetricCard
+                      label="已支撑结论"
+                      value={faithfulness.supported_claim_count ?? "N/A"}
+                    />
+                    <MetricCard
+                      label="未支撑结论"
+                      value={faithfulness.unsupported_claim_count ?? 0}
+                    />
+                    <MetricCard
+                      label="弱支撑结论"
+                      value={faithfulness.weak_claim_count ?? 0}
+                    />
+                  </div>
+
+                  <div className="mt-5">
+                    <h4 className="text-sm font-semibold text-rose-100">
+                      未支撑结论（疑似幻觉）
+                    </h4>
+                    {faithfulness.claim_results &&
+                    faithfulness.claim_results.some((item) => !item.supported) ? (
+                      <ul className="mt-3 space-y-2">
+                        {faithfulness.claim_results
+                          .filter((item) => !item.supported)
+                          .map((item) => (
+                            <li
+                              className="flex flex-col gap-1 rounded-md border border-rose-400/25 bg-rose-500/10 px-3 py-2 text-sm text-rose-100 sm:flex-row sm:items-center sm:justify-between"
+                              key={item.claim_id}
+                            >
+                              <span className="font-mono text-xs text-rose-200">
+                                {item.claim_id}
+                              </span>
+                              <span className="break-words">
+                                {faithReasonLabel(item.reason)}
+                              </span>
+                            </li>
+                          ))}
+                      </ul>
+                    ) : (
+                      <p className="mt-3 rounded-md border border-emerald-400/25 bg-emerald-400/10 px-3 py-2 text-sm text-emerald-100">
+                        全部结论均能被其引用证据支撑，未发现疑似幻觉。
+                      </p>
+                    )}
+                  </div>
+                </>
+              ) : (
+                <p className="text-sm text-slate-400">
+                  暂无忠实性校验结果，请等待 VerificationAgent 执行完成。
+                </p>
+              )}
+            </section>
+
+            <section className="rounded-lg border border-slate-800 bg-slate-950/70 p-5">
+              <div className="mb-4 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+                <div>
+                  <h3 className="text-lg font-semibold text-white">
+                    矩阵防幻觉与人工审核单
+                  </h3>
+                  <p className="mt-1 text-sm text-slate-400">
+                    矩阵分析中的数字也需要被引用证据支撑；三次自动修复失败后会生成 ReviewTicket。
+                  </p>
+                </div>
+                <div className="flex flex-wrap gap-2">
+                  <StatusBadge
+                    label={`矩阵问题 ${matrixIssues.length} 条`}
+                    tone={matrixIssues.length > 0 ? "warning" : "success"}
+                  />
+                  <StatusBadge
+                    label={reviewTicket?.ticket_id ? "审核单已生成" : "审核单未触发"}
+                    tone={reviewTicket?.ticket_id ? "warning" : "neutral"}
+                  />
+                </div>
+              </div>
+
+              <div className="grid gap-5 lg:grid-cols-2">
+                <div>
+                  <h4 className="text-sm font-semibold text-slate-200">
+                    矩阵问题
+                  </h4>
+                  {matrixIssues.length > 0 ? (
+                    <ul className="mt-3 space-y-2">
+                      {matrixIssues.slice(0, 8).map((issue, index) => (
+                        <li
+                          className="rounded-md border border-amber-400/25 bg-amber-400/10 px-3 py-2 text-sm leading-6 text-amber-100"
+                          key={`${issue.matrix}-${issue.platform}-${issue.dimension}-${index}`}
+                        >
+                          {matrixIssueLabel(issue)}
+                        </li>
+                      ))}
+                    </ul>
+                  ) : (
+                    <p className="mt-3 rounded-md border border-emerald-400/25 bg-emerald-400/10 px-3 py-2 text-sm text-emerald-100">
+                      矩阵分析未发现未支撑数字。
+                    </p>
+                  )}
+                </div>
+
+                <div>
+                  <h4 className="text-sm font-semibold text-slate-200">
+                    ReviewTicket
+                  </h4>
+                  {reviewTicket?.ticket_id ? (
+                    <dl className="mt-3 space-y-3 rounded-md border border-amber-400/25 bg-amber-400/10 p-4 text-sm">
+                      <div>
+                        <dt className="text-slate-500">Ticket ID</dt>
+                        <dd className="mt-1 break-words font-mono text-amber-100">
+                          {reviewTicket.ticket_id}
+                        </dd>
+                      </div>
+                      <div>
+                        <dt className="text-slate-500">目标 Agent</dt>
+                        <dd className="mt-1 text-amber-100">
+                          {reviewTicket.target_agent || "未指定"}
+                        </dd>
+                      </div>
+                      <div>
+                        <dt className="text-slate-500">下一步</dt>
+                        <dd className="mt-2 space-y-2">
+                          {(reviewTicket.suggested_next_steps ?? []).length > 0 ? (
+                            reviewTicket.suggested_next_steps?.map((step) => (
+                              <p className="break-words text-amber-100" key={step}>
+                                {step}
+                              </p>
+                            ))
+                          ) : (
+                            <span className="text-slate-400">暂无</span>
+                          )}
+                        </dd>
+                      </div>
+                    </dl>
+                  ) : (
+                    <p className="mt-3 rounded-md border border-slate-800 bg-slate-900/45 px-3 py-2 text-sm text-slate-400">
+                      当前流程尚未进入人工审核。
+                    </p>
+                  )}
+                </div>
               </div>
             </section>
 

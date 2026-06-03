@@ -4,7 +4,13 @@ from pydantic import BaseModel, Field
 
 
 class RiskFlag(BaseModel):
-    risk_type: Literal["data_credibility", "data_timeliness", "evidence_gap", "compliance"]
+    risk_type: Literal[
+        "data_credibility",
+        "data_timeliness",
+        "evidence_gap",
+        "compliance",
+        "faithfulness",
+    ]
     description: str
     severity: Literal["low", "medium", "high"]
     related_platforms: List[str] = Field(default_factory=list)

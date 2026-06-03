@@ -17,14 +17,15 @@ os.environ["STRATEGY_AGENT_USE_LLM"] = "0"
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 load_dotenv(Path(__file__).resolve().parent / ".env")
 
-from agents.research_agent import research_agent
-from agents.evidence_agent import evidence_agent
-from agents.product_agent import product_agent
-from agents.business_agent import business_agent
-from agents.risk_agent import risk_agent
-from agents.quality_agent import quality_agent, quality_router
-from agents.strategy_agent import strategy_agent
-from agents.state import CompetitiveAnalysisState
+from app.agents.research_agent import research_agent
+from app.agents.evidence_agent import evidence_agent
+from app.agents.product_agent import product_agent
+from app.agents.business_agent import business_agent
+from app.agents.risk_agent import risk_agent
+from app.agents.quality_agent import quality_agent, quality_router
+from app.agents.strategy_agent import strategy_agent
+from app.agents.verification_agent import verification_agent
+from orchestration.state import CompetitiveAnalysisState
 
 
 initial_state: CompetitiveAnalysisState = {
@@ -35,18 +36,29 @@ initial_state: CompetitiveAnalysisState = {
     "analysis_scene": "电竞鼠标产品竞争格局与增长策略分析",
     "target_user": "电竞鼠标产品经理",
     "time_range": "近 12 个月",
-    "focus_dimensions": ["性能参数", "轻量化设计", "无线与续航", "软件生态", "用户口碑", "价格定位", "电竞品牌影响力"],
+    "focus_dimensions": ["性能参数", "轻量化设计", "无线与续航", "软件生态", "用户口碑", "价格定位", "电竞品牌影响力", "握持手感与人体工学"],
     "raw_research": [],
     "evidence_list": [],
+    "claims": [],
     "product_matrix": {},
     "business_matrix": {},
     "risk_flags": [],
+    "faithfulness_report": {},
+    "unsupported_claim_ids": [],
     "quality_result": {},
     "final_report": {},
+    "context_summary": {},
+    "review_ticket": {},
+    "trace_log": [],
+    "metrics": {},
+    "used_claim_ids": [],
+    "used_evidence_ids": [],
     "current_agent": "",
     "iteration_count": 0,
     "rejected_agents": [],
     "is_approved": False,
+    "needs_human_review": False,
+    "quality_status": "",
     "error_log": [],
 }
 
@@ -128,8 +140,21 @@ if __name__ == "__main__":
 
     print("BusinessAgent 测试通过")
 
+    print("\n=== 测试 VerificationAgent ===")
+    verification_result = verification_agent(business_result)
+    faithfulness_report = verification_result["faithfulness_report"]
+
+    assert faithfulness_report, "faithfulness_report 不能为空"
+    assert "faithfulness_rate" in faithfulness_report, "缺少 faithfulness_rate"
+    assert 0 <= faithfulness_report["faithfulness_rate"] <= 1, "faithfulness_rate 越界"
+    assert isinstance(verification_result["unsupported_claim_ids"], list), "unsupported_claim_ids 必须是列表"
+
+    print(f"忠实率: {faithfulness_report['faithfulness_rate']}")
+    print(f"未支撑 claim: {faithfulness_report['unsupported_claim_count']}")
+    print("VerificationAgent 测试通过")
+
     print("\n=== 测试 RiskAgent ===")
-    risk_result = risk_agent(business_result)
+    risk_result = risk_agent(verification_result)
     risk_flags = risk_result["risk_flags"]
 
     print(f"风险数量: {len(risk_flags)}")

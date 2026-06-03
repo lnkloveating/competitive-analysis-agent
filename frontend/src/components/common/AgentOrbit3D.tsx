@@ -19,6 +19,7 @@ const agents: OrbitAgent[] = [
   { key: "evidence", zh: "证据", en: "Evidence", role: "抽取结构化证据并标记可信度" },
   { key: "product", zh: "产品", en: "Product", role: "生成产品维度分析矩阵" },
   { key: "business", zh: "商业", en: "Business", role: "分析定位、价格与市场策略" },
+  { key: "verification", zh: "校验", en: "Verification", role: "校验结论与矩阵是否被证据支撑" },
   { key: "risk", zh: "风险", en: "Risk", role: "识别数据缺口与潜在风险" },
   { key: "quality", zh: "质检", en: "Quality", role: "检查证据覆盖与结论可靠性" },
   { key: "strategy", zh: "策略", en: "Strategy", role: "生成最终竞品策略报告" },

@@ -3,6 +3,7 @@ from __future__ import annotations
 from typing import Any, Dict
 
 from app.services.mock_research_provider import MockResearchProvider
+from app.services.error_log_service import append_error, normalize_error_log
 
 
 def _append_trace(state: dict, raw_research_count: int) -> None:
@@ -20,13 +21,20 @@ def _append_trace(state: dict, raw_research_count: int) -> None:
 
 def research_agent(state: dict) -> Dict[str, Any]:
     """Collect mock research through the provider abstraction."""
-    error_log = list(state.get("error_log", []))
+    error_log = normalize_error_log(state.get("error_log", []))
 
     try:
         raw_items = MockResearchProvider().collect(state)
         raw_research = [item.model_dump() for item in raw_items]
     except Exception as exc:
-        error_log.append(f"ResearchAgent provider 采集失败：{exc}")
+        error_log = append_error(
+            error_log,
+            agent_name="ResearchAgent",
+            error_type="provider_failed",
+            message=f"ResearchAgent provider 采集失败：{exc}",
+            recover_action="continue_with_empty_raw_research",
+            retry_count=int(state.get("iteration_count", 0) or 0),
+        )
         raw_research = []
 
     next_state = {

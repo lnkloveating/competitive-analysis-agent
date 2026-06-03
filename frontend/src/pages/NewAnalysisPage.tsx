@@ -22,6 +22,7 @@ const defaultDimensions = [
   "用户口碑",
   "价格定位",
   "电竞品牌影响力",
+  "握持手感与人体工学",
 ];
 
 export function NewAnalysisPage({

@@ -130,50 +130,73 @@ export function ClaimsPage({
 
     const activeTaskId = taskId;
     let cancelled = false;
+    let timerId: number | undefined;
+    let inFlight = false;
+    let hasAutoExpanded = false;
 
-    async function loadClaimsGraph() {
-      setIsLoading(true);
-      setError(null);
+    // 结论随 Product/Business Agent 产出；任务运行中先轮询，完成后停止。
+    async function refreshClaimsGraph() {
+      if (inFlight) {
+        return;
+      }
+      inFlight = true;
 
-      try {
-        const [claimsResponse, evidenceResponse] = await Promise.all([
-          analysisApi.getClaims(activeTaskId),
-          analysisApi.getEvidence(activeTaskId),
-        ]);
+      const [statusResult, claimsResult, evidenceResult] = await Promise.allSettled([
+        analysisApi.getStatus(activeTaskId),
+        analysisApi.getClaims(activeTaskId),
+        analysisApi.getEvidence(activeTaskId),
+      ]);
 
-        const nextClaims = Array.isArray(claimsResponse?.claims)
-          ? claimsResponse.claims
+      if (cancelled) {
+        inFlight = false;
+        return;
+      }
+
+      const nextClaims =
+        claimsResult.status === "fulfilled" && Array.isArray(claimsResult.value?.claims)
+          ? claimsResult.value.claims
           : [];
-        const nextEvidence = Array.isArray(evidenceResponse?.evidence_list)
-          ? evidenceResponse.evidence_list
+      const nextEvidence =
+        evidenceResult.status === "fulfilled" &&
+        Array.isArray(evidenceResult.value?.evidence_list)
+          ? evidenceResult.value.evidence_list
           : [];
 
-        if (cancelled) {
-          return;
-        }
+      setClaims(nextClaims);
+      setEvidenceList(nextEvidence);
+      // 仅在首次拿到结论时自动展开第一条，避免每次轮询覆盖用户的展开状态。
+      if (!hasAutoExpanded && nextClaims[0]) {
+        setExpandedIds(new Set([nextClaims[0].claim_id]));
+        hasAutoExpanded = true;
+      }
+      setError(
+        claimsResult.status === "rejected" && evidenceResult.status === "rejected"
+          ? "结论追踪数据加载失败。"
+          : null,
+      );
+      setIsLoading(false);
+      inFlight = false;
 
-        setClaims(nextClaims);
-        setEvidenceList(nextEvidence);
-        setExpandedIds(nextClaims[0] ? new Set([nextClaims[0].claim_id]) : new Set());
-      } catch (err) {
-        if (!cancelled) {
-          setError(
-            err instanceof Error ? err.message : "结论追踪数据加载失败。",
-          );
-          setClaims([]);
-          setEvidenceList([]);
-        }
-      } finally {
-        if (!cancelled) {
-          setIsLoading(false);
-        }
+      const taskStatus =
+        statusResult.status === "fulfilled"
+          ? String(statusResult.value?.status || "").toLowerCase()
+          : "";
+      if ((taskStatus === "completed" || taskStatus === "failed") && timerId) {
+        window.clearInterval(timerId);
+        timerId = undefined;
       }
     }
 
-    loadClaimsGraph();
+    setIsLoading(true);
+    setError(null);
+    refreshClaimsGraph();
+    timerId = window.setInterval(refreshClaimsGraph, 1800);
 
     return () => {
       cancelled = true;
+      if (timerId) {
+        window.clearInterval(timerId);
+      }
     };
   }, [taskId]);
 
