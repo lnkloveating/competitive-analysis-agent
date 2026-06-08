@@ -1,0 +1,27 @@
+# 实时爬虫全局配置文件
+global:
+  request_timeout: 20
+  max_retry_times: 2
+  min_delay_sec: 0.5
+  max_delay_sec: 1.5
+  cache_ttl_days: 7
+  follow_redirects: true
+
+# User-Agent 池
+user_agents:
+  - "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36"
+
+# 各行业种子URL配置 - 100%无反爬公开站点
+industries:
+  gaming_mouse:
+    name: "电竞鼠标"
+    seed_urls:
+      - url: "https://zh.wikipedia.org/zh-cn/%E9%BC%A0%E6%A0%87%E6%97%A0%E7%BA%BF%E9%BC%A0%E6%A0%87"
+        source_type: "review"
+        platform: "维基百科"
+      - url: "https://www.bing.com/search?q=%E7%94%B5%E7%AB%9E%E9%BC%A0%E6%A0%87+%E6%80%A7%E8%83%BD%E5%8F%82%E6%95%B0"
+        source_type: "news"
+        platform: "Bing搜索"
+      - url: "https://example.com/"
+        source_type: "official"
+        platform: "示例站点"
