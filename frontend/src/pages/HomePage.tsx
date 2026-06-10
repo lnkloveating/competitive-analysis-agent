@@ -75,7 +75,7 @@ type OrbitModeDef = {
   items: OrbitProductDef[];
 };
 
-// 双模式品类：电竞 / 办公，箭头在两者间切换，每个模式各自一组产品。
+// 电竞品类：只展示当前后端支持的可分析品类。
 const orbitModes: OrbitModeDef[] = [
   {
     key: "gaming",
@@ -93,79 +93,31 @@ const orbitModes: OrbitModeDef[] = [
       {
         key: "gaming_keyboard",
         label: "电竞键盘",
-        description: "轴体、配列与低延迟输入",
-        available: false,
+        description: "轴体、配列、热插拔与低延迟输入",
+        available: true,
         glyph: "keyboard",
       },
       {
         key: "gaming_headset",
         label: "头戴式耳机",
         description: "空间音频、麦克风与佩戴舒适度",
-        available: false,
+        available: true,
         glyph: "headset",
-      },
-      {
-        key: "gaming_mic",
-        label: "麦克风",
-        description: "直播与语音场景的拾音表现",
-        available: false,
-        glyph: "mic",
-      },
-      {
-        key: "hifi_inear",
-        label: "入耳式 HiFi 耳机",
-        description: "调音风格、解析力与佩戴体验",
-        available: false,
-        glyph: "inear",
-      },
-    ],
-  },
-  {
-    key: "office",
-    label: "办公",
-    en: "OFFICE",
-    tagline: "舒适 · 静音 · 长时间高效办公",
-    items: [
-      {
-        key: "office_keyboard",
-        label: "办公键盘",
-        description: "手感、静音与多设备连接",
-        available: false,
-        glyph: "keyboard",
-      },
-      {
-        key: "office_mouse",
-        label: "办公鼠标",
-        description: "人体工学、静音与续航",
-        available: false,
-        glyph: "mouse",
-      },
-      {
-        key: "bt_earbuds",
-        label: "蓝牙音乐耳机",
-        description: "音质、降噪与通话体验",
-        available: false,
-        glyph: "earbuds",
-      },
-      {
-        key: "office_speaker",
-        label: "桌面音箱",
-        description: "音质、连接方式与桌面占用",
-        available: false,
-        glyph: "speaker",
-      },
-      {
-        key: "office_webcam",
-        label: "高清摄像头",
-        description: "画质、对焦与会议体验",
-        available: false,
-        glyph: "webcam",
       },
     ],
   },
 ];
 
 const allProducts: OrbitProductDef[] = orbitModes.flatMap((mode) => mode.items);
+const runnableProductKeys = new Set([
+  "gaming_mouse",
+  "gaming_keyboard",
+  "gaming_headset",
+]);
+
+function getRunnableIndustryKey(categoryKey: string) {
+  return runnableProductKeys.has(categoryKey) ? categoryKey : null;
+}
 
 function normalizeIndustries(payload: unknown): Industry[] {
   const rawItems = Array.isArray(payload)
@@ -505,15 +457,19 @@ export function HomePage({
     orbitModes.find((mode) =>
       mode.items.some((item) => item.key === categoryValue),
     ) ?? orbitModes[0];
-  const gamingMouse = backendIndustries.find((industry) => {
-    return (industry.industry_key || industry.key) === "gaming_mouse";
+  const selectedBackendIndustry = backendIndustries.find((industry) => {
+    return (industry.industry_key || industry.key) === selectedCategoryOption.key;
   });
-  const hasGamingMouse = Boolean(gamingMouse);
-  const representativeProducts = flattenRepresentativeProducts(gamingMouse);
+  const hasSelectedBackendIndustry = Boolean(selectedBackendIndustry);
+  const representativeProducts = flattenRepresentativeProducts(selectedBackendIndustry);
+  const connectedRunnableCount = backendIndustries.filter((industry) =>
+    getRunnableIndustryKey(industry.industry_key || industry.key || ""),
+  ).length;
   const canEnterConfig =
     selectedIndustry.key === "gaming_peripherals" &&
-    selectedCategoryOption.key === "gaming_mouse" &&
-    hasGamingMouse;
+    selectedCategoryOption.available &&
+    Boolean(getRunnableIndustryKey(selectedCategoryOption.key)) &&
+    hasSelectedBackendIndustry;
 
   const demoFlowIndex = analysisFlowSteps.findIndex(
     (step) => step.key === currentDemoKey,
@@ -531,15 +487,20 @@ export function HomePage({
     onSelectionChange({
       selectedDomain: "gaming_peripherals",
       selectedCategory: nextCategory,
-      selectedIndustryKey: nextCategory === "gaming_mouse" ? "gaming_mouse" : null,
+      selectedIndustryKey: getRunnableIndustryKey(nextCategory),
     });
   }
 
-  function handleEnterConfig() {
+  function handleEnterConfig(nextCategory = selectedCategoryOption.key) {
+    const nextIndustryKey = getRunnableIndustryKey(nextCategory);
+    if (!nextIndustryKey) {
+      return;
+    }
+
     onSelectionChange({
       selectedDomain: "gaming_peripherals",
-      selectedCategory: "gaming_mouse",
-      selectedIndustryKey: "gaming_mouse",
+      selectedCategory: nextCategory,
+      selectedIndustryKey: nextIndustryKey,
     });
     onNavigate("new-analysis");
   }
@@ -592,8 +553,12 @@ export function HomePage({
                   tone={isLoading ? "warning" : error ? "danger" : "success"}
                 />
                 <Pill
-                  label={hasGamingMouse ? "电竞鼠标可分析" : "电竞鼠标服务未就绪"}
-                  tone={hasGamingMouse ? "success" : "warning"}
+                  label={
+                    connectedRunnableCount > 0
+                      ? `${connectedRunnableCount} 个电竞品类可分析`
+                      : "电竞分析服务未就绪"
+                  }
+                  tone={connectedRunnableCount > 0 ? "success" : "warning"}
                 />
                 <Pill
                   label={displayTaskId ? `当前任务：${displayTaskId}` : "暂无任务"}
@@ -828,10 +793,10 @@ export function HomePage({
                 <div>
                   <p className="text-sm font-medium text-[#7dd3fc]">分析场景选择</p>
                   <h3 className="mt-2 text-2xl font-semibold text-[#f1f6ff]">
-                    电竞 / 办公 双模式品类选择
+                    电竞品类选择
                   </h3>
                   <p className="mt-2 max-w-3xl text-sm leading-6 text-[#8aa0c6]">
-                    用左右箭头在电竞与办公双模式间切换，点击环形卡片选择品类。当前正式开放电竞鼠标分析，其它品类保留在规划中。
+                    点击环形卡片选择品类。当前正式开放电竞鼠标、电竞键盘与头戴式耳机分析。
                   </p>
                 </div>
                 <Pill
@@ -840,11 +805,11 @@ export function HomePage({
                 />
               </div>
 
-              {/* 环形悬浮品类选择器：双模式切换 + 方框产品卡，可旋转、悬停浮起、点击选中。 */}
+              {/* 环形悬浮品类选择器：方框产品卡，可旋转、悬停浮起、点击选中。 */}
               <div className="mt-6 rounded-2xl border border-[#ffffff14] bg-[#070f1f]/55 px-2 py-4 md:px-4">
                 <ProductOrbit
                   activeKey={categoryValue}
-                  canEnter={hasGamingMouse}
+                  canEnter={canEnterConfig}
                   modes={orbitModes}
                   onEnter={handleEnterConfig}
                   onSelect={handleCategoryChange}
@@ -875,7 +840,7 @@ export function HomePage({
                       </p>
                       <p className="mt-2 text-sm text-[#cdd9f0]">
                         {canEnterConfig
-                          ? (gamingMouse?.competitors || ["罗技", "雷蛇", "海盗船"]).join("、")
+                          ? (selectedBackendIndustry?.competitors || []).join("、")
                           : "暂未开放"}
                       </p>
                     </div>
@@ -884,7 +849,9 @@ export function HomePage({
                         分析场景
                       </p>
                       <p className="mt-2 text-sm font-medium text-[#7dd3fc]">
-                        {canEnterConfig ? selectedIndustryKey || "gaming_mouse" : "暂未开放"}
+                        {canEnterConfig
+                          ? selectedIndustryKey || selectedCategoryOption.key
+                          : "暂未开放"}
                       </p>
                     </div>
                   </div>

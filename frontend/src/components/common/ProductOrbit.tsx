@@ -199,6 +199,7 @@ export function ProductOrbit({
   );
   const activeItem = items[activeIndex];
   const availableCount = items.filter((item) => item.available).length;
+  const canSwitchMode = modes.length > 1;
 
   // 椭圆弧的横/纵半径：横向随框宽撑满，纵向保持克制。
   const radiusX = Math.min(540, Math.max(210, stageWidth * 0.42));
@@ -206,6 +207,10 @@ export function ProductOrbit({
   const angleStep = 30;
 
   function switchMode(direction: 1 | -1) {
+    if (!canSwitchMode) {
+      return;
+    }
+
     const next = (modeIndex + direction + modes.length) % modes.length;
     onSelect(modes[next].items[0].key);
   }
@@ -214,27 +219,31 @@ export function ProductOrbit({
     <div className="orbit-shell">
       {/* 模式切换条：独立放在框外，避免压住卡片 */}
       <div className={`orbit-modebar orbit-modebar-${mode.key}`}>
-        <button
-          aria-label="上一个模式"
-          className="orbit-arrow"
-          onClick={() => switchMode(-1)}
-          type="button"
-        >
-          ‹
-        </button>
+        {canSwitchMode ? (
+          <button
+            aria-label="上一个模式"
+            className="orbit-arrow"
+            onClick={() => switchMode(-1)}
+            type="button"
+          >
+            ‹
+          </button>
+        ) : null}
         <div className="orbit-modebar-center">
           <span className="orbit-mode-label">{mode.label}</span>
           <span className="orbit-mode-en">{mode.en} MODE</span>
           <span className="orbit-modebar-tagline">{mode.tagline}</span>
         </div>
-        <button
-          aria-label="下一个模式"
-          className="orbit-arrow"
-          onClick={() => switchMode(1)}
-          type="button"
-        >
-          ›
-        </button>
+        {canSwitchMode ? (
+          <button
+            aria-label="下一个模式"
+            className="orbit-arrow"
+            onClick={() => switchMode(1)}
+            type="button"
+          >
+            ›
+          </button>
+        ) : null}
       </div>
 
       <div
