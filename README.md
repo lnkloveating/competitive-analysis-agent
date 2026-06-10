@@ -1,168 +1,122 @@
-﻿# AI 椹卞姩鐨勭珵鍝佸垎鏋?Agent 鍗忎綔绯荤粺
+# AI 驱动的竞品分析多 Agent 协作系统
 
-杩欐槸涓€涓潰鍚戠珵鍝佸垎鏋愬満鏅殑澶?Agent 鍚庣椤圭洰锛屼娇鐢?FastAPI + LangGraph 缂栨帓澶氫釜涓撲笟 Agent锛屾ā鎷熶竴涓粨鏋勫寲鏁板瓧璋冪爺灏忕粍锛屼粠鍏紑鏉愭枡閲囬泦銆佽瘉鎹娊鍙栥€佷骇鍝?鍟嗕笟鍒嗘瀽銆侀闄╄瘑鍒€佽川閲忔鏌ュ埌鏈€缁堟姤鍛婄敓鎴愶紝褰㈡垚鍙拷婧殑鍒嗘瀽閾捐矾銆?
+这是一个面向竞品分析场景的多 Agent 后端项目，使用 **FastAPI + LangGraph** 编排多个专业 Agent，模拟一个结构化的数字调研小组：从公开材料采集、证据抽取、产品/商业分析、风险识别、质量检查，到最终战略报告生成，形成一条**可追溯、可质检、拒绝凭空捏造**的分析链路。
 
-褰撳墠 Demo 绗竴闃舵鑱氱劍 `gaming_mouse` 鐢电珵榧犳爣鍨傜洿鍦烘櫙锛岃€屼笉鏄硾鐢电珵澶栬銆?
+当前 Demo 聚焦 **`gaming_mouse` 电竞鼠标**垂直场景，并已扩展支持电竞键盘、电竞头戴耳机两个品类。
 
-## Demo 鍦烘櫙
+## 核心特性
 
-褰撳墠鎺ㄨ崘 Demo 琛屼笟锛?
+- **真·多 Agent 编排**：8 个 Agent 通过 LangGraph 组成 DAG，Product / Business 为真并行分支。
+- **质量闭环 + 人工兜底**：QualityAgent 不通过时按目标 Agent 重试（上限 3 次），仍失败则转人工复核（`human_review`），输出"低置信草稿 + 待办事项"，**绝不 force pass**。
+- **两层反幻觉**：① 引用有效性——每条 claim 必须引用已存在的 `evidence_id`；② 引用忠实度（`faithfulness.py`）——claim 中出现的数字必须能在所引证据原文中找到，否则判为硬失败。
+- **Schema-first 通信**：每个 Agent 的输出都经过 Pydantic Schema 校验。
+- **全程可追溯**：`trace_log` 记录每个 Agent 的执行轨迹，前端可直接展示 Evidence → Claim → Report 的溯源链。
+- **三档可切换数据源**：mock / 预载真实数据库 / 实时爬虫，通过环境变量一键切换。
+- **行业配置驱动**：新增品类只需扩展行业配置，无需改动编排逻辑。
 
-```text
-industry_key = "gaming_mouse"
-industry_name = "鐢电珵榧犳爣"
-```
-
-瑕嗙洊鍝佺墝锛?
-
-| 鍝佺墝 | 浠ｈ〃鍨嬪彿 |
-|---|---|
-| 缃楁妧 | G Pro X Superlight 2銆丟502 X Plus |
-| 闆疯泧 | Viper V3 Pro銆丏eathAdder V3 Pro |
-| 娴风洍鑸?| M75 Air銆丼ABRE RGB PRO Wireless |
-
-瑕嗙洊缁村害锛?
-
-- 鎬ц兘鍙傛暟
-- 杞婚噺鍖栬璁?
-- 鏃犵嚎涓庣画鑸?
-- 杞欢鐢熸€?
-- 鐢ㄦ埛鍙ｇ
-- 浠锋牸瀹氫綅
-- 鐢电珵鍝佺墝褰卞搷鍔?
-
-閫夋嫨鐢电珵榧犳爣浣滀负绗竴闃舵 Demo 鐨勫師鍥狅細
-
-- 榧犳爣鍙傛暟鏄庣‘锛岄€傚悎缁撴瀯鍖栧姣旓紱
-- 鍏紑鏁版嵁鍜岃瘎娴嬭祫鏂欏厖瓒筹紝閫傚悎 evidence-grounded 鍒嗘瀽锛?
-- 鐢ㄦ埛璇勮涓板瘜锛岄€傚悎灞曠ず Evidence -> Claim -> Report 婧簮閾捐矾锛?
-- 鍦烘櫙瓒冲鍨傜洿锛屼究浜庡墠绔仛娓呮櫚鐨?Agent 宸ヤ綔鍙版紨绀恒€?
-
-`gaming_peripherals` 娉涚數绔炲璁鹃厤缃粛鐒朵繚鐣欙紝鍚庣画鍙互缁х画鎵╁睍鍒伴敭鐩樸€佽€虫満銆佹墜鏌勭瓑澶栬鍝佺被銆?
-
-## 绯荤粺鑳藉姏
-
-- 澶?Agent 鍗忎綔绔炲搧鍒嗘瀽 workflow
-- 琛屼笟閰嶇疆椹卞姩锛屾敮鎸佸琛屼笟鎵╁睍
-- ResearchProvider 鎶借薄锛屽綋鍓嶄娇鐢?MockResearchProvider锛屾湭鏉ュ彲鏇挎崲鐪熷疄鐖櫕
-- 姣忎釜 Agent 杈撳嚭缁忚繃 Pydantic Schema 鏍￠獙
-- ProductAgent / BusinessAgent 鐢熸垚缁撴瀯鍖?claims
-- StrategyAgent 鏈€缁堟姤鍛婂繀椤诲紩鐢ㄥ凡鏈?claim_id 鍜?evidence_id
-- QualityAgent 鏀寔缁撴瀯鍖栨墦鍥炲拰涓夋澶辫触鍚庝汉宸ュ鏍?
-- trace_log 璁板綍 Agent 鎵ц杞ㄨ抗锛屼究浜庡墠绔睍绀哄拰绛旇京璇存槑
-- FastAPI 鎻愪緵浠诲姟鍚姩銆佺姸鎬佹煡璇€佹姤鍛婃煡璇㈠拰鍙涓棿浜х墿鎺ュ彛
-
-## Agent 宸ヤ綔娴?
+## Agent 工作流
 
 ```text
 ResearchAgent
-  -> EvidenceAgent
-  -> ProductAgent / BusinessAgent
-  -> RiskAgent
-  -> QualityAgent
-       | approved
-       v
-     StrategyAgent
-       |
-       v
-     final_report
+  → EvidenceAgent
+      → ProductAgent  ┐
+      → BusinessAgent ┘  (并行)
+          → VerificationAgent
+              → RiskAgent
+                  → QualityAgent
+                       │ approved
+                       ▼
+                     StrategyAgent → final_report
 ```
 
-璐ㄩ噺妫€鏌ュけ璐ユ椂锛?
+质量检查失败时：
 
 ```text
-QualityAgent -> reject_to target Agent
+QualityAgent → 路由回目标 Agent 重试（capped by MAX_ITERATIONS = 3）
+3 次仍失败 → human_review → 输出低置信草稿，需人工复核
 ```
 
-涓夋鑷姩淇鍚庝粛澶辫触锛?
+系统不会在证据不足时强制通过，也不会让 StrategyAgent 生成没有证据支撑的结论。
 
-```text
-QualityAgent -> HumanReviewRequired
-```
+## 技术栈
 
-绯荤粺涓嶄細鍦ㄨ瘉鎹笉瓒虫椂 force pass锛屼篃涓嶄細璁?StrategyAgent 鐢熸垚娌℃湁璇佹嵁鏀拺鐨勬寮忔姤鍛娿€?
+| 层 | 技术 |
+|---|---|
+| 编排 | LangGraph（StateGraph / 条件路由 / 并行分支） |
+| Web | FastAPI + Uvicorn |
+| Agent 状态 | TypedDict + Pydantic Schema |
+| LLM | Doubao / Ark（`langchain_openai.ChatOpenAI`，可通过环境变量关闭单个 Agent 的 LLM 调用） |
+| 爬虫 | httpx + trafilatura + PyYAML |
+| 数据源 | MockResearchProvider / DatabaseResearchProvider / CrawlerResearchProvider（工厂模式） |
+| 前端 | React + Vite + TailwindCSS（图表/动画全部自研 CSS/SVG，无第三方图表库） |
+| 认证 | 独立 auth 模块（bcrypt + PyJWT，最小侵入，失败不影响分析主流程） |
 
-## 鎶€鏈爤
-
-- 鍚庣锛歅ython + FastAPI + LangGraph
-- Agent 鐘舵€佺害鏉燂細TypedDict + Pydantic Schema
-- LLM 鎺ュ叆锛欴oubao / Ark 瀹㈡埛绔皝瑁?
-- 褰撳墠鏁版嵁鍏ュ彛锛歁ockResearchProvider
-- 鍚庣画鏁版嵁鍏ュ彛锛欳rawlerResearchProvider锛岃鍙栫埇铏?JSON 骞舵牎楠屼负 `RawResearchItem`
-- 鍓嶇锛歊eact + Vite + TailwindCSS
-
-## 鍚庣鐩綍缁撴瀯
+## 目录结构
 
 ```text
 backend/
+  main.py                      # 启动入口（uvicorn）
+  api/
+    routes.py                  # FastAPI 路由：任务启动 / 状态 / 报告 / 中间产物
   app/
-    main.py
-    api/
-      analysis.py
-      industries.py
-      health.py
-    agents/
+    agents/                    # 8 个 Agent 实现
       research_agent.py
       evidence_agent.py
       product_agent.py
       business_agent.py
+      verification_agent.py
       risk_agent.py
       quality_agent.py
       strategy_agent.py
     core/
-      agent_runner.py
-      config.py
-      errors.py
-      logging.py
-    schemas/
-      research.py
-      evidence.py
-      claim.py
-      product.py
-      business.py
-      risk.py
-      quality.py
-      report.py
-      trace.py
-      metrics.py
-      state.py
+      agent_runner.py          # run_node：schema 校验 + 错误恢复
+    schemas/                   # research / evidence / claim / product /
+                               # business / risk / quality / report / ...
     services/
-      research_provider.py
+      research_provider.py             # ResearchProvider 抽象基类
+      research_provider_factory.py     # 按 RESEARCH_PROVIDER 选择数据源
       mock_research_provider.py
-      llm_client.py
+      faithfulness.py                  # 引用忠实度（数值/词法接地）
       metrics_service.py
+      review_service.py
+      crawl_data_service.py
+      crawler/                         # 爬虫/数据库数据源实现
+        http_downloader.py
+        content_extractor.py
+        cache_manager.py
+        dimension_classifier.py
+        crawler_research_provider.py
+        database_research_provider.py
   orchestration/
-    workflow.py            # LangGraph DAG and routing
-    state.py               # workflow state and reducers
-    industry_config.py     # industry presets
+    workflow.py                # LangGraph DAG 与路由
+    state.py                   # 工作流状态与 reducer
+    industry_config.py         # 行业预设（鼠标/键盘/耳机/泛外设）
+  auth/                        # 登录认证（可选模块）
+  config/crawler_config.yaml   # 爬虫配置（种子 URL / 全局参数）
+  test_*.py                    # 测试脚本
+
+crawler_package/               # 独立可分发的爬虫工具包（含文档与 demo 脚本）
+data/preload/crawl_seeds.json  # 预载真实竞品数据（鼠标/键盘/耳机各 7 条）
+frontend/src/                  # React 前端（9 个页面 + 自研可视化组件）
+docs/                          # 架构 / API / Agent 协议文档
 ```
 
-`backend/orchestration` is the workflow orchestration layer. Real agent implementations live in `backend/app/agents`.
+## 快速开始
 
-## 蹇€熷紑濮?
-
-### 鍚庣
+### 后端
 
 ```bash
 cd backend
+python -m venv venv
+venv\Scripts\activate          # Windows
 pip install -r requirements.txt
-cp .env.example .env
+copy .env.example .env         # 填入 ARK_API_KEY / ARK_EP
 python main.py
 ```
 
-榛樿鏈嶅姟鍦板潃锛?
+默认服务地址：`http://localhost:8000`，健康检查：`GET /health`。
 
-```text
-http://localhost:8000
-```
-
-鍋ュ悍妫€鏌ワ細
-
-```text
-GET /health
-```
-
-### 鍓嶇
+### 前端
 
 ```bash
 cd frontend
@@ -170,60 +124,56 @@ npm install
 npm run dev
 ```
 
-## Demo 璇锋眰绀轰緥
+前端通过 `VITE_API_BASE_URL`（默认 `http://127.0.0.1:8000`）连接后端。
+
+## 数据源切换
+
+通过环境变量 `RESEARCH_PROVIDER` 选择研究数据来源（默认 `database`）：
+
+| 取值 | 说明 |
+|---|---|
+| `database` | 读取本地预载真实竞品数据（鼠标/键盘/耳机），SQLite 库不可用时自动回退到 `data/preload/crawl_seeds.json`。**推荐默认值** |
+| `crawler` | 实时抓取公开站点（依赖 trafilatura / httpx / PyYAML），含 UA 轮换、重试、随机延迟、缓存、低质量页面过滤 |
+| `mock` | 确定性模拟数据，无需网络与密钥，适合纯流程演示 |
+
+三档 Provider 都输出统一的 `RawResearchItem` schema，对上层 Agent 完全透明。
+
+## Demo 请求示例
 
 ```json
 {
-  "target_platform": "缃楁妧",
-  "competitors": ["缃楁妧", "闆疯泧", "娴风洍鑸?],
-  "analysis_scene": "鐢电珵榧犳爣绔炲搧鍒嗘瀽",
-  "target_user": "浜у搧缁忕悊",
-  "time_range": "杩戜袱骞?,
+  "industry_key": "gaming_mouse",
+  "target_platform": "罗技",
+  "competitors": ["罗技", "雷蛇", "海盗船"],
+  "analysis_scene": "电竞鼠标竞品分析",
+  "target_user": "产品经理",
+  "time_range": "近两年",
   "focus_dimensions": [
-    "鎬ц兘鍙傛暟",
-    "杞婚噺鍖栬璁?,
-    "鏃犵嚎涓庣画鑸?,
-    "杞欢鐢熸€?,
-    "鐢ㄦ埛鍙ｇ",
-    "浠锋牸瀹氫綅",
-    "鐢电珵鍝佺墝褰卞搷鍔?
-  ],
-  "industry_key": "gaming_mouse"
+    "性能参数", "轻量化设计", "无线与续航",
+    "软件生态", "用户口碑", "价格定位", "电竞品牌影响力"
+  ]
 }
 ```
 
-璋冪敤锛?
+调用流程：
 
 ```text
-POST /api/analysis/start
+POST /api/analysis/start              → 拿到 task_id
+GET  /api/analysis/{task_id}/status   → 轮询进度
+GET  /api/analysis/{task_id}/report   → 最终报告
 ```
 
-鎷垮埌 `task_id` 鍚庤疆璇細
+## FastAPI 接口
 
-```text
-GET /api/analysis/{task_id}/status
-```
-
-瀹屾垚鍚庤鍙栵細
-
-```text
-GET /api/analysis/{task_id}/report
-GET /api/analysis/{task_id}/trace
-GET /api/analysis/{task_id}/evidence
-GET /api/analysis/{task_id}/claims
-```
-
-## FastAPI 鎺ュ彛
-
-鏍稿績鎺ュ彛锛?
+核心接口：
 
 - `POST /api/analysis/start`
-- `GET /api/analysis/{task_id}/status`
-- `GET /api/analysis/{task_id}/report`
-- `GET /api/industries`
-- `GET /health`
+- `GET  /api/analysis/{task_id}/status`
+- `GET  /api/analysis/{task_id}/report`
+- `GET  /api/industries`
+- `GET  /health`
 
-Agent 宸ヤ綔鍙板彧璇绘帴鍙ｏ細
+Agent 中间产物（只读，供前端展示与溯源）：
 
 - `GET /api/analysis/{task_id}/evidence`
 - `GET /api/analysis/{task_id}/claims`
@@ -233,62 +183,28 @@ Agent 宸ヤ綔鍙板彧璇绘帴鍙ｏ細
 - `GET /api/analysis/{task_id}/risks`
 - `GET /api/analysis/{task_id}/artifacts`
 
-瀹屾暣鎺ュ彛璇存槑瑙侊細
+完整接口说明见 `docs/api.md`，Agent 协议说明见 `docs/agent_protocol.md`。
 
-```text
-docs/api.md
-```
-
-Agent 鍗忚璇存槑瑙侊細
-
-```text
-docs/agent_protocol.md
-```
-
-## MockResearchProvider
-
-褰撳墠娌℃湁鎺ョ湡瀹炵埇铏€俙MockResearchProvider` 浼氭牴鎹?`industry_key` 鐢熸垚 mock raw research銆?
-
-褰?`industry_key = "gaming_mouse"` 鏃讹紝mock 鏁版嵁浼氬洿缁曠數绔為紶鏍囩敓鎴愶紝骞惰鐩栵細
-
-- 缃楁妧銆侀浄铔囥€佹捣鐩楄埞涓変釜鍝佺墝锛?
-- 浠ｈ〃鍨嬪彿锛?
-- 涓冧釜鏍稿績缁村害锛?
-- `official`銆乣review`銆乣ecommerce`銆乣user_review`銆乣news`銆乣report` 绛?source type锛?
-- `mock://gaming_mouse/...` 椋庢牸 URL锛?
-- `dimension`銆乣related_dimension`銆乣product_name`銆乣category` 鍏煎瀛楁銆?
-
-鍚庣画鎺ョ湡瀹炵埇铏椂锛屽彧闇€瑕佸疄鐜版柊鐨?`CrawlerResearchProvider`锛岃瀹冭緭鍑虹鍚?`RawResearchItem` schema 鐨勬暟鎹嵆鍙€?
-
-## 娴嬭瘯
-
-甯哥敤鍚庣娴嬭瘯锛?
+## 测试
 
 ```bash
 backend\venv\Scripts\python.exe backend\test_workflow.py
 backend\venv\Scripts\python.exe backend\test_agents.py
 backend\venv\Scripts\python.exe backend\test_traceability.py
 backend\venv\Scripts\python.exe backend\test_api_readonly.py
+backend\venv\Scripts\python.exe backend\test_context_and_faithfulness.py
+backend\venv\Scripts\python.exe backend\test_failure_paths.py
 backend\venv\Scripts\python.exe backend\test_gaming_mouse_config.py
 ```
 
-`test_gaming_mouse_config.py` 浼氭鏌ワ細
+## 设计原则
 
-- 琛屼笟閰嶇疆鍖呭惈 `gaming_mouse`锛?
-- 鍝佺墝瑕嗙洊缃楁妧銆侀浄铔囥€佹捣鐩楄埞锛?
-- 缁村害瑕嗙洊涓冧釜鐢电珵榧犳爣鏍稿績缁村害锛?
-- MockResearchProvider 杩斿洖绗﹀悎 `RawResearchItem` 鐨勬暟鎹紱
-- mock 鏁版嵁瑕嗙洊涓変釜鍝佺墝鍜屼唬琛ㄥ瀷鍙枫€?
+- Schema-first：Agent 间结构化通信
+- Evidence-grounded：claim 必须有证据支撑
+- 无证据不出结论：禁止生成无支撑的正式报告
+- 战略生成前先质检：QualityAgent 把关
+- 人工复核优于强制通过：失败转 human review 而非 force pass
+- 可追溯、前端可读的中间产物
+- 行业配置驱动的可扩展性
 
-## 璁捐鍘熷垯
-
-- Schema-first Agent communication
-- Evidence-grounded claims
-- No unsupported final report
-- Quality rejection before strategy generation
-- Human review instead of force pass
-- Backward compatibility during migration
-- Traceable and frontend-readable intermediate artifacts
-- Industry-config driven extensibility
-
-褰撳墠绯荤粺涓嶆槸鏅€?LLM 鎶ュ憡鐢熸垚鍣紝鑰屾槸 evidence-grounded銆乻chema-validated銆乹uality-controlled 鐨勫 Agent 绔炲搧鍒嗘瀽宸ヤ綔娴併€?
+本系统不是普通的 LLM 报告生成器，而是一条 **evidence-grounded、schema-validated、quality-controlled** 的多 Agent 竞品分析工作流。
