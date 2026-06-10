@@ -13,17 +13,82 @@ type NewAnalysisPageProps = {
   onStartAutoDemo: () => void;
 };
 
-const defaultCompetitors = ["罗技", "雷蛇", "海盗船"];
-const defaultDimensions = [
-  "性能参数",
-  "轻量化设计",
-  "无线与续航",
-  "软件生态",
-  "用户口碑",
-  "价格定位",
-  "电竞品牌影响力",
-  "握持手感与人体工学",
-];
+type AnalysisPreset = {
+  industryKey: string;
+  categoryName: string;
+  defaultTargetPlatform: string;
+  competitors: string[];
+  dimensions: string[];
+  analysisScene: string;
+  intro: string;
+};
+
+const analysisPresets = {
+  gaming_mouse: {
+    industryKey: "gaming_mouse",
+    categoryName: "电竞鼠标",
+    defaultTargetPlatform: "罗技",
+    competitors: ["罗技", "雷蛇", "海盗船"],
+    dimensions: [
+      "性能参数",
+      "轻量化设计",
+      "无线与续航",
+      "软件生态",
+      "用户口碑",
+      "价格定位",
+      "电竞品牌影响力",
+      "握持手感与人体工学",
+    ],
+    analysisScene: "电竞鼠标竞品分析",
+    intro:
+      "使用当前系统任务创建接口启动多 Agent 工作流，系统将围绕电竞鼠标赛道完成证据采集、结论生成、质量审查与报告输出。",
+  },
+  gaming_keyboard: {
+    industryKey: "gaming_keyboard",
+    categoryName: "电竞键盘",
+    defaultTargetPlatform: "罗技",
+    competitors: ["罗技", "雷蛇", "海盗船", "Cherry"],
+    dimensions: [
+      "轴体手感",
+      "键帽材质",
+      "键位布局",
+      "RGB灯效",
+      "热插拔能力",
+      "续航表现",
+      "电竞延迟表现",
+    ],
+    analysisScene: "电竞键盘竞品分析",
+    intro:
+      "使用当前系统任务创建接口启动多 Agent 工作流，系统将围绕电竞键盘赛道完成证据采集、结论生成、质量审查与报告输出。",
+  },
+  gaming_headset: {
+    industryKey: "gaming_headset",
+    categoryName: "电竞头戴式耳机",
+    defaultTargetPlatform: "雷蛇",
+    competitors: ["森海塞尔", "索尼", "雷蛇", "赛睿"],
+    dimensions: [
+      "音频音质",
+      "降噪能力",
+      "麦克风收音效果",
+      "佩戴舒适度",
+      "无线延迟",
+      "续航时长",
+      "头戴重量",
+    ],
+    analysisScene: "电竞头戴式耳机竞品分析",
+    intro:
+      "使用当前系统任务创建接口启动多 Agent 工作流，系统将围绕电竞头戴式耳机赛道完成证据采集、结论生成、质量审查与报告输出。",
+  },
+} satisfies Record<string, AnalysisPreset>;
+
+type AnalysisPresetKey = keyof typeof analysisPresets;
+
+function getAnalysisPresetKey(selectedIndustryKey?: string | null): AnalysisPresetKey {
+  return selectedIndustryKey &&
+    Object.prototype.hasOwnProperty.call(analysisPresets, selectedIndustryKey)
+    ? (selectedIndustryKey as AnalysisPresetKey)
+    : "gaming_mouse";
+}
 
 export function NewAnalysisPage({
   selectedIndustryKey,
@@ -34,24 +99,26 @@ export function NewAnalysisPage({
   onToggleAutoDemo,
   onStartAutoDemo,
 }: NewAnalysisPageProps) {
-  const [targetPlatform, setTargetPlatform] = useState("罗技");
+  const presetKey = getAnalysisPresetKey(selectedIndustryKey);
+  const preset = analysisPresets[presetKey];
+
+  const [targetPlatform, setTargetPlatform] = useState(
+    preset.defaultTargetPlatform,
+  );
   const [targetUser, setTargetUser] = useState("产品经理");
   const [timeRange, setTimeRange] = useState("近两年");
   const [isStarting, setIsStarting] = useState(false);
   const [createdTaskId, setCreatedTaskId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
-  const industryKey =
-    selectedIndustryKey === "gaming_mouse" ? selectedIndustryKey : "gaming_mouse";
-
   const payload: StartAnalysisRequest = {
-    target_platform: targetPlatform.trim() || "罗技",
-    competitors: defaultCompetitors,
-    analysis_scene: "电竞鼠标竞品分析",
+    target_platform: targetPlatform.trim() || preset.defaultTargetPlatform,
+    competitors: preset.competitors,
+    analysis_scene: preset.analysisScene,
     target_user: targetUser.trim() || "产品经理",
     time_range: timeRange.trim() || "近两年",
-    focus_dimensions: defaultDimensions,
-    industry_key: industryKey,
+    focus_dimensions: preset.dimensions,
+    industry_key: preset.industryKey,
   };
 
   async function handleStartAnalysis() {
@@ -98,7 +165,7 @@ export function NewAnalysisPage({
             配置 Agent 分析任务
           </h2>
           <p className="mt-3 max-w-3xl text-sm leading-6 text-slate-400">
-            使用当前系统任务创建接口启动多 Agent 工作流，系统将围绕电竞鼠标赛道完成证据采集、结论生成、质量审查与报告输出。
+            {preset.intro}
           </p>
         </div>
         <div className="flex flex-wrap gap-2 lg:justify-end">
@@ -116,10 +183,10 @@ export function NewAnalysisPage({
             <div>
               <p className="text-sm font-medium text-cyan-300">当前分析范围</p>
               <h3 className="mt-2 text-2xl font-semibold text-white">
-                电竞外设 / 电竞鼠标
+                电竞外设 / {preset.categoryName}
               </h3>
             </div>
-            <StatusBadge label="电竞鼠标" tone="info" />
+            <StatusBadge label={preset.categoryName} tone="info" />
           </div>
 
           <dl className="mt-5 grid gap-3">
@@ -136,7 +203,7 @@ export function NewAnalysisPage({
                 品类
               </dt>
               <dd className="mt-2 text-sm font-medium text-slate-100">
-                电竞鼠标
+                {preset.categoryName}
               </dd>
             </div>
             <div className="rounded-xl border border-white/10 bg-slate-900/45 p-4">
@@ -144,7 +211,7 @@ export function NewAnalysisPage({
                 分析对象
               </dt>
               <dd className="mt-3 flex flex-wrap gap-2">
-                {defaultCompetitors.map((competitor) => (
+                {preset.competitors.map((competitor) => (
                   <StatusBadge key={competitor} label={competitor} tone="neutral" />
                 ))}
               </dd>
@@ -198,7 +265,7 @@ export function NewAnalysisPage({
           <div className="mt-5 rounded-xl border border-white/10 bg-slate-900/35 p-4">
             <p className="text-sm font-medium text-slate-300">分析维度</p>
             <div className="mt-3 flex flex-wrap gap-2">
-              {defaultDimensions.map((dimension) => (
+              {preset.dimensions.map((dimension) => (
                 <span
                   className="rounded-lg border border-cyan-300/20 bg-cyan-300/10 px-3 py-2 text-sm text-cyan-100"
                   key={dimension}
