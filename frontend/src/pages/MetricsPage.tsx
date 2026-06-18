@@ -325,10 +325,10 @@ export function MetricsPage({
           action={
             <button
               className="rounded-md bg-cyan-300 px-4 py-2 text-sm font-semibold text-slate-950 transition hover:bg-cyan-200"
-              onClick={() => onNavigate("new-analysis")}
+              onClick={() => onNavigate("product-compare")}
               type="button"
             >
-              新建分析
+              产品对比
             </button>
           }
         />
@@ -378,9 +378,9 @@ export function MetricsPage({
                 helper="系统指标"
               />
               <MetricCard
-                label="质量得分"
+                label="报告可信度"
                 value={formatMetric(metrics?.quality_score, "score")}
-                helper="质量门控评分"
+                helper="分析质量分，非产品评分"
               />
               <MetricCard
                 label="重试轮次"

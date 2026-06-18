@@ -6,12 +6,13 @@ import { ClaimsPage } from "./pages/ClaimsPage";
 import { EvidencePage } from "./pages/EvidencePage";
 import { HomePage } from "./pages/HomePage";
 import { MetricsPage } from "./pages/MetricsPage";
-import { NewAnalysisPage } from "./pages/NewAnalysisPage";
+import { ProductComparePage } from "./pages/ProductComparePage";
 import { QualityPage } from "./pages/QualityPage";
 import { ReportPage } from "./pages/ReportPage";
 import { WelcomePage } from "./pages/WelcomePage";
 import { WorkflowPage } from "./pages/WorkflowPage";
 import { getDisplayTaskId } from "./utils/taskDisplay";
+import { analysisApi } from "./api/analysisApi";
 import type { AuthUser } from "./api/authApi";
 
 const AUTH_TOKEN_KEY = "authToken";
@@ -44,7 +45,7 @@ function getStoredUser(): AuthUser | null {
 
 type PageKey =
   | "overview"
-  | "new-analysis"
+  | "product-compare"
   | "workflow"
   | "evidence"
   | "claims"
@@ -54,7 +55,7 @@ type PageKey =
 
 const navItems: Array<NavItem & { key: PageKey }> = [
   { key: "overview", label: "总览" },
-  { key: "new-analysis", label: "新建分析" },
+  { key: "product-compare", label: "产品对比" },
   { key: "workflow", label: "Agent 工作流" },
   { key: "evidence", label: "证据中心" },
   { key: "claims", label: "结论追踪" },
@@ -101,6 +102,9 @@ function getPageKeyFromHash(): PageKey {
   }
 
   const pageKey = window.location.hash.replace(/^#\/?/, "");
+  if (pageKey === "new-analysis") {
+    return "product-compare";
+  }
   return isPageKey(pageKey) ? pageKey : "overview";
 }
 
@@ -124,14 +128,14 @@ export default function App() {
   const [displayTaskId, setDisplayTaskId] = useState<string | null>(() =>
     getDisplayTaskId(getStoredTaskId()),
   );
+  // 旧任务失效提示（后端重启 / task 过期后 /api/analysis/{id} 返回 404）。
+  const [staleTaskNotice, setStaleTaskNotice] = useState(false);
   const [selectedDomain, setSelectedDomain] = useState<string | null>(null);
   const [selectedCategory, setSelectedCategory] = useState<string | null>(null);
   const [selectedIndustryKey, setSelectedIndustryKey] = useState<string | null>(
     null,
   );
 
-  // 自动演示模式状态（默认关闭：创建任务后不自动逐步推进，改为手动浏览）
-  const [autoDemoEnabled, setAutoDemoEnabled] = useState(false);
   const [demoRunning, setDemoRunning] = useState(false);
   const [demoPaused, setDemoPaused] = useState(false);
   const [demoStepIndex, setDemoStepIndex] = useState(0);
@@ -312,6 +316,7 @@ export default function App() {
   function handleTaskCreated(nextTaskId: string) {
     setTaskId(nextTaskId);
     setDisplayTaskId(getDisplayTaskId(nextTaskId));
+    setStaleTaskNotice(false);
 
     if (typeof window !== "undefined") {
       window.sessionStorage.setItem("activeTaskId", nextTaskId);
@@ -320,6 +325,48 @@ export default function App() {
 
   useEffect(() => {
     setDisplayTaskId(getDisplayTaskId(taskId));
+  }, [taskId]);
+
+  // 校验当前任务是否仍存在：若 /api/analysis/{id} 返回 404（后端重启 / 任务过期），
+  // 清除失效的 activeTaskId 并提示用户重新启动，避免各页面持续轮询已失效任务。
+  useEffect(() => {
+    if (!taskId) {
+      return;
+    }
+    let cancelled = false;
+    let timer: number | undefined;
+
+    async function validate(currentTaskId: string) {
+      try {
+        await analysisApi.getStatus(currentTaskId);
+      } catch (error) {
+        if (cancelled) {
+          return;
+        }
+        const message = error instanceof Error ? error.message : "";
+        if (message.includes("404")) {
+          if (typeof window !== "undefined") {
+            window.sessionStorage.removeItem("activeTaskId");
+          }
+          setTaskId(null);
+          setDisplayTaskId(null);
+          setStaleTaskNotice(true);
+          if (timer) {
+            window.clearInterval(timer);
+          }
+        }
+      }
+    }
+
+    validate(taskId);
+    timer = window.setInterval(() => validate(taskId), 4000);
+
+    return () => {
+      cancelled = true;
+      if (timer) {
+        window.clearInterval(timer);
+      }
+    };
   }, [taskId]);
 
   function handleHomeSelection(selection: {
@@ -342,16 +389,12 @@ export default function App() {
 
   // 总览 / 新建分析：分析前的入口页，单页展示。
   function renderSinglePage() {
-    if (activePage === "new-analysis") {
+    if (activePage === "product-compare") {
       return (
-        <NewAnalysisPage
+        <ProductComparePage
           displayTaskId={displayTaskId ?? undefined}
           onNavigate={handleNavigate}
           onTaskCreated={handleTaskCreated}
-          selectedIndustryKey={selectedIndustryKey}
-          autoDemoEnabled={autoDemoEnabled}
-          onToggleAutoDemo={setAutoDemoEnabled}
-          onStartAutoDemo={startAutoDemo}
         />
       );
     }
@@ -438,6 +481,30 @@ export default function App() {
       onStopDemo={stopDemo}
       showAmbientParticles={!inResultsView}
     >
+      {staleTaskNotice ? (
+        <div className="mb-5 flex flex-col gap-3 rounded-lg border border-amber-400/35 bg-amber-400/10 px-4 py-3 text-sm text-amber-100 sm:flex-row sm:items-center sm:justify-between">
+          <span>上一个分析任务已失效（后端可能已重启或任务已过期），已停止轮询。请重新启动一次分析。</span>
+          <div className="flex shrink-0 gap-2">
+            <button
+              className="rounded-md border border-amber-300/50 px-3 py-1.5 text-xs font-semibold text-amber-100 transition hover:bg-amber-300/15"
+              onClick={() => {
+                setStaleTaskNotice(false);
+                handleNavigate("product-compare");
+              }}
+              type="button"
+            >
+              去产品对比
+            </button>
+            <button
+              className="rounded-md border border-slate-600 px-3 py-1.5 text-xs font-medium text-slate-300 transition hover:border-slate-400"
+              onClick={() => setStaleTaskNotice(false)}
+              type="button"
+            >
+              知道了
+            </button>
+          </div>
+        </div>
+      ) : null}
       {inResultsView ? (
         <div className="page-enter" key="results-scroll">
           {renderResultsScroll()}

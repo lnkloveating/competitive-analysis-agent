@@ -8,6 +8,13 @@ export type Industry = {
   representative_products?: Record<string, string[]>;
 };
 
+export type SelectedProductRef = {
+  id: string;
+  model?: string;
+  brand?: string;
+  category?: string;
+};
+
 export type StartAnalysisRequest = {
   target_platform: string;
   competitors: string[];
@@ -16,6 +23,8 @@ export type StartAnalysisRequest = {
   time_range: string;
   focus_dimensions: string[];
   industry_key: string;
+  // 产品对比页带入的两个产品；普通新建分析入口可省略。
+  selected_products?: SelectedProductRef[];
 };
 
 export type StartAnalysisResponse = {

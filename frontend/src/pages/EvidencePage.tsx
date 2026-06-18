@@ -276,10 +276,10 @@ export function EvidencePage({
           action={
             <button
               className="rounded-md bg-cyan-300 px-4 py-2 text-sm font-semibold text-slate-950 transition hover:bg-cyan-200"
-              onClick={() => onNavigate("new-analysis")}
+              onClick={() => onNavigate("product-compare")}
               type="button"
             >
-              新建分析
+              产品对比
             </button>
           }
         />

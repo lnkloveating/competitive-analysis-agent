@@ -66,6 +66,13 @@ class CompetitiveAnalysisState(TypedDict):
     target_user: str
     time_range: str
     focus_dimensions: List[str]
+    # 产品对比模式：从产品对比页带入的结构化产品事实底座。
+    # 这三个通道只在初始 state 写入一次，节点不在并行分支里改写，因此无需 reducer。
+    product_compare_mode: bool
+    selected_products: List[Dict]
+    product_facts: List[Dict]
+    # 产品评分（ProductAgent 基于硬件 JSON 计算；与报告 quality_score 分离）。
+    product_scores: Dict
     raw_research: List[Dict]
     evidence_list: List[Dict]
     claims: Annotated[List[Dict], merge_claims]

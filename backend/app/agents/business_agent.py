@@ -592,6 +592,22 @@ def _append_trace(
 def business_agent(state: dict) -> Dict[str, Any]:
     """Analyze business dimensions and output a matrix plus business claims."""
     _load_env()
+
+    # 产品对比模式：聚焦两款产品的硬参数，不做品牌级商业矩阵；返回空矩阵、不新增商业 claim。
+    # QualityAgent 在对比模式下会跳过 business_matrix_not_empty 检查。
+    if state.get("product_compare_mode"):
+        existing_claims = [item for item in state.get("claims", []) if isinstance(item, dict)]
+        next_state = {
+            **state,
+            "current_agent": "BusinessAgent",
+            "business_matrix": {},
+            "claims": existing_claims,
+            "context_summary": state.get("context_summary", {}),
+        }
+        _append_trace(next_state, [], {})
+        print("[BusinessAgent] 产品对比模式：跳过商业矩阵（聚焦产品硬参数对比）")
+        return next_state
+
     evidence_list = [
         item for item in state.get("evidence_list", [])
         if isinstance(item, dict)

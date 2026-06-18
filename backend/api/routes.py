@@ -1,12 +1,36 @@
 from __future__ import annotations
 
+import os
 import threading
-from typing import Any, Dict, List
+from pathlib import Path
+from typing import Any, Dict, List, Optional
 from uuid import uuid4
 
+from dotenv import load_dotenv
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
+
+
+def _configure_tracing() -> None:
+    """默认关闭 LangSmith tracing，避免无网络/无效 key 时的报错噪音。
+
+    需要时通过 ENABLE_LANGSMITH=true 打开（保留 .env 里的 LANGCHAIN_* 配置）。
+    必须在导入 workflow（langchain）之前执行；先 load .env 再按需覆盖，
+    后续 agent 内的 load_dotenv(override=False) 不会再覆盖这里已设的值。
+    """
+    load_dotenv(Path(__file__).resolve().parents[1] / ".env")
+    load_dotenv()
+    enabled = os.getenv("ENABLE_LANGSMITH", "").strip().lower() in {"1", "true", "yes", "on"}
+    if not enabled:
+        for var in ("LANGCHAIN_TRACING_V2", "LANGCHAIN_TRACING", "LANGSMITH_TRACING"):
+            os.environ[var] = "false"
+        # 移除 key，避免后台上传 trace 时打印鉴权失败噪音
+        for var in ("LANGCHAIN_API_KEY", "LANGSMITH_API_KEY"):
+            os.environ.pop(var, None)
+
+
+_configure_tracing()
 
 from orchestration.industry_config import INDUSTRY_CONFIGS, get_state_dimensions, get_state_industry_name
 from orchestration.workflow import app as workflow_app
@@ -34,6 +58,11 @@ try:
 except Exception:  # pragma: no cover - 认证可选，失败不影响分析接口
     pass
 
+# 产品规格事实底座只读接口（搜索/列表/详情/对比）。与分析主流程解耦，仅新增、不改 workflow。
+from api.product_routes import router as product_router
+
+app.include_router(product_router)
+
 TASKS: Dict[str, Dict[str, Any]] = {}
 TASK_LOCK = threading.Lock()
 
@@ -57,16 +86,45 @@ class AnalysisRequest(BaseModel):
     target_user: str
     time_range: str
     focus_dimensions: List[str]
+    # 产品对比页带入的两个产品（{id, model, brand, category}）。可选，兼容旧入口。
+    selected_products: Optional[List[Dict[str, Any]]] = None
+
+
+def _build_compare_seed(request: AnalysisRequest) -> Optional[Dict[str, Any]]:
+    """若请求带 selected_products，则解析规格并构造对比模式的注入物；否则返回 None。"""
+    selected = request.selected_products or []
+    if not selected:
+        return None
+    # 延迟导入，避免无产品目录场景下的多余依赖
+    from app.services.product_compare_service import build_compare_payload, resolve_products
+
+    category = request.industry_key or "gaming_mouse"
+    products = resolve_products(selected, category)
+    if not products:
+        return None
+    return build_compare_payload(products, category)
 
 
 def _build_initial_state(request: AnalysisRequest) -> Dict[str, Any]:
     state = request.model_dump()
+    state.pop("selected_products", None)  # 不直接进 state，下面按解析结果注入
     state["industry_name"] = get_state_industry_name(state)
     state["focus_dimensions"] = get_state_dimensions(state)
+
+    seed = _build_compare_seed(request)
+    compare_mode = seed is not None
+    if compare_mode:
+        # 对比模式：把质检范围收敛到被选中的两个产品 + 实际覆盖维度
+        state["competitors"] = seed["competitors"]
+        state["focus_dimensions"] = seed["focus_dimensions"]
+
     state.update(
         {
-            "raw_research": [],
-            "evidence_list": [],
+            "product_compare_mode": compare_mode,
+            "selected_products": seed["products"] if compare_mode else [],
+            "product_facts": seed["product_facts"] if compare_mode else [],
+            "raw_research": seed["raw_research"] if compare_mode else [],
+            "evidence_list": seed["evidence_list"] if compare_mode else [],
             "claims": [],
             "product_matrix": {},
             "business_matrix": {},

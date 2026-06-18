@@ -387,6 +387,19 @@ def _append_trace(state: dict, evidence_count: int) -> None:
 def evidence_agent(state: dict) -> Dict[str, Any]:
     """Convert raw_research into EvidenceItem-compatible records."""
     _load_env()
+
+    # 产品对比模式：证据已是结构化硬规格事实，直接沿用，不再用 LLM 二次抽取（避免改写数值/维度）。
+    if state.get("product_compare_mode"):
+        evidence_list = [item for item in state.get("evidence_list", []) if isinstance(item, dict)]
+        next_state = {
+            **state,
+            "current_agent": "EvidenceAgent",
+            "evidence_list": evidence_list,
+        }
+        _append_trace(next_state, len(evidence_list))
+        print(f"[EvidenceAgent] 产品对比模式：沿用注入的 {len(evidence_list)} 条结构化产品证据")
+        return next_state
+
     raw_research = state.get("raw_research", [])
     competitors = state.get("competitors", [])
     focus_dimensions = state.get("focus_dimensions", [])

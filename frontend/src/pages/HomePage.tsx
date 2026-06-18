@@ -231,14 +231,14 @@ const capabilityCards = [
 
 const analysisFlowSteps = [
   {
-    key: "new-analysis",
+    key: "product-compare",
     code: "01",
-    label: "新建分析",
-    subtitle: "TASK CONFIG",
-    desc: "配置行业、品类、竞品范围与分析维度。",
-    input: "行业 / 品类 / 竞品范围",
-    process: "生成分析任务",
-    output: "TASK-001 或待创建",
+    label: "产品对比",
+    subtitle: "PRODUCT ENTRY",
+    desc: "搜索两款电竞鼠标，先完成硬件规格对比，再启动 Agent 分析任务。",
+    input: "产品 A / 产品 B",
+    process: "规格事实库对比 + 任务创建",
+    output: "规格对比 / TASK-001",
     positionClass: "mission-node-1",
   },
   {
@@ -313,7 +313,7 @@ const analysisFlowSteps = [
     code: "08",
     label: "指标看板",
     subtitle: "METRICS",
-    desc: "展示证据数量、结论数量、质量得分、引用率、上下文裁剪和错误恢复等指标。",
+    desc: "展示证据数量、结论数量、报告可信度、引用率、上下文裁剪和错误恢复等指标。",
     input: "全流程结果",
     process: "统计证据、结论、质量和引用指标",
     output: "Citation / Coverage / Faithfulness / Recovery",
@@ -502,7 +502,7 @@ export function HomePage({
       selectedCategory: nextCategory,
       selectedIndustryKey: nextIndustryKey,
     });
-    onNavigate("new-analysis");
+    onNavigate("product-compare");
   }
 
   return (
@@ -721,7 +721,7 @@ export function HomePage({
                       const isComplete =
                         missionCompleted || isVisited || hasPassedInPreview;
                       const output =
-                        step.key === "new-analysis"
+                        step.key === "product-compare"
                           ? displayTaskId ?? "待创建"
                           : step.output;
 

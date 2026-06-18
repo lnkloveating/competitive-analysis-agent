@@ -106,6 +106,18 @@ const agentNodes: AgentNode[] = [
   },
 ];
 
+const AGENT_SCORE_CONTRIBUTIONS: Record<string, string> = {
+  ResearchAgent: "确认产品身份与本地事实，未来接入爬虫补官网/评测/实时价格。",
+  EvidenceAgent: "把规格、来源和字段可信度整理成可引用证据。",
+  ProductAgent: "生成基础硬件快评、模具识别和点击系统判断；体验适配等待爬虫。",
+  BusinessAgent: "产品对比模式下让位于硬件决策；未来可承接价格/渠道数据。",
+  VerificationAgent: "检查购买建议是否有 evidence 支撑。",
+  RiskAgent: "标记口碑、实时价格、长期可靠性等待验证项。",
+  QualityAgent: "检查证据覆盖和风险严重度，输出报告可信度。",
+  StrategyAgent: "把基础快评、证据链和风险项整合成最终购买建议。",
+  HumanReviewRequired: "自动审查失败时等待人工复核。",
+};
+
 const humanReviewNode: AgentNode = {
   name: "HumanReviewRequired",
   label: "人工审核",
@@ -291,6 +303,7 @@ function AgentCard({
   onSelect,
   status,
   produce,
+  contribution,
 }: {
   badges?: Array<{
     label: string;
@@ -302,6 +315,7 @@ function AgentCard({
   onSelect: () => void;
   status: AgentStatus;
   produce: string;
+  contribution: string;
 }) {
   return (
     <Tooltip
@@ -319,6 +333,10 @@ function AgentCard({
           <span className="block">
             <span className="text-slate-400">本次产出：</span>
             {produce}
+          </span>
+          <span className="block">
+            <span className="text-slate-400">对最终建议：</span>
+            {contribution}
           </span>
           <span className="block">
             <span className="text-slate-400">状态：</span>
@@ -365,6 +383,9 @@ function AgentCard({
             </span>
           ) : null}
         </div>
+        <p className="mt-3 text-xs leading-5 text-slate-400">
+          {contribution}
+        </p>
       </button>
     </Tooltip>
   );
@@ -674,7 +695,7 @@ export function WorkflowPage({
   const selectedTrace =
     latestTraceByAgent[selectedAgent.name] ??
     (selectedAgent.name === humanReviewNode.name
-      ? latestTraceByAgent.HumanReviewAgent
+      ? latestTraceByAgent.HumanReviewRequired ?? latestTraceByAgent.HumanReviewAgent
       : undefined);
   const selectedStatus = derivedStatuses[selectedAgent.name] ?? "pending";
   const selectedRejectTo =
@@ -737,7 +758,7 @@ export function WorkflowPage({
           : outputSummary || "暂无";
       case "QualityAgent": {
         const scoreText =
-          typeof qualityScore === "number" ? `质量得分 ${qualityScore}` : "尚未评分";
+          typeof qualityScore === "number" ? `报告可信度 ${qualityScore}` : "尚未评分";
         const resultText =
           qualityApproved === true
             ? "审查通过"
@@ -789,10 +810,10 @@ export function WorkflowPage({
           action={
             <button
               className="rounded-md bg-cyan-300 px-4 py-2 text-sm font-semibold text-slate-950 transition hover:bg-cyan-200"
-              onClick={() => onNavigate("new-analysis")}
+              onClick={() => onNavigate("product-compare")}
               type="button"
             >
-              新建分析
+              产品对比
             </button>
           }
         />
@@ -853,7 +874,7 @@ export function WorkflowPage({
             <div>
               <h3 className="text-lg font-semibold text-white">Agent 执行路径</h3>
               <p className="mt-1 text-sm text-slate-400">
-                节点状态来自系统执行记录与当前 Agent。
+                节点状态来自系统执行记录；每个 Agent 都会把基础硬件快评推进到最终购买建议。
               </p>
             </div>
             {lastUpdated ? (
@@ -879,6 +900,7 @@ export function WorkflowPage({
                           onSelect={() => setSelectedAgentName(node.name)}
                           status={derivedStatuses[node.name] ?? "pending"}
                           produce={getAgentProduce(node.name)}
+                          contribution={AGENT_SCORE_CONTRIBUTIONS[node.name] ?? "参与最终建议生成。"}
                         />
                       ))}
                     </div>
@@ -896,6 +918,10 @@ export function WorkflowPage({
                         onSelect={() => setSelectedAgentName(column.nodes[0].name)}
                         status={derivedStatuses[column.nodes[0].name] ?? "pending"}
                         produce={getAgentProduce(column.nodes[0].name)}
+                        contribution={
+                          AGENT_SCORE_CONTRIBUTIONS[column.nodes[0].name] ??
+                          "参与最终建议生成。"
+                        }
                       />
                     </div>
                   )}
@@ -1125,6 +1151,12 @@ export function WorkflowPage({
                 <dt className="text-slate-500">本次产出</dt>
                 <dd className="mt-1 break-words text-slate-100">
                   {getAgentProduce(selectedAgent.name)}
+                </dd>
+              </div>
+              <div>
+                <dt className="text-slate-500">对最终建议的贡献</dt>
+                <dd className="mt-1 break-words leading-6 text-slate-100">
+                  {AGENT_SCORE_CONTRIBUTIONS[selectedAgent.name] ?? "参与最终建议生成。"}
                 </dd>
               </div>
               <div>

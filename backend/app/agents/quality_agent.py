@@ -104,6 +104,7 @@ def _build_checked_items(
     focus_dimensions: List[str],
     unsupported_claim_ids: List[str],
     matrix_issues: List[Dict[str, Any]],
+    product_compare_mode: bool = False,
 ) -> tuple[Dict[str, bool], List[str], List[str], List[str], str | None]:
     existing_evidence_ids = {
         _as_text(evidence.get("evidence_id"))
@@ -165,7 +166,8 @@ def _build_checked_items(
         "all_competitors_covered": not missing_platforms,
         "all_dimensions_covered": not missing_dimensions,
         "product_matrix_not_empty": _matrix_not_empty(product_matrix),
-        "business_matrix_not_empty": _matrix_not_empty(business_matrix),
+        # 对比模式只看被选中的两个产品，不要求品牌级商业矩阵。
+        "business_matrix_not_empty": True if product_compare_mode else _matrix_not_empty(business_matrix),
         "no_high_severity_risk": not high_risks,
     }
 
@@ -217,6 +219,9 @@ def _quality_result_with_legacy_fields(result: QualityResult, reason: str) -> Di
         {
             "status": "approved" if result.approved else "rejected",
             "quality_score": result.score,
+            # 明确：这是报告可信度/分析质量分，不是产品综合评分。
+            "score_type": "report_credibility",
+            "score_meaning": "报告可信度 / 分析质量分（非产品评分）",
             "reason": reason,
             "passed_checks": [
                 name for name, passed in result.checked_items.items() if passed
@@ -300,6 +305,7 @@ def quality_agent(state: dict) -> Dict[str, Any]:
         focus_dimensions=focus_dimensions,
         unsupported_claim_ids=unsupported_claim_ids,
         matrix_issues=matrix_issues,
+        product_compare_mode=bool(state.get("product_compare_mode")),
     )
 
     approved = all(checked_items.values())

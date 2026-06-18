@@ -576,8 +576,11 @@ def product_agent(state: dict) -> Dict[str, Any]:
     valid_ids = _valid_evidence_ids(evidence_list)
     prompt_evidence, context_summary = select_evidence_context("ProductAgent", evidence_list)
 
+    compare_mode = bool(state.get("product_compare_mode"))
+
+    # 对比模式：优先用注入的结构化产品 facts（已是确定性证据），跳过 LLM 以保证可复现且数值忠实。
     llm: ChatOpenAI | None = None
-    if _llm_enabled() and os.getenv("ARK_EP") and os.getenv("ARK_API_KEY"):
+    if not compare_mode and _llm_enabled() and os.getenv("ARK_EP") and os.getenv("ARK_API_KEY"):
         try:
             llm = _get_llm()
         except Exception:
@@ -602,6 +605,24 @@ def product_agent(state: dict) -> Dict[str, Any]:
         product_matrix = fallback_matrix
         product_claims = fallback_claims
 
+    # 对比模式：用确定性矩阵（不截断证据数值）替换 fallback 矩阵，补充硬参数对比 claim，并算产品评分。
+    product_scores: Dict[str, Any] = state.get("product_scores", {}) or {}
+    if compare_mode:
+        from app.services.product_compare_service import build_product_matrix, comparative_claims
+        from app.services.product_scoring_service import build_scoreboard
+
+        selected = [p for p in state.get("selected_products", []) if isinstance(p, dict)]
+        product_matrix = build_product_matrix(selected, evidence_list, dimensions)
+        comp = comparative_claims(
+            selected,
+            evidence_list,
+            len(existing_claims) + len(product_claims),
+        )
+        if comp:
+            product_claims = [*product_claims, *comp]
+        # 基于硬件 JSON 的真实产品评分（区别于报告 quality_score）
+        product_scores = build_scoreboard(selected)
+
     output = ProductAgentOutput(
         product_matrix=product_matrix,
         claims=[Claim.model_validate(item) for item in product_claims],
@@ -612,6 +633,7 @@ def product_agent(state: dict) -> Dict[str, Any]:
         **state,
         "current_agent": "ProductAgent",
         "product_matrix": output.product_matrix,
+        "product_scores": product_scores,
         "claims": [*existing_claims, *product_claim_dicts],
         "context_summary": {
             **state.get("context_summary", {}),

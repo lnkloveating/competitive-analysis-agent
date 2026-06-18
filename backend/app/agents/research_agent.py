@@ -23,6 +23,20 @@ def research_agent(state: dict) -> Dict[str, Any]:
     """Collect mock research through the provider abstraction."""
     error_log = normalize_error_log(state.get("error_log", []))
 
+    # 产品对比模式：研究数据已由产品事实底座注入，直接沿用，不调用爬虫/数据库 provider。
+    if state.get("product_compare_mode"):
+        raw_research = [item for item in state.get("raw_research", []) if isinstance(item, dict)]
+        next_state = {
+            **state,
+            "current_agent": "ResearchAgent",
+            "raw_research": raw_research,
+            "error_log": error_log,
+            "metrics": state.get("metrics", {}),
+        }
+        _append_trace(next_state, len(raw_research))
+        print(f"[ResearchAgent] 产品对比模式：沿用注入的 {len(raw_research)} 条产品事实研究数据")
+        return next_state
+
     try:
         raw_items = ResearchProviderFactory.create().collect(state)
         raw_research = [item.model_dump() for item in raw_items]
