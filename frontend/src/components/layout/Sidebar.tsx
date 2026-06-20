@@ -5,15 +5,31 @@ export type NavItem = {
   label: string;
 };
 
+export type AgentSidebarStatus =
+  | "waiting"
+  | "running"
+  | "done"
+  | "limited"
+  | "partial"
+  | "failed";
+
+export type AgentSidebarItem = {
+  name: string;
+  role: string;
+  status: AgentSidebarStatus;
+  current?: boolean;
+  selected?: boolean;
+};
+
 type SidebarProps = {
   items: NavItem[];
   activeKey: string;
   taskId?: string;
   displayTaskId?: string;
   onNavigate: (key: string) => void;
-  demoActive?: boolean;
-  currentDemoKey?: string;
-  visitedKeys?: Set<string>;
+  agentItems?: AgentSidebarItem[];
+  showAgentTasks?: boolean;
+  onAgentSelect?: (agentName: string) => void;
 };
 
 const SIDEBAR_COLLAPSED_KEY = "sidebarCollapsed";
@@ -31,11 +47,10 @@ export function Sidebar({
   taskId,
   displayTaskId,
   onNavigate,
-  demoActive = false,
-  currentDemoKey,
-  visitedKeys,
+  agentItems = [],
+  showAgentTasks = false,
+  onAgentSelect,
 }: SidebarProps) {
-  // 仅在桌面端（md+）生效的收缩状态。
   const [collapsed, setCollapsed] = useState(getStoredCollapsed);
 
   useEffect(() => {
@@ -43,6 +58,8 @@ export function Sidebar({
       window.sessionStorage.setItem(SIDEBAR_COLLAPSED_KEY, String(collapsed));
     }
   }, [collapsed]);
+
+  const hasSelectedAgent = showAgentTasks && agentItems.some((agent) => agent.selected);
 
   return (
     <aside
@@ -59,28 +76,31 @@ export function Sidebar({
             竞品分析控制台
           </h1>
         </div>
-        {/* 收缩 / 展开按钮（仅桌面端显示） */}
         <button
-          aria-label={collapsed ? "展开任务栏" : "收缩任务栏"}
+          aria-label={collapsed ? "展开导航" : "收起导航"}
           aria-pressed={collapsed}
           className="hidden h-8 w-8 shrink-0 items-center justify-center rounded-lg border border-cyan-300/25 bg-slate-900/70 text-cyan-200 transition hover:border-cyan-200/60 hover:bg-cyan-400/10 md:flex"
           onClick={() => setCollapsed((value) => !value)}
-          title={collapsed ? "展开任务栏" : "收缩任务栏"}
+          title={collapsed ? "展开导航" : "收起导航"}
           type="button"
         >
-          <span className="text-base leading-none">{collapsed ? "»" : "«"}</span>
+          <span className="text-base leading-none">{collapsed ? ">" : "<"}</span>
         </button>
       </div>
 
-      <nav className="grid gap-1 md:block md:space-y-1">
+      <div className={`mb-3 ${collapsed ? "md:hidden" : ""}`}>
+        <p className="text-[11px] font-semibold uppercase tracking-[0.22em] text-cyan-300">
+          Task Board
+        </p>
+        <h2 className="mt-1 text-base font-semibold text-white">任务栏</h2>
+      </div>
+
+      <nav className="grid gap-1 md:block md:space-y-2">
         {items.map((item, index) => {
-          const isActive = item.key === activeKey;
-          const isCurrentDemo = demoActive && item.key === currentDemoKey;
-          const isVisited = visitedKeys?.has(item.key) ?? false;
+          const isActive = item.key === activeKey && !(item.key === "workflow" && hasSelectedAgent);
 
           return (
             <button
-              key={item.key}
               className={`group flex w-full items-center gap-3 rounded-lg px-3 py-2.5 text-left text-sm transition duration-200 ${
                 collapsed ? "md:justify-center md:px-0" : ""
               } ${
@@ -88,31 +108,88 @@ export function Sidebar({
                   ? "bg-cyan-400/10 text-cyan-100 ring-1 ring-cyan-300/30 shadow-[0_0_24px_rgba(34,211,238,0.12)]"
                   : "text-slate-400 hover:bg-white/[0.04] hover:text-slate-100"
               }`}
-              type="button"
+              key={item.key}
               onClick={() => onNavigate(item.key)}
               title={collapsed ? item.label : undefined}
+              type="button"
             >
               <span
                 className={`flex h-6 w-6 shrink-0 items-center justify-center rounded-full border text-[11px] font-semibold transition ${
-                  isCurrentDemo
-                    ? "nav-dot-pulse border-cyan-400 bg-cyan-500 text-white"
-                    : isActive
-                      ? "border-cyan-300 bg-cyan-300/15 text-cyan-100"
-                      : isVisited
-                        ? "border-emerald-300/45 bg-emerald-400/10 text-emerald-200"
-                        : "border-slate-700 bg-slate-900/80 text-slate-500"
+                  isActive
+                    ? "border-cyan-300 bg-cyan-300/15 text-cyan-100"
+                    : "border-slate-700 bg-slate-900/80 text-slate-500"
                 }`}
               >
                 {index + 1}
               </span>
-              <span
-                className={`min-w-0 flex-1 truncate ${collapsed ? "md:hidden" : ""}`}
-              >
+              <span className={`min-w-0 flex-1 truncate ${collapsed ? "md:hidden" : ""}`}>
                 {item.label}
               </span>
             </button>
           );
         })}
+
+        {showAgentTasks && agentItems.length
+          ? agentItems.map((agent, index) => {
+              const selected = agent.selected;
+              const running = agent.current || agent.status === "running";
+              const limited = agent.status === "limited" || agent.status === "partial";
+              const failed = agent.status === "failed";
+              const number = items.length + index + 1;
+
+              return (
+                <button
+                  className={`group flex w-full items-center gap-3 rounded-lg border px-3 py-2.5 text-left transition duration-200 hover:-translate-y-0.5 hover:border-cyan-300/55 ${
+                    collapsed ? "md:justify-center md:px-0" : ""
+                  } ${
+                    selected
+                      ? "border-cyan-300/60 bg-cyan-400/12 text-cyan-100 shadow-[0_0_22px_rgba(34,211,238,0.12)]"
+                      : "border-slate-800 bg-slate-900/45 text-slate-300 hover:bg-white/[0.04]"
+                  }`}
+                  key={agent.name}
+                  onClick={() => onAgentSelect?.(agent.name)}
+                  title={collapsed ? agent.name : undefined}
+                  type="button"
+                >
+                  <span
+                    className={`flex h-7 w-7 shrink-0 items-center justify-center rounded-full border text-xs font-semibold ${
+                      running
+                        ? "border-cyan-300 bg-cyan-300/15 text-cyan-100"
+                        : selected
+                          ? "border-cyan-300/60 text-cyan-100"
+                          : "border-slate-700 text-slate-500"
+                    }`}
+                  >
+                    {number}
+                  </span>
+                  <span className={`min-w-0 flex-1 ${collapsed ? "md:hidden" : ""}`}>
+                    <span className="block truncate text-sm font-semibold">{agent.name}</span>
+                    <span className="mt-0.5 block truncate text-xs text-slate-500">
+                      {agent.role}
+                    </span>
+                  </span>
+                  <span className={`relative flex h-2.5 w-2.5 shrink-0 ${collapsed ? "md:hidden" : ""}`}>
+                    {running ? (
+                      <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-cyan-300 opacity-70" />
+                    ) : null}
+                    <span
+                      className={`relative inline-flex h-2.5 w-2.5 rounded-full ${
+                        running
+                          ? "bg-cyan-300"
+                          : failed
+                            ? "bg-rose-300"
+                            : limited
+                              ? "bg-amber-300"
+                              : agent.status === "done"
+                                ? "bg-emerald-300"
+                                : "bg-slate-600"
+                      }`}
+                    />
+                  </span>
+                </button>
+              );
+            })
+          : null}
       </nav>
 
       <div

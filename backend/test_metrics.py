@@ -11,11 +11,7 @@ os.environ["LANGCHAIN_TRACING_V2"] = "false"
 os.environ["LANGSMITH_TRACING"] = "false"
 os.environ["RESEARCH_AGENT_USE_LLM"] = "0"
 os.environ["EVIDENCE_AGENT_USE_LLM"] = "0"
-os.environ["PRODUCT_AGENT_USE_LLM"] = "0"
-os.environ["BUSINESS_AGENT_USE_LLM"] = "0"
-os.environ["RISK_AGENT_USE_LLM"] = "0"
 os.environ["QUALITY_AGENT_USE_LLM"] = "0"
-os.environ["STRATEGY_AGENT_USE_LLM"] = "0"
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 load_dotenv(Path(__file__).resolve().parent / ".env")
@@ -46,8 +42,8 @@ REQUIRED_METRIC_KEYS = {
 REQUEST_BODY = {
     "industry_key": "gaming_mouse",
     "industry_name": "电竞鼠标",
-    "target_platform": "罗技",
-    "competitors": ["雷蛇", "海盗船"],
+    "target_platform": "G Pro X Superlight 2",
+    "competitors": ["Viper V3 Pro"],
     "analysis_scene": "电竞鼠标竞品分析",
     "target_user": "产品经理",
     "time_range": "近12个月",

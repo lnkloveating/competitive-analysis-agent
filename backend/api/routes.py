@@ -68,13 +68,12 @@ TASK_LOCK = threading.Lock()
 
 AGENT_PROGRESS = {
     "ResearchAgent": 12,
-    "EvidenceAgent": 25,
-    "ProductAgent": 40,
-    "BusinessAgent": 40,
-    "VerificationAgent": 55,
-    "RiskAgent": 68,
-    "QualityAgent": 80,
-    "StrategyAgent": 100,
+    "CollectorAgent": 28,
+    "EvidenceAgent": 42,
+    "AnalysisAgent": 62,
+    "VerificationAgent": 76,
+    "QualityAgent": 88,
+    "ReportAgent": 100,
 }
 
 
@@ -90,41 +89,48 @@ class AnalysisRequest(BaseModel):
     selected_products: Optional[List[Dict[str, Any]]] = None
 
 
-def _build_compare_seed(request: AnalysisRequest) -> Optional[Dict[str, Any]]:
-    """若请求带 selected_products，则解析规格并构造对比模式的注入物；否则返回 None。"""
-    selected = request.selected_products or []
-    if not selected:
-        return None
-    # 延迟导入，避免无产品目录场景下的多余依赖
-    from app.services.product_compare_service import build_compare_payload, resolve_products
-
-    category = request.industry_key or "gaming_mouse"
-    products = resolve_products(selected, category)
-    if not products:
-        return None
-    return build_compare_payload(products, category)
+def _product_input_names(request: AnalysisRequest) -> List[str]:
+    names: List[str] = []
+    for value in [request.target_platform, *request.competitors]:
+        text = str(value or "").strip()
+        if text and text not in names:
+            names.append(text)
+    return names[:2]
 
 
 def _build_initial_state(request: AnalysisRequest) -> Dict[str, Any]:
     state = request.model_dump()
-    state.pop("selected_products", None)  # 不直接进 state，下面按解析结果注入
+    selected_inputs = state.pop("selected_products", None) or []
+    product_input_names = _product_input_names(request)
     state["industry_name"] = get_state_industry_name(state)
     state["focus_dimensions"] = get_state_dimensions(state)
 
-    seed = _build_compare_seed(request)
-    compare_mode = seed is not None
-    if compare_mode:
-        # 对比模式：把质检范围收敛到被选中的两个产品 + 实际覆盖维度
-        state["competitors"] = seed["competitors"]
-        state["focus_dimensions"] = seed["focus_dimensions"]
+    compare_mode = bool(selected_inputs) or (
+        request.industry_key == "gaming_mouse" and len(product_input_names) >= 2
+    )
 
     state.update(
         {
             "product_compare_mode": compare_mode,
-            "selected_products": seed["products"] if compare_mode else [],
-            "product_facts": seed["product_facts"] if compare_mode else [],
-            "raw_research": seed["raw_research"] if compare_mode else [],
-            "evidence_list": seed["evidence_list"] if compare_mode else [],
+            "selected_products": selected_inputs,
+            "original_product_inputs": selected_inputs or product_input_names,
+            "resolved_products": [],
+            "unresolved_products": [],
+            "product_facts": [],
+            "data_requirements": [],
+            "official_spec_status": [],
+            "review_intel_status": {},
+            "price_status": {},
+            "hardware_analysis": {},
+            "experience_analysis": {},
+            "business_analysis": {},
+            "agent_contributions": [],
+            "pending_data": [],
+            "pending_dimensions": [],
+            "score_flow": {},
+            "raw_research": [],
+            "evidence_list": [],
+            "evidence_status": {},
             "claims": [],
             "product_matrix": {},
             "business_matrix": {},
@@ -144,6 +150,7 @@ def _build_initial_state(request: AnalysisRequest) -> Dict[str, Any]:
             "rejected_agents": [],
             "is_approved": False,
             "needs_human_review": False,
+            "degraded_report": False,
             "quality_status": "",
             "error_log": [],
         }
@@ -192,7 +199,7 @@ def _run_workflow(task_id: str, initial_state: Dict[str, Any]) -> None:
                     if current_agent:
                         TASKS[task_id]["current_agent"] = current_agent
 
-        current_agent = final_state.get("current_agent", "StrategyAgent")
+        current_agent = final_state.get("current_agent", "ReportAgent")
 
         with TASK_LOCK:
             TASKS[task_id].update(
@@ -233,6 +240,8 @@ async def get_industries():
             "dimensions": config.get("dimensions", []),
             "description": config.get("description", ""),
             "data_sources": config.get("data_sources", {}),
+            "schema_id": config.get("schema_id", ""),
+            "schema_model": config.get("schema_model", ""),
             "schema_fields": config.get("schema_fields", []),
         }
         for key, config in INDUSTRY_CONFIGS.items()
@@ -263,12 +272,16 @@ async def start_analysis(request: AnalysisRequest):
 async def get_status(task_id: str):
     with TASK_LOCK:
         task = _get_task(task_id).copy()
+        state = dict(task.get("state", {}))
 
     return {
         "task_id": task_id,
         "status": task.get("status", "failed"),
         "current_agent": task.get("current_agent", ""),
         "progress": _task_progress(task),
+        "quality_status": state.get("quality_status", ""),
+        "degraded_report": state.get("degraded_report", False),
+        "needs_human_review": state.get("needs_human_review", False),
         "error": task.get("error", ""),
     }
 
@@ -284,6 +297,9 @@ async def get_report(task_id: str):
         "status": task.get("status", "failed"),
         "final_report": state.get("final_report", {}),
         "quality_result": state.get("quality_result", {}),
+        "quality_status": state.get("quality_status", ""),
+        "degraded_report": state.get("degraded_report", False),
+        "needs_human_review": state.get("needs_human_review", False),
         "review_ticket": state.get("review_ticket", {}),
         "evidence_list": state.get("evidence_list", []),
         "error": task.get("error", ""),
@@ -330,6 +346,7 @@ async def get_quality(task_id: str):
         "iteration_count": state.get("iteration_count", 0),
         "rejected_agents": state.get("rejected_agents", []),
         "needs_human_review": state.get("needs_human_review", False),
+        "degraded_report": state.get("degraded_report", False),
         "quality_status": state.get("quality_status", ""),
         "review_ticket": state.get("review_ticket", {}),
     }

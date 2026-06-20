@@ -1,31 +1,29 @@
-"""LangGraph workflow for the competitive analysis multi-agent system.
+"""LangGraph workflow for the competitive-analysis multi-agent system.
 
-This module is the orchestration layer. The agent node implementations live in
-``app/agents``; here we only wire them into the DAG, run each one through the resilient
-``run_node`` runner (schema validation + error recovery), and define the routing.
+The competition rubric asks for a clear DAG, structured agent communication,
+traceability, and a real quality feedback loop. This workflow exposes seven
+specialized roles:
 
-DAG:
-Research -> Evidence -> [Product, Business] -> Verification -> Risk -> Quality
-Quality rejected -> target agent (retry, capped by MAX_ITERATIONS)
-Quality rejected after retries -> Human review -> END
-Quality approved -> Strategy -> END
+Research -> Collector -> Evidence -> Analysis -> Verification -> Quality -> Report
+
+Quality can route rejected work back to Collector/Evidence/Analysis/Research. After
+the retry cap, Quality marks a partial report and still routes to ReportAgent so the
+demo does not block on manual review.
 """
+
+from __future__ import annotations
 
 from langgraph.graph import END, StateGraph
 
-from app.agents.business_agent import business_agent
+from app.agents.analysis_agent import analysis_agent
+from app.agents.collector_agent import collector_agent
 from app.agents.evidence_agent import evidence_agent
-from app.agents.product_agent import product_agent
 from app.agents.quality_agent import quality_agent, quality_router
+from app.agents.report_agent import report_agent
 from app.agents.research_agent import research_agent
-from app.agents.risk_agent import risk_agent
-from app.agents.strategy_agent import strategy_agent
 from app.agents.verification_agent import verification_agent
 from app.core.agent_runner import run_node
-from app.schemas.business import BusinessAgentOutput
-from app.schemas.product import ProductAgentOutput
-from app.schemas.report import StrategyAgentOutput
-from app.schemas.risk import RiskAgentOutput
+from app.schemas.report import ReportAgentOutput
 from app.services.metrics_service import calculate_report_metrics
 from app.services.review_service import create_review_ticket
 
@@ -33,9 +31,12 @@ from .state import CompetitiveAnalysisState
 
 
 def human_review_node(state: CompetitiveAnalysisState) -> dict:
-    """Stop automatic routing after repeated quality rejection."""
+    """Compatibility fallback for explicit manual-review flows.
+
+    The default product-comparison path degrades to a partial report after automatic
+    retries are exhausted, instead of blocking the user.
+    """
     quality_result = state.get("quality_result", {})
-    risk_flags = state.get("risk_flags", [])
     metrics = calculate_report_metrics(state)
     review_ticket = create_review_ticket(state)
     trace_log = list(state.get("trace_log", []))
@@ -49,7 +50,6 @@ def human_review_node(state: CompetitiveAnalysisState) -> dict:
             "error": None,
         }
     )
-
     return {
         **state,
         "current_agent": "HumanReviewRequired",
@@ -58,20 +58,18 @@ def human_review_node(state: CompetitiveAnalysisState) -> dict:
         "quality_status": "rejected_after_max_iterations",
         "metrics": metrics,
         "review_ticket": review_ticket,
-        "used_claim_ids": state.get("used_claim_ids", []),
-        "used_evidence_ids": state.get("used_evidence_ids", []),
         "trace_log": trace_log,
         "final_report": {
             "quality_status": "rejected_after_max_iterations",
             "needs_human_review": True,
             "auto_approved": False,
             "executive_summary": [
-                "系统已完成自动分析流程，但质量检查在 3 次自动修复后仍未通过。",
-                "当前报告仅作为低置信草稿，不建议直接用于正式业务决策。",
-                "请人工根据 required_actions 补充或修正证据后重新运行分析。",
+                "Automatic analysis finished, but quality checks still failed after retries.",
+                "This draft should not be used as a formal decision record.",
+                "Please add or correct evidence, then rerun the workflow.",
             ],
             "quality_result": quality_result,
-            "risk_flags": risk_flags,
+            "risk_flags": state.get("risk_flags", []),
             "missing_dimensions": quality_result.get("missing_dimensions", []),
             "missing_platforms": quality_result.get("missing_platforms", []),
             "required_actions": quality_result.get("required_actions", []),
@@ -91,61 +89,32 @@ def research_agent_node(state: CompetitiveAnalysisState) -> dict:
     return run_node("ResearchAgent", research_agent, state)
 
 
+def collector_agent_node(state: CompetitiveAnalysisState) -> dict:
+    return run_node("CollectorAgent", collector_agent, state)
+
+
 def evidence_agent_node(state: CompetitiveAnalysisState) -> dict:
     return run_node("EvidenceAgent", evidence_agent, state)
 
 
-def product_agent_node(state: CompetitiveAnalysisState) -> dict:
-    """Run ProductAgent in a parallel branch and return only its owned updates."""
-
-    def _owned(inner_state: dict) -> dict:
-        result = product_agent(inner_state)
-        return {
-            "current_agent": result.get("current_agent", "ProductAgent"),
-            "product_matrix": result.get("product_matrix", {}),
-            "product_scores": result.get("product_scores", {}),
-            "claims": result.get("claims", []),
-            "context_summary": result.get("context_summary", {}),
-            "trace_log": result.get("trace_log", []),
-        }
-
-    return run_node("ProductAgent", _owned, state, ProductAgentOutput, ["product_matrix", "claims"])
-
-
-def business_agent_node(state: CompetitiveAnalysisState) -> dict:
-    """Run BusinessAgent in a parallel branch and return only its owned updates."""
-
-    def _owned(inner_state: dict) -> dict:
-        result = business_agent(inner_state)
-        return {
-            "current_agent": result.get("current_agent", "BusinessAgent"),
-            "business_matrix": result.get("business_matrix", {}),
-            "claims": result.get("claims", []),
-            "context_summary": result.get("context_summary", {}),
-            "trace_log": result.get("trace_log", []),
-        }
-
-    return run_node("BusinessAgent", _owned, state, BusinessAgentOutput, ["business_matrix", "claims"])
+def analysis_agent_node(state: CompetitiveAnalysisState) -> dict:
+    return run_node("AnalysisAgent", analysis_agent, state)
 
 
 def verification_agent_node(state: CompetitiveAnalysisState) -> dict:
     return run_node("VerificationAgent", verification_agent, state)
 
 
-def risk_agent_node(state: CompetitiveAnalysisState) -> dict:
-    return run_node("RiskAgent", risk_agent, state, RiskAgentOutput, ["risk_flags"])
-
-
 def quality_agent_node(state: CompetitiveAnalysisState) -> dict:
     return run_node("QualityAgent", quality_agent, state)
 
 
-def strategy_agent_node(state: CompetitiveAnalysisState) -> dict:
+def report_agent_node(state: CompetitiveAnalysisState) -> dict:
     return run_node(
-        "StrategyAgent",
-        strategy_agent,
+        "ReportAgent",
+        report_agent,
         state,
-        StrategyAgentOutput,
+        ReportAgentOutput,
         ["final_report", "used_claim_ids", "used_evidence_ids"],
     )
 
@@ -154,38 +123,34 @@ def build_workflow():
     workflow = StateGraph(CompetitiveAnalysisState)
 
     workflow.add_node("research_agent", research_agent_node)
+    workflow.add_node("collector_agent", collector_agent_node)
     workflow.add_node("evidence_agent", evidence_agent_node)
-    workflow.add_node("product_agent", product_agent_node)
-    workflow.add_node("business_agent", business_agent_node)
+    workflow.add_node("analysis_agent", analysis_agent_node)
     workflow.add_node("verification_agent", verification_agent_node)
-    workflow.add_node("risk_agent", risk_agent_node)
     workflow.add_node("quality_agent", quality_agent_node)
-    workflow.add_node("strategy_agent", strategy_agent_node)
+    workflow.add_node("report_agent", report_agent_node)
     workflow.add_node("human_review", human_review_node)
 
     workflow.set_entry_point("research_agent")
 
-    workflow.add_edge("research_agent", "evidence_agent")
-    workflow.add_edge("evidence_agent", "product_agent")
-    workflow.add_edge("evidence_agent", "business_agent")
-    workflow.add_edge("product_agent", "verification_agent")
-    workflow.add_edge("business_agent", "verification_agent")
-    workflow.add_edge("verification_agent", "risk_agent")
-    workflow.add_edge("risk_agent", "quality_agent")
+    workflow.add_edge("research_agent", "collector_agent")
+    workflow.add_edge("collector_agent", "evidence_agent")
+    workflow.add_edge("evidence_agent", "analysis_agent")
+    workflow.add_edge("analysis_agent", "verification_agent")
+    workflow.add_edge("verification_agent", "quality_agent")
     workflow.add_conditional_edges(
         "quality_agent",
         quality_router,
         {
-            "evidence_agent": "evidence_agent",
-            "product_agent": "product_agent",
-            "business_agent": "business_agent",
             "research_agent": "research_agent",
-            "strategy_agent": "strategy_agent",
-            "risk_agent": "risk_agent",
+            "collector_agent": "collector_agent",
+            "evidence_agent": "evidence_agent",
+            "analysis_agent": "analysis_agent",
+            "report_agent": "report_agent",
             "human_review": "human_review",
         },
     )
-    workflow.add_edge("strategy_agent", END)
+    workflow.add_edge("report_agent", END)
     workflow.add_edge("human_review", END)
 
     return workflow

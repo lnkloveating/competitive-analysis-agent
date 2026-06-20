@@ -6,6 +6,9 @@ export type Industry = {
   dimensions: string[];
   description?: string;
   representative_products?: Record<string, string[]>;
+  schema_id?: string;
+  schema_model?: string;
+  schema_fields?: string[];
 };
 
 export type SelectedProductRef = {
@@ -36,6 +39,9 @@ export type AnalysisStatus = {
   status?: string;
   progress?: number;
   current_agent?: string;
+  quality_status?: string;
+  degraded_report?: boolean;
+  needs_human_review?: boolean;
   message?: string;
   error?: string;
 };
@@ -71,6 +77,9 @@ export type AgentTrace = {
   status: string;
   input_summary?: string;
   output_summary?: string;
+  evidence_added?: number;
+  pending_fields?: string[];
+  substeps?: Array<Record<string, unknown>>;
   duration_ms?: number;
   context_selected_evidence_count?: number;
   context_trimmed_evidence_count?: number;
@@ -130,7 +139,10 @@ export type QualityResult = {
   approved?: boolean;
   score?: number;
   status?: string;
+  report_status?: string;
   quality_score?: number;
+  score_type?: string;
+  score_meaning?: string;
   reason?: string;
   reject_to?: string | null;
   target_agent?: string | null;
@@ -138,11 +150,20 @@ export type QualityResult = {
   missing_dimensions?: string[];
   missing_platforms?: string[];
   matrix_issues?: MatrixIssue[];
+  matrix_issues_disclosed?: MatrixIssue[];
   required_actions?: string[];
   required_fix?: string;
   checked_items?: Record<string, boolean>;
   passed_checks?: string[];
   failed_checks?: string[];
+  approved_with_limitations?: boolean;
+  partial_report?: boolean;
+  auto_degraded?: boolean;
+  limitations?: string[];
+  pending_data?: Array<Record<string, unknown>>;
+  evidence_gap_note?: string;
+  degradation_reason?: string;
+  excluded_claim_ids?: string[];
 };
 
 export type Metrics = {
@@ -203,9 +224,183 @@ export type ArtifactsSummary = {
   context_trimmed_evidence_count?: number;
   error_count?: number;
   has_review_ticket?: boolean;
-  has_product_matrix?: boolean;
-  has_business_matrix?: boolean;
   has_final_report?: boolean;
 };
 
-export type FinalReport = Record<string, any>;
+export type ConfidenceLabel =
+  | "official"
+  | "review_verified"
+  | "rule_inferred"
+  | "community_likely"
+  | "community_unverified"
+  | "pending"
+  | string;
+
+export type DimensionsMm = {
+  length?: number | null;
+  width?: number | null;
+  height?: number | null;
+};
+
+export type PriceRange = {
+  usd?: number[];
+  cny?: number[];
+  status?: string;
+  note?: string;
+};
+
+export type ProductIdentity = {
+  official_model?: string;
+  model?: string;
+  brand?: string;
+  family?: string;
+  variant_name?: string;
+  variant_type?: string;
+  aliases?: string[];
+  community_aliases?: string[];
+  alias_confidence?: ConfidenceLabel;
+  official_name_confidence?: ConfidenceLabel;
+  mold_id?: string;
+  shape_detail?: string;
+  click_system?: string;
+  data_status?: string;
+  field_confidence?: Record<string, ConfidenceLabel>;
+  official_fields?: string[];
+  review_verified_fields?: string[];
+  rule_inferred_fields?: string[];
+  community_unverified_fields?: string[];
+  pending?: string[] | string;
+};
+
+export type HardwareSpec = {
+  product_id?: string;
+  brand?: string;
+  model?: string;
+  weight_g?: number | null;
+  dimensions_mm?: DimensionsMm | null;
+  sensor?: string;
+  dpi_max?: number | null;
+  polling_rate_hz?: number | null;
+  connection?: string[];
+  battery_hours?: number | null;
+  switch_type?: string;
+  click_system?: string;
+  software?: string;
+  onboard_memory?: boolean | null;
+  shape?: string;
+  mold_id?: string;
+  price_range?: PriceRange | null;
+  field_confidence?: Record<string, ConfidenceLabel>;
+  sources?: Array<Record<string, unknown>>;
+};
+
+export type MatrixCell = {
+  score?: number | null;
+  summary?: string;
+  analysis?: string;
+  evidence_ids?: string[];
+  confidence_score?: number;
+  data_status?: string;
+};
+
+export type CompetitiveMatrix = {
+  dimensions?: Record<string, Record<string, MatrixCell>>;
+  generated_at?: string;
+};
+
+export type FeatureNode = {
+  name: string;
+  status?: "available" | "partial" | "pending" | "insufficient_evidence" | string;
+  summary?: string;
+  evidence_ids?: string[];
+  source?: string;
+  fields?: string[];
+};
+
+export type FeatureTree = {
+  schema_name?: "gaming_mouse_feature_tree" | string;
+  performance?: FeatureNode;
+  shape_and_weight?: FeatureNode;
+  wireless_and_battery?: FeatureNode;
+  click_system?: FeatureNode;
+  software_ecosystem?: FeatureNode;
+};
+
+export type PricingModel = {
+  schema_name?: "gaming_mouse_pricing_model" | string;
+  status?: "pending" | "reference_only" | "available" | string;
+  realtime_price_status?: "mcp_not_connected" | "pending" | "available" | string;
+  price_range_reference?: Array<Record<string, unknown>>;
+  value_score_status?: "pending" | "available" | string;
+  note?: string;
+};
+
+export type UserPersona = {
+  schema_name?: "gaming_mouse_user_persona" | string;
+  status?: "pending" | "insufficient_evidence" | "available" | string;
+  grip_style_fit?: Record<string, string>;
+  hand_size_fit?: Record<string, string>;
+  game_type_fit?: Record<string, string>;
+  target_persona?: string[];
+  evidence_status?: string;
+  limitation?: string;
+};
+
+export type EvidenceLinks = {
+  used_claim_ids?: string[];
+  used_evidence_ids?: string[];
+  evidence_status?: Record<string, unknown>;
+  unsupported_claim_ids?: string[];
+  pending_data?: Array<Record<string, unknown>>;
+  risk_flags?: Array<Record<string, unknown>>;
+};
+
+export type ScoreFlow = {
+  baseline_score?: Record<string, unknown>;
+  agent_adjustments?: Array<Record<string, unknown>>;
+  final_score?: Record<string, unknown>;
+  products?: Array<Record<string, unknown>>;
+};
+
+export type AgentContribution = {
+  agent: string;
+  role?: string;
+  summary?: string;
+  status?: string;
+};
+
+export type FinalReport = {
+  schema_name?: "gaming_mouse_competitive_report" | string;
+  schema_version?: string;
+  report_kind?: "gaming_mouse_product_comparison" | string;
+  report_type?: "agent_final_report" | string;
+  title?: string;
+  summary?: Record<string, unknown> | string | string[];
+  executive_summary?: string | string[];
+  product_identification?: ProductIdentity[];
+  hardware_specs?: HardwareSpec[];
+  hardware_fact_comparison?: Record<string, unknown>;
+  product_matrix?: CompetitiveMatrix;
+  business_matrix?: CompetitiveMatrix;
+  feature_tree?: FeatureTree;
+  pricing_model?: PricingModel;
+  user_persona?: UserPersona;
+  evidence_links?: EvidenceLinks;
+  score_flow?: ScoreFlow;
+  agent_contributions?: AgentContribution[];
+  pending_data?: Array<Record<string, unknown>>;
+  risk_disclosure?: Array<Record<string, unknown>>;
+  risk_flags?: Array<Record<string, unknown>>;
+  quality_status?: string;
+  report_status?: string;
+  approved_with_limitations?: boolean;
+  partial_report?: boolean;
+  auto_degraded?: boolean;
+  limitations?: string[];
+  final_recommendation?: Record<string, unknown>;
+  final_score?: Array<Record<string, unknown>>;
+  used_claim_ids?: string[];
+  used_evidence_ids?: string[];
+  generated_at?: string;
+  [key: string]: unknown;
+};

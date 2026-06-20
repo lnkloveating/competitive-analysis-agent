@@ -4,10 +4,10 @@
 - evidence_list：结构化硬规格证据（每个产品 × 每个硬维度一条 official 高可信证据），
   以及软性维度（用户口碑 / 电竞品牌影响力）的 pending_research 占位证据（标记 evidence_gap）。
 - raw_research：与证据对应的原始采集镜像（给 ResearchAgent / trace 用）。
-- product_facts：带 product_fact_id 的结构化产品事实，供 ProductAgent / 前端使用。
+- product_facts：带 product_fact_id 的结构化产品事实，供 AnalysisAgent / 前端使用。
 - competitors / focus_dimensions：把质检范围缩小到"被选中的两个产品 + 实际覆盖的维度"。
 
-这样多 Agent 工作流就用真实硬参数跑，而不是旧的爬虫证据流；缺失的软性评价被标记为
+这样多 Agent 工作流就用真实硬参数跑，而不是旧的外部采集证据流；缺失的软性评价被标记为
 待补充，而不会导致 QualityAgent 因覆盖不足三次打回。
 """
 
@@ -26,11 +26,16 @@ HARD_DIMENSION_SPECS: List[Tuple[str, List[str]]] = [
     ("无线与续航", ["connection", "battery_hours"]),
     ("软件生态", ["software", "onboard_memory"]),
     ("握持手感与人体工学", ["shape", "dimensions_mm"]),
-    ("价格定位", ["price_range"]),
 ]
 
-# 暂无实时爬虫的软性维度 -> 标记 pending_research / evidence_gap，不阻断流程
-PENDING_DIMENSIONS: List[str] = ["用户口碑", "电竞品牌影响力"]
+# 暂无实时 MCP 的软性/时效维度 -> 标记 pending_research / evidence_gap，不阻断流程
+PENDING_DIMENSIONS: List[str] = [
+    "用户口碑",
+    "博主测评",
+    "实时价格",
+    "驱动长期口碑",
+    "长期可靠性",
+]
 
 COMPARE_DIMENSIONS: List[str] = [dim for dim, _ in HARD_DIMENSION_SPECS] + PENDING_DIMENSIONS
 
@@ -45,9 +50,13 @@ FACT_SPEC_FIELDS = [
     "connection",
     "battery_hours",
     "switch_type",
+    "click_system",
     "software",
     "onboard_memory",
-    "price_range",
+    "mold_id",
+    "shape_detail",
+    "official_url",
+    "field_confidence",
 ]
 
 # 比较型 claim：维度 / 字段 / 单位 / 优势措辞 / 偏好方向
@@ -221,7 +230,7 @@ def build_compare_payload(
                     "publish_time": publish_time,
                     "collected_time": collected_time,
                     "raw_content": content,
-                    "crawl_method": "database",
+                    "collection_method": "database",
                     "dimension": dimension,
                     "related_dimension": dimension,
                     "product_name": model,
@@ -246,11 +255,11 @@ def build_compare_payload(
                 )
             )
 
-        # 软性维度：暂无实时爬虫，标记 pending_research / evidence_gap
+        # 软性维度：暂无实时 MCP，标记 pending_research / evidence_gap
         for dimension in PENDING_DIMENSIONS:
             content = (
                 f"{model} 的{dimension}（用户评价 / 博主测评 / 驱动口碑）"
-                "暂无实时爬虫数据，待补充实时评价数据。"
+                "暂无实时 MCP 数据，待补充实时评价数据。"
             )
             fact_evidence_ids.append(
                 _add(
@@ -393,7 +402,7 @@ def comparative_claims(
                     f"PF{2:03d}",
                 ],
                 "confidence_score": 0.9,
-                "generated_by": "ProductAgent",
+                "generated_by": "AnalysisAgent",
             }
         )
 

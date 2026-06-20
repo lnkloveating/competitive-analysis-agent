@@ -1,13 +1,14 @@
-"""产品对比模式数据链路测试：选中两款鼠标后，工作流应读取 JSON 规格、
-生成基于硬参数的 product_matrix 与有据可依的 claims，且 QualityAgent 不应三次打回。
+"""Backend product-comparison workflow tests.
 
-运行（从 backend 目录）：python test_product_compare_flow.py
+Run from the repository root:
+    backend\\venv\\Scripts\\python.exe backend\\test_product_compare_flow.py
 """
+
+from __future__ import annotations
 
 import os
 import sys
 
-# 离线运行：关闭所有 LLM 与 tracing，避免网络依赖。
 os.environ.setdefault("ENABLE_LANGSMITH", "false")
 for _agent in ("RESEARCH", "EVIDENCE", "PRODUCT", "BUSINESS", "RISK", "QUALITY", "STRATEGY"):
     os.environ[f"{_agent}_AGENT_USE_LLM"] = "0"
@@ -18,105 +19,216 @@ from api.routes import AnalysisRequest, _build_initial_state
 from orchestration.workflow import app as workflow_app
 
 
+EXPECTED_TRACE = [
+    "ResearchAgent",
+    "CollectorAgent",
+    "EvidenceAgent",
+    "AnalysisAgent",
+    "VerificationAgent",
+    "QualityAgent",
+    "ReportAgent",
+]
+
+
 def _run(initial_state: dict) -> dict:
     final = dict(initial_state)
-    for event in workflow_app.stream(initial_state, {"recursion_limit": 50}, stream_mode="updates"):
-        for node_name, update in event.items():
+    for event in workflow_app.stream(initial_state, {"recursion_limit": 80}, stream_mode="updates"):
+        for _node_name, update in event.items():
             if isinstance(update, dict):
                 final.update(update)
     return final
 
 
-def _make_request() -> AnalysisRequest:
+def _request(product_a: dict, product_b: dict) -> AnalysisRequest:
+    a_name = product_a.get("model") or product_a.get("id") or "product-a"
+    b_name = product_b.get("model") or product_b.get("id") or "product-b"
     return AnalysisRequest(
         industry_key="gaming_mouse",
-        target_platform="G Pro X Superlight 2",
-        competitors=["G Pro X Superlight 2", "Viper V3 Pro"],
-        analysis_scene="电竞鼠标产品对比",
-        target_user="电竞玩家",
-        time_range="近12个月",
+        target_platform=a_name,
+        competitors=[a_name, b_name],
+        analysis_scene="gaming mouse product comparison",
+        target_user="gaming peripheral buyer",
+        time_range="last two years",
         focus_dimensions=[],
-        selected_products=[
-            {"id": "logitech-gpx-superlight-2", "model": "G Pro X Superlight 2", "brand": "Logitech", "category": "gaming_mouse"},
-            {"id": "razer-viper-v3-pro", "model": "Viper V3 Pro", "brand": "Razer", "category": "gaming_mouse"},
-        ],
+        selected_products=[product_a, product_b],
     )
 
 
-def test_initial_state_is_compare_mode():
-    state = _build_initial_state(_make_request())
+def _gpx2_viper_request() -> AnalysisRequest:
+    return _request(
+        {
+            "id": "logitech-gpx-superlight-2",
+            "model": "G Pro X Superlight 2",
+            "brand": "Logitech",
+            "category": "gaming_mouse",
+        },
+        {
+            "id": "razer-viper-v3-pro",
+            "model": "Viper V3 Pro",
+            "brand": "Razer",
+            "category": "gaming_mouse",
+        },
+    )
+
+
+def _zhuque_dex_request() -> AnalysisRequest:
+    return _request(
+        {"model": "\u6731\u96c0", "category": "gaming_mouse"},
+        {"model": "DEX", "category": "gaming_mouse"},
+    )
+
+
+def test_initial_state_keeps_inputs_only():
+    state = _build_initial_state(_gpx2_viper_request())
     assert state["product_compare_mode"] is True
-    assert state["competitors"] == ["G Pro X Superlight 2", "Viper V3 Pro"], state["competitors"]
-    # 2 产品 × (6 硬维度 + 2 软维度) = 16 条证据
-    assert len(state["evidence_list"]) == 16, len(state["evidence_list"])
-    platforms = {e["platform"] for e in state["evidence_list"]}
-    assert platforms == {"G Pro X Superlight 2", "Viper V3 Pro"}, platforms
-    pending = [e for e in state["evidence_list"] if e.get("pending_research")]
-    assert len(pending) == 4, len(pending)  # 每个产品 2 个软维度
-    assert len(state["product_facts"]) == 2
+    assert len(state["selected_products"]) == 2
+    assert state["resolved_products"] == []
+    assert state["product_facts"] == []
+    assert state["evidence_list"] == []
+    assert state["claims"] == []
     return state
 
 
-def test_compatible_with_legacy_entry():
-    # 不带 selected_products 的旧入口应仍走原链路（非对比模式）。
-    legacy = AnalysisRequest(
+def test_free_text_entry_uses_product_compare_mode():
+    request = AnalysisRequest(
         industry_key="gaming_mouse",
-        target_platform="罗技",
-        competitors=["罗技", "雷蛇"],
-        analysis_scene="电竞鼠标竞品分析",
-        target_user="产品经理",
-        time_range="近12个月",
-        focus_dimensions=["性能参数"],
+        target_platform="Logitech",
+        competitors=["Logitech", "Razer"],
+        analysis_scene="gaming mouse competitive analysis",
+        target_user="product manager",
+        time_range="last two years",
+        focus_dimensions=["performance"],
     )
-    state = _build_initial_state(legacy)
-    assert state["product_compare_mode"] is False
+    state = _build_initial_state(request)
+    assert state["product_compare_mode"] is True
+    assert state["selected_products"] == []
+    assert state["original_product_inputs"] == ["Logitech", "Razer"]
     assert state["evidence_list"] == []
-    assert state["product_facts"] == []
 
 
-def test_full_workflow_passes_quality():
-    initial_state = _build_initial_state(_make_request())
-    final = _run(initial_state)
+def test_full_workflow_gpx2_viper():
+    final = _run(_build_initial_state(_gpx2_viper_request()))
 
-    # 1) workflow 读到了两款产品的规格 -> product_matrix 非空，且按 model 分平台
-    matrix = final.get("product_matrix", {})
-    dims = matrix.get("dimensions", {})
-    assert dims, "product_matrix 为空"
-    sample_dim = dims.get("性能参数", {})
-    assert "G Pro X Superlight 2" in sample_dim and "Viper V3 Pro" in sample_dim, list(sample_dim)
+    trace_names = [item.get("agent_name") for item in final.get("trace_log", [])]
+    for agent_name in EXPECTED_TRACE:
+        assert agent_name in trace_names, trace_names
 
-    # 2) claims 不为 0，且每条都有 evidence_ids 支撑
-    claims = [c for c in final.get("claims", []) if isinstance(c, dict)]
-    assert len(claims) > 0, "claims 为 0"
-    for claim in claims:
-        assert claim.get("evidence_ids"), f"claim 缺 evidence_ids: {claim.get('claim_id')}"
+    assert final.get("current_agent") == "ReportAgent"
+    assert final.get("review_intel_status", {}).get("status") == "mcp_not_connected"
+    assert final.get("price_status", {}).get("status") == "mcp_not_connected"
+    assert final.get("experience_analysis", {}).get("status") == "insufficient_evidence"
 
-    # 3) 至少有基于硬参数的对比 claim（比较型）
-    comparative = [c for c in claims if "对比：" in str(c.get("content", ""))]
-    assert comparative, "没有生成硬参数对比 claim"
+    assert len(final.get("resolved_products", [])) == 2
+    assert len(final.get("product_facts", [])) == 2
+    assert len(final.get("evidence_list", [])) == 20
+    assert final.get("hardware_analysis", {}).get("scope") == "hardware_facts_only"
 
-    # 4) 忠实性：无未支撑 claim（数值都落在证据里）
-    assert final.get("unsupported_claim_ids", []) == [], final.get("unsupported_claim_ids")
-
-    # 5) QualityAgent 不应因品牌覆盖/商业矩阵不足而打回
     quality = final.get("quality_result", {})
     assert quality.get("approved") is True, quality
-    assert final.get("needs_human_review") is False
-    checks = quality.get("checked_items", {})
-    assert checks.get("all_competitors_covered") is True
-    assert checks.get("all_dimensions_covered") is True
-    assert checks.get("business_matrix_not_empty") is True  # 对比模式跳过
+    assert quality.get("quality_score") != 90
+    assert quality.get("pending_data"), quality
 
-    # 6) 软性维度被标记为待补充，而不是失败
-    pending = [e for e in final.get("evidence_list", []) if e.get("pending_research")]
-    assert pending and all(e.get("data_status") == "pending_research" for e in pending)
+    report = final.get("final_report", {})
+    for key in (
+        "schema_name",
+        "schema_version",
+        "product_identification",
+        "hardware_specs",
+        "hardware_fact_comparison",
+        "feature_tree",
+        "pricing_model",
+        "user_persona",
+        "evidence_links",
+        "agent_contributions",
+        "pending_data",
+        "risk_flags",
+        "score_flow",
+        "final_score",
+        "final_recommendation",
+    ):
+        assert key in report, key
+
+    assert report["schema_name"] == "gaming_mouse_competitive_report"
+    assert report["report_kind"] == "gaming_mouse_product_comparison"
+    assert report["feature_tree"]["schema_name"] == "gaming_mouse_feature_tree"
+    assert report["pricing_model"]["schema_name"] == "gaming_mouse_pricing_model"
+    assert report["user_persona"]["schema_name"] == "gaming_mouse_user_persona"
+    assert report["user_persona"]["evidence_status"] == "mcp_not_connected"
+    assert report["pricing_model"]["realtime_price_status"] == "mcp_not_connected"
+    assert report["evidence_links"]["evidence_status"]["local_json"]["count"] == 10
+    return final
+
+
+def test_full_workflow_zhuque_dex_resolution():
+    final = _run(_build_initial_state(_zhuque_dex_request()))
+
+    resolved = final.get("resolved_products", [])
+    resolved_by_input = {item.get("original_input"): item for item in resolved}
+
+    zhuque = resolved_by_input.get("\u6731\u96c0")
+    assert zhuque, resolved
+    assert zhuque["resolved_product_id"] == "logitech-g-pro-x2-superstrike"
+    assert zhuque["official_model"] == "G PRO X2 SUPERSTRIKE"
+    assert zhuque["matched_by"] == "community_alias"
+    assert zhuque["match_confidence"] == "unverified"
+    assert zhuque["alias_warning"]
+
+    dex = resolved_by_input.get("DEX")
+    assert dex, resolved
+    assert dex["resolved_product_id"] == "logitech-gpx-superlight-2-dex"
+    assert dex["official_model"] == "G Pro X Superlight 2 DEX"
+    assert dex["mold_id"] == "gpx-dex-ergonomic"
+
+    assert final.get("experience_analysis", {}).get("status") == "insufficient_evidence"
+    assert final.get("quality_result", {}).get("approved") is True
+    return final
+
+
+def test_unknown_products_do_not_use_seed_evidence():
+    request = AnalysisRequest(
+        industry_key="gaming_mouse",
+        target_platform="unknown mouse alpha",
+        competitors=["unknown mouse alpha", "unknown mouse beta"],
+        analysis_scene="unknown gaming mouse comparison",
+        target_user="gaming peripheral buyer",
+        time_range="last two years",
+        focus_dimensions=[],
+    )
+    final = _run(_build_initial_state(request))
+
+    assert final["product_compare_mode"] is True
+    assert final.get("resolved_products", []) == []
+    assert final.get("unresolved_products") == ["unknown mouse alpha", "unknown mouse beta"]
+    assert final.get("raw_research", []) == []
+    assert final.get("evidence_list", []) == []
+    assert final.get("claims", []) == []
+    assert final.get("pending_data"), final
+    assert final.get("quality_result", {}).get("status") == "partial_report"
+    risk_flags = [item for item in final.get("risk_flags", []) if isinstance(item, dict)]
+    assert any(
+        item.get("risk_type") == "evidence_gap"
+        and "product_resolution" in item.get("related_dimensions", [])
+        for item in risk_flags
+    )
+    report = final.get("final_report", {})
+    assert any(
+        item.get("agent") == "CollectorAgent.product_resolution"
+        for item in report.get("pending_data", [])
+        if isinstance(item, dict)
+    )
+    assert report.get("schema_name") == "gaming_mouse_competitive_report"
+    assert report.get("hardware_specs") == []
+    assert report.get("pricing_model", {}).get("status") == "pending"
+    assert report.get("user_persona", {}).get("status") == "insufficient_evidence"
     return final
 
 
 ALL_TESTS = [
-    test_initial_state_is_compare_mode,
-    test_compatible_with_legacy_entry,
-    test_full_workflow_passes_quality,
+    test_initial_state_keeps_inputs_only,
+    test_free_text_entry_uses_product_compare_mode,
+    test_full_workflow_gpx2_viper,
+    test_full_workflow_zhuque_dex_resolution,
+    test_unknown_products_do_not_use_seed_evidence,
 ]
 
 
@@ -124,9 +236,10 @@ if __name__ == "__main__":
     for test in ALL_TESTS:
         test()
         print(f"  PASS  {test.__name__}")
-    final = test_full_workflow_passes_quality()
+    final = test_full_workflow_gpx2_viper()
     print(
-        f"\n产品对比链路测试通过：claims={len([c for c in final.get('claims', []) if isinstance(c, dict)])}，"
-        f"quality={final.get('quality_result', {}).get('status')}，"
-        f"current_agent={final.get('current_agent')}"
+        "\nProduct compare workflow passed: "
+        f"trace={len(final.get('trace_log', []))}, "
+        f"claims={len([c for c in final.get('claims', []) if isinstance(c, dict)])}, "
+        f"quality={final.get('quality_result', {}).get('quality_score')}"
     )

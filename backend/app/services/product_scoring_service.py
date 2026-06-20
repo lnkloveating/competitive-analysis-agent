@@ -7,12 +7,12 @@
 每个产品输出（分数均为 0-100，越高越好）：
 - hardware_score：重量/传感器/回报率/连接/续航/微动/板载 综合
 - software_score：是否有配套驱动 / 板载能力的基础事实判断，不代表驱动口碑
-- game_fit_score / grip_fit_score / hand_fit_score：体验结论，等待真实用户评价/测评爬虫
-- sentiment_score：网友评价/博主测评 —— 爬虫未接入，故为 None 并标 pending
+- game_fit_score / grip_fit_score / hand_fit_score：体验结论，等待真实用户评价/测评 MCP
+- sentiment_score：网友评价/博主测评 —— MCP 未接入，故为 None 并标 pending
 - data_completeness：已覆盖的评分维度占比
 - pending_dimensions：当前缺失（待采集）的维度
 - overall_score.current_score：只用现有数据
-- overall_score.full_score_with_missing_as_zero：缺失爬虫维度按 0 计入
+- overall_score.full_score_with_missing_as_zero：缺失外部体验维度按 0 计入
 - score_basis：每个分数基于哪些字段
 """
 
@@ -20,7 +20,7 @@ from __future__ import annotations
 
 from typing import Any, Dict, List, Optional
 
-# 软性/爬虫维度，未接入实时数据前为待采集；不写入本地 JSON，不参与基础硬件快评。
+# 软性/MCP 维度，未接入实时数据前为待采集；不写入本地 JSON，不参与本地硬件事实基线。
 PENDING_SCORE_DIMENSIONS = [
     "grip_fit（握法适配：趴握 / 抓握 / 指握，待用户评价与测评验证）",
     "hand_fit（手型适配：小手 / 中手 / 大手，待用户评价与测评验证）",
@@ -30,12 +30,12 @@ PENDING_SCORE_DIMENSIONS = [
     "driver_reputation（驱动稳定性与口碑）",
 ]
 
-# overall 权重：基础快评只使用本地硬件/官方事实；体验口碑由 crawler_experience 占位。
+# overall 权重：基础快评只使用本地硬件/官方事实；体验口碑由 external_experience 占位。
 OVERALL_WEIGHTS = {
     "hardware": 0.58,
     "software": 0.14,
     "click_system": 0.13,
-    "crawler_experience": 0.15,  # 爬虫未接入，current_score 归一化时剔除，full 分按 0 计入
+    "external_experience": 0.15,  # MCP 未接入，current_score 归一化时剔除，full 分按 0 计入
 }
 
 # 点击系统评分与优劣/风险说明
@@ -253,7 +253,7 @@ def score_product(product: dict) -> dict:
     moba = round(0.35 * software_score + 0.30 * comfort + 0.20 * conn_s + 0.15 * (88 if onboard else 70), 1)
     office = round(0.35 * (100 if has_bt else 55) + 0.25 * battery_s + 0.25 * comfort + 0.15 * conn_s, 1)
     game_fit = {"fps": fps, "moba": moba, "office": office}
-    game_best_label = {"fps": "FPS", "moba": "MOBA / 通用", "office": "办公 / 多设备"}
+    game_best_label = {"fps": "FPS", "moba": "MOBA / 综合", "office": "办公 / 多设备"}
     game_fit["best_fit"] = game_best_label[max(("fps", "moba", "office"), key=lambda k: game_fit[k])]
     game_fit_score = round(max(fps, moba, office), 1)
 
@@ -317,24 +317,24 @@ def score_product(product: dict) -> dict:
     # 体验适配不再由本地 JSON/规则给结论。握法、手型、适合游戏类型需要真实用户评价
     # 和博主测评验证，暂时仅保留字段形状供前端兼容。
     pending_experience = {
-        "status": "pending_crawler",
-        "reason": "需要用户评价、博主测评或长期使用反馈验证，基础硬件快评不直接判断。",
+        "status": "pending_mcp",
+        "reason": "需要用户评价、博主测评或长期使用反馈验证，本地硬件事实基线不直接判断。",
     }
     game_fit_score = None
     persona_fit_score = None
     grip_fit_score = None
     hand_fit_score = None
     game_type_fit_score = None
-    game_fit = {"best_fit": "待爬虫验证", **pending_experience}
-    persona_fit = {"best_fit": ["待爬虫验证"], **pending_experience}
-    grip_fit = {"best_fit": "待爬虫验证", **pending_experience}
-    hand_fit = {"best_fit": "待爬虫验证", **pending_experience}
-    game_type_fit = {"best_fit": "待爬虫验证", **pending_experience}
+    game_fit = {"best_fit": "待 MCP 验证", **pending_experience}
+    persona_fit = {"best_fit": ["待 MCP 验证"], **pending_experience}
+    grip_fit = {"best_fit": "待 MCP 验证", **pending_experience}
+    hand_fit = {"best_fit": "待 MCP 验证", **pending_experience}
+    game_type_fit = {"best_fit": "待 MCP 验证", **pending_experience}
 
-    # sentiment：爬虫未接入 -> pending
+    # sentiment：MCP 未接入 -> pending
     sentiment_score = None
 
-    # ---- overall：只纳入本地硬件/官方事实；体验口碑维度等待爬虫 ----
+    # ---- overall：只纳入本地硬件/官方事实；体验口碑维度等待 MCP ----
     available = {
         "hardware": hardware_score,
         "software": software_score,
@@ -344,7 +344,7 @@ def score_product(product: dict) -> dict:
     current_den = sum(OVERALL_WEIGHTS[k] for k in available)
     current_score = round(current_num / current_den, 1) if current_den else None
     # 缺失的体验/口碑维度按 0 计入完整分，作为保守占位展示。
-    full_with_zero = round(current_num + 0.0 * OVERALL_WEIGHTS["crawler_experience"], 1)
+    full_with_zero = round(current_num + 0.0 * OVERALL_WEIGHTS["external_experience"], 1)
 
     total_weight = sum(OVERALL_WEIGHTS.values())
     data_completeness = round(current_den / total_weight, 2) if total_weight else 0.0
@@ -409,12 +409,12 @@ def score_product(product: dict) -> dict:
         "score_basis": {
             "hardware_score": "weight_g / dimensions_mm / sensor·dpi_max / polling_rate_hz / connection / battery_hours / switch_type / onboard_memory",
             "software_score": f"software（{software_raw or '无'}）+ onboard_memory；仅代表驱动支持事实，不代表驱动口碑。{software_note}",
-            "grip_fit_score": "待爬虫：握法适配需要真实用户评价 / 博主测评验证",
-            "hand_fit_score": "待爬虫：手型适配需要真实用户评价 / 博主测评验证",
-            "game_type_fit_score": "待爬虫：适合游戏类型需要真实用户评价 / 博主测评验证",
+            "grip_fit_score": "待 MCP：握法适配需要真实用户评价 / 博主测评验证",
+            "hand_fit_score": "待 MCP：手型适配需要真实用户评价 / 博主测评验证",
+            "game_type_fit_score": "待 MCP：适合游戏类型需要真实用户评价 / 博主测评验证",
             "click_system_score": f"click_system={click_type}：{click_pros}；风险：{click_risk}",
             "shape_confidence": "mold_id / shape_detail 是否齐全，仅用于说明模具事实完整度",
-            "sentiment_score": "网友评价 / 博主测评 —— 爬虫未接入，待采集（pending）",
+            "sentiment_score": "网友评价 / 博主测评 —— MCP 未接入，待采集（pending）",
             "overall_score.current_score": "硬件/驱动支持事实/点击系统 按权重归一化（剔除 pending 的体验口碑维度）",
             "overall_score.full_score_with_missing_as_zero": "把缺失的体验口碑维度按 0 计入后的保守占位分",
         },
@@ -422,7 +422,7 @@ def score_product(product: dict) -> dict:
 
 
 # --------------------------------------------------------------------------- #
-# 双产品裁决（喂给 StrategyAgent / 报告）
+# 双产品裁决（喂给 AnalysisAgent / ReportAgent）
 # --------------------------------------------------------------------------- #
 def _winner(scored: List[dict], key_fn) -> Optional[str]:
     if not scored:
@@ -437,7 +437,7 @@ def _winner(scored: List[dict], key_fn) -> Optional[str]:
 
 
 def build_scoreboard(products: List[dict]) -> dict:
-    """对一组产品出基础硬件快评 + 裁决；体验/口碑维度等待爬虫。"""
+    """对一组产品出本地硬件事实基线 + 裁决；体验/口碑维度等待 MCP。"""
     scored = [score_product(p) for p in products]
 
     def by(path):
@@ -451,7 +451,7 @@ def build_scoreboard(products: List[dict]) -> dict:
         "best_for": {},
         "pending_verification": [
             "握法适配 / 手型适配 / 适合游戏类型不再由本地 JSON 推断，等待真实用户评价和博主测评。",
-            "网友评价 / 博主测评（sentiment）尚未接入实时爬虫，相关结论标记为待验证。",
+            "网友评价 / 博主测评（sentiment）尚未接入实时 MCP，相关结论标记为待验证。",
             "实时价格、驱动长期稳定性、电竞品牌影响力 / 长期口碑缺少实时数据，仅供参考。",
         ],
     }
@@ -460,12 +460,12 @@ def build_scoreboard(products: List[dict]) -> dict:
 
     return {
         "scale": "0-100，越高越好",
-        "score_type": "baseline_hardware_quick_review",
+        "score_type": "local_hardware_fact_baseline",
         "score_type_note": (
-            "基础硬件快评只基于本地产品 JSON 中较稳定的硬件/官方事实计算，不是最终综合购买建议；"
-            "握法、手型、适合游戏类型、网友评价、博主测评、实时价格和长期可靠性待爬虫补齐。"
+            "本地硬件事实基线只基于本地产品 JSON 中较稳定的硬件/官方事实计算，不是最终综合购买建议；"
+            "握法、手型、适合游戏类型、网友评价、博主测评、实时价格和长期可靠性待 MCP 补齐。"
         ),
-        "price_note": "price_range 仅作为参考价 / 历史参考区间展示，不参与当前核心评分；实时价格待爬虫接入。",
+        "price_note": "price_range 仅作为参考价 / 历史参考区间展示，不参与当前核心评分；实时价格待 MCP 接入。",
         "not_final": True,
         "products": scored,
         "verdicts": verdicts,
@@ -505,7 +505,7 @@ def _identification_for(score: dict) -> dict:
         "community_unverified_fields": field_summary.get("community_unverified", []),
         "community_likely_fields": field_summary.get("community_likely", []),
         "hardware_based": "本地事实库只用于官方型号、模具、重量、尺寸、传感器、回报率、连接、续航、点击系统等稳定事实。",
-        "pending": "握法 / 手型 / 适合游戏类型 / 网友口碑 / 博主测评尚未接入爬虫，相关体验结论需后续验证。",
+        "pending": "握法 / 手型 / 适合游戏类型 / 网友口碑 / 博主测评尚未接入 MCP，相关体验结论需后续验证。",
     }
 
 

@@ -8,9 +8,6 @@ type TopBarProps = {
   displayTaskId?: string;
   onLogout?: () => void;
   currentUser?: AuthUser | null;
-  demoStatusLabel?: string;
-  demoRunning?: boolean;
-  demoPaused?: boolean;
 };
 
 export function TopBar({
@@ -18,9 +15,6 @@ export function TopBar({
   displayTaskId,
   onLogout,
   currentUser,
-  demoStatusLabel,
-  demoRunning,
-  demoPaused,
 }: TopBarProps) {
   const [apiStatus, setApiStatus] = useState<"checking" | "online" | "offline">(
     "checking",
@@ -77,14 +71,6 @@ export function TopBar({
             tone={displayTaskId ? "info" : "neutral"}
           />
         </span>
-        {demoStatusLabel ? (
-          <StatusBadge
-            label={`自动演示：${demoStatusLabel}`}
-            tone={
-              demoRunning ? (demoPaused ? "warning" : "success") : "neutral"
-            }
-          />
-        ) : null}
         {currentUser ? (
           <StatusBadge label={`${currentUser.username}`} tone="neutral" />
         ) : null}
@@ -92,8 +78,8 @@ export function TopBar({
           <button
             className="rounded-full border border-slate-700 bg-slate-900/55 px-3 py-1 text-xs font-medium text-slate-300 transition hover:border-rose-300/50 hover:bg-rose-500/10 hover:text-rose-200"
             onClick={onLogout}
-            type="button"
             title="退出登录并返回登录页"
+            type="button"
           >
             退出登录
           </button>

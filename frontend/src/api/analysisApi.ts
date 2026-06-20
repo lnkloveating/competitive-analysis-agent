@@ -34,9 +34,15 @@ export const analysisApi = {
     apiGet<
       | {
           task_id?: string;
+          status?: string;
           final_report?: FinalReport;
           quality_result?: QualityResult;
+          quality_status?: string;
+          degraded_report?: boolean;
+          needs_human_review?: boolean;
           review_ticket?: ReviewTicket;
+          evidence_list?: unknown[];
+          error?: string;
         }
       | FinalReport
     >(
@@ -72,6 +78,7 @@ export const analysisApi = {
       iteration_count?: number;
       rejected_agents?: string[];
       needs_human_review?: boolean;
+      degraded_report?: boolean;
       quality_status?: string;
       review_ticket?: ReviewTicket;
     }>(`/api/analysis/${taskId}/quality`),

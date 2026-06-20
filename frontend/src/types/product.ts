@@ -217,7 +217,7 @@ export type ProductScore = {
   game_type_fit_score?: number | null;
   click_system_score?: number | null;
   shape_confidence?: number; // 0..1，模具置信度
-  sentiment_score: number | null; // 爬虫未接入 -> null
+  sentiment_score: number | null; // MCP 未接入 -> null
   sentiment_status?: string; // "pending"
   data_completeness: number; // 0..1
   pending_dimensions: string[];

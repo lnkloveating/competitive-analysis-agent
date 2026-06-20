@@ -18,7 +18,7 @@ from app.schemas.evidence import EvidenceItem
 
 BASE_URL = "https://ark.cn-beijing.volces.com/api/v3"
 VALID_CREDIBILITIES = {"high", "medium", "low"}
-SCHEMA_SOURCE_TYPES = {"official", "news", "review", "report", "ecommerce", "user_review", "mock"}
+SCHEMA_SOURCE_TYPES = {"official", "news", "review", "report", "ecommerce", "user_review"}
 
 
 def _load_env() -> None:
@@ -181,7 +181,7 @@ def _canonical_source_type(source_type: Any, source_url: str = "", raw_content: 
     content = raw_content.lower()
     if "财报" in content or "annual report" in content or "financial report" in content:
         return "report"
-    return "mock"
+    return "report"
 
 
 def _credibility_and_confidence(source_type: str, raw_content: str = "") -> tuple[str, float]:
@@ -192,7 +192,7 @@ def _credibility_and_confidence(source_type: str, raw_content: str = "") -> tupl
         return "high", 0.85
     if source_type in {"news", "review", "ecommerce"}:
         return "medium", 0.7
-    if source_type in {"user_review", "mock"}:
+    if source_type == "user_review":
         return "medium", 0.6
     return "low", 0.4
 
@@ -216,7 +216,6 @@ def _build_source_title(raw_item: Dict[str, Any], source_type: str) -> str:
         "report": "财报或行业报告",
         "ecommerce": "电商页面信息",
         "user_review": "用户评论信息",
-        "mock": "模拟公开信息",
     }
     return f"{platform}{dimension}{source_names.get(source_type, '公开信息')}"
 
@@ -268,7 +267,7 @@ def _build_prompt(raw_item: Dict[str, Any], focus_dimensions: List[str]) -> str:
 请只输出一个 JSON 对象，不要输出 Markdown 或解释文字。字段如下：
 {{
   "claim": "该证据支持的核心结论，一句话",
-  "source_type": "official/news/review/report/ecommerce/user_review/mock",
+  "source_type": "official/news/review/report/ecommerce/user_review",
   "source_title": "来源标题",
   "credibility": "high/medium/low",
   "related_dimension": "对应分析维度"
@@ -299,7 +298,7 @@ def _structure_with_llm(
 def _coerce_raw_item(item: Any) -> Dict[str, Any]:
     if isinstance(item, dict):
         return item
-    return {"raw_content": _as_text(item), "source_type": "mock"}
+    return {"raw_content": _as_text(item), "source_type": "report"}
 
 
 def _normalize_evidence(
@@ -344,7 +343,7 @@ def _normalize_evidence(
         source_type=source_type,
         source_title=_as_text(llm_item.get("source_title") or llm_item.get("sourceTitle"))
         or _build_source_title(raw_item, source_type),
-        source_url=source_url or _as_text(raw_item.get("source")) or "mock://unknown",
+        source_url=source_url or _as_text(raw_item.get("source")) or "manual://unknown",
         publish_time=_as_text(
             raw_item.get("publish_time")
             or raw_item.get("publishTime")
@@ -378,7 +377,9 @@ def _append_trace(state: dict, evidence_count: int) -> None:
             "step_id": len(trace_log) + 1,
             "agent_name": "EvidenceAgent",
             "status": "success",
+            "input_summary": "normalize available evidence and pending MCP statuses",
             "output_summary": f"structured {evidence_count} evidence items",
+            "pending_fields": state.get("pending_dimensions", []),
             "error": None,
         }
     )
@@ -391,10 +392,24 @@ def evidence_agent(state: dict) -> Dict[str, Any]:
     # 产品对比模式：证据已是结构化硬规格事实，直接沿用，不再用 LLM 二次抽取（避免改写数值/维度）。
     if state.get("product_compare_mode"):
         evidence_list = [item for item in state.get("evidence_list", []) if isinstance(item, dict)]
+        local_count = len([item for item in evidence_list if not item.get("pending_research")])
+        pending_count = len([item for item in evidence_list if item.get("pending_research")])
+        evidence_status = {
+            "local_json": {
+                "status": "available",
+                "count": local_count,
+                "description": "Stable hardware facts loaded from the local product catalog.",
+            },
+            "official_pending": state.get("official_spec_status", []),
+            "review_pending": state.get("review_intel_status", {}),
+            "price_pending": state.get("price_status", {}),
+            "pending_evidence_count": pending_count,
+        }
         next_state = {
             **state,
             "current_agent": "EvidenceAgent",
             "evidence_list": evidence_list,
+            "evidence_status": evidence_status,
         }
         _append_trace(next_state, len(evidence_list))
         print(f"[EvidenceAgent] 产品对比模式：沿用注入的 {len(evidence_list)} 条结构化产品证据")

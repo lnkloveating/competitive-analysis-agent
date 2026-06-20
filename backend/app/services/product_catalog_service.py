@@ -1,8 +1,8 @@
 """产品规格事实底座的读取 / 搜索 / 对比服务（只读）。
 
 数据源：`data/products/{category}.json`（结构化硬件参数事实底座，由
-`gaming_mice.json` 等文件组成），与爬虫证据流（DatabaseResearchProvider /
-crawl_seeds.json）相互独立，互不影响分析主流程。
+`gaming_mice.json` 等文件组成），与后续 MCP 证据流（ResearchProvider /
+MCP 采集库）相互独立，互不影响分析主流程。
 
 对外能力：
 - load_catalog / list_products      读取整张品类表

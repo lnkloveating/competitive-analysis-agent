@@ -81,14 +81,13 @@ export type AgentMeta = {
 
 // 各 Agent 的作用说明，用于节点悬停与详情展示。
 export const agentMeta: Record<string, AgentMeta> = {
-  ResearchAgent: { role: "收集公开调研资料" },
-  EvidenceAgent: { role: "从调研资料中抽取结构化证据" },
-  ProductAgent: { role: "生成产品分析矩阵与产品结论" },
-  BusinessAgent: { role: "生成商业分析矩阵与商业结论" },
+  ResearchAgent: { role: "规划本次竞品分析需要采集和补齐的数据" },
+  CollectorAgent: { role: "完成产品识别、实体消歧、本地事实读取与后续 MCP 采集调度" },
+  EvidenceAgent: { role: "把本地事实和外部采集结果转换成可追溯 evidence" },
+  AnalysisAgent: { role: "只分析有证据支撑的硬件事实差异和风险" },
   VerificationAgent: { role: "忠实性校验，剔除无法被证据支撑的结论（防幻觉）" },
-  RiskAgent: { role: "识别风险项" },
-  QualityAgent: { role: "质量门控审查" },
-  StrategyAgent: { role: "生成最终竞品策略报告" },
+  QualityAgent: { role: "质量门控，决定通过、有限通过或生成 partial_report" },
+  ReportAgent: { role: "生成专业电竞鼠标 final_report" },
   HumanReviewRequired: { role: "质量门控未通过时进入人工复核" },
 };
 
@@ -104,8 +103,10 @@ export const checkedItemLabels: Record<string, string> = {
   all_matrix_claims_faithful: "矩阵分析均能被证据支撑（防幻觉）",
   all_competitors_covered: "覆盖全部竞品",
   all_dimensions_covered: "覆盖全部维度",
-  product_matrix_not_empty: "产品矩阵非空",
-  business_matrix_not_empty: "商业矩阵非空",
+  product_entities_resolved: "产品实体已识别",
+  local_or_pending_facts_disclosed: "本地事实或待补齐状态已披露",
+  evidence_available_or_pending_disclosed: "证据可用或 pending 已披露",
+  final_report_schema_valid: "最终报告符合电竞鼠标专业 schema",
   no_high_severity_risk: "无高危风险",
 };
 

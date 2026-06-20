@@ -13,28 +13,53 @@ def _append_trace(state: dict, raw_research_count: int) -> None:
             "step_id": len(trace_log) + 1,
             "agent_name": "ResearchAgent",
             "status": "success",
-            "output_summary": f"collected {raw_research_count} raw research items",
+            "input_summary": "planned data requirements for this analysis",
+            "output_summary": f"planned data requirements; raw_research_items={raw_research_count}",
+            "pending_fields": state.get("data_requirements", []),
             "error": None,
         }
     )
 
 
-def research_agent(state: dict) -> Dict[str, Any]:
-    """Collect mock research through the provider abstraction."""
-    error_log = normalize_error_log(state.get("error_log", []))
-
-    # 产品对比模式：研究数据已由产品事实底座注入，直接沿用，不调用爬虫/数据库 provider。
+def _is_product_compare_request(state: dict) -> bool:
     if state.get("product_compare_mode"):
+        return True
+    if state.get("industry_key") != "gaming_mouse":
+        return False
+    inputs = []
+    for value in [state.get("target_platform"), *(state.get("competitors") or [])]:
+        text = str(value or "").strip()
+        if text and text not in inputs:
+            inputs.append(text)
+    return len(inputs) >= 2
+
+
+def research_agent(state: dict) -> Dict[str, Any]:
+    """Plan product data needs or collect real research through the provider abstraction."""
+    error_log = normalize_error_log(state.get("error_log", []))
+    data_requirements = [
+        "local_product_facts",
+        "official_specs",
+        "user_reviews",
+        "creator_reviews",
+        "realtime_price",
+        "software_driver_ecosystem",
+    ]
+
+    # 产品对比模式：这里只规划数据需求，不调用 MCP provider。
+    if _is_product_compare_request(state):
         raw_research = [item for item in state.get("raw_research", []) if isinstance(item, dict)]
         next_state = {
             **state,
+            "product_compare_mode": True,
             "current_agent": "ResearchAgent",
+            "data_requirements": data_requirements,
             "raw_research": raw_research,
             "error_log": error_log,
             "metrics": state.get("metrics", {}),
         }
         _append_trace(next_state, len(raw_research))
-        print(f"[ResearchAgent] 产品对比模式：沿用注入的 {len(raw_research)} 条产品事实研究数据")
+        print(f"[ResearchAgent] 产品对比模式：已规划数据需求，未执行 MCP 采集，raw_research={len(raw_research)}")
         return next_state
 
     try:
@@ -54,6 +79,7 @@ def research_agent(state: dict) -> Dict[str, Any]:
     next_state = {
         **state,
         "current_agent": "ResearchAgent",
+        "data_requirements": data_requirements,
         "raw_research": raw_research,
         "error_log": error_log,
         "metrics": state.get("metrics", {}),

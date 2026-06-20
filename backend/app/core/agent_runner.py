@@ -67,7 +67,7 @@ def run_node(
     """Run an agent with schema validation and error recovery.
 
     ``output_schema``/``output_keys`` (optional) validate just the subset of the node's
-    update that the agent owns, e.g. ``ProductAgentOutput`` over ``product_matrix`` and
+    update that the agent owns, e.g. ``ReportAgentOutput`` over ``final_report`` and
     ``claims``. A validation failure is recovered like any other error.
     """
     start = time.time()

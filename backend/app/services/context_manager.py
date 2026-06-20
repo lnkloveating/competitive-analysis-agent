@@ -1,8 +1,8 @@
 """Context management for LLM prompts.
 
 The analysis agents (Product/Business) used to serialize the *entire* evidence_list
-into their prompt. That is fine for the small curated mock dataset, but once a real
-crawler feeds in dozens or hundreds of long evidence records the prompt would blow past
+into their prompt. That is fine for a small curated dataset, but once a real
+external collection feeds in dozens or hundreds of long evidence records the prompt would blow past
 the context window, inflate cost/latency, and degrade quality ("lost in the middle").
 
 This module selects and trims evidence before it is serialized into a prompt:

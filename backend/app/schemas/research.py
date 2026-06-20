@@ -16,11 +16,10 @@ class RawResearchItem(BaseModel):
         "ecommerce",
         "user_review",
         "test",
-        "mock",
     ]
     source_title: str
     source_url: str
     publish_time: Optional[str] = None
     collected_time: str
     raw_content: str
-    crawl_method: Literal["llm_mock", "crawler", "database", "manual", "cache"] = "llm_mock"
+    collection_method: Literal["mcp", "database", "manual", "cache"] = "manual"

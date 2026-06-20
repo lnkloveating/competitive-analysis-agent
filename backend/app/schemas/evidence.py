@@ -14,7 +14,6 @@ class EvidenceItem(BaseModel):
         "report",
         "ecommerce",
         "user_review",
-        "mock",
     ]
     source_title: str
     source_url: str

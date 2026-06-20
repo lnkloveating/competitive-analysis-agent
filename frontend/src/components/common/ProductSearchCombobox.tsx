@@ -31,7 +31,6 @@ const ACCENT: Record<Accent, AccentTheme> = {
 
 const MAX_RESULTS = 6;
 
-const CONN_CN: Record<string, string> = { wired: "有线", "2.4ghz": "2.4G", bluetooth: "蓝牙" };
 const CONFIDENCE_TAG: Record<string, { label: string; cls: string }> = {
   verified: { label: "官方确认", cls: "border-emerald-400/40 bg-emerald-400/10 text-emerald-200" },
   likely: { label: "较可信", cls: "border-amber-400/40 bg-amber-400/10 text-amber-200" },
@@ -39,26 +38,6 @@ const CONFIDENCE_TAG: Record<string, { label: string; cls: string }> = {
   family: { label: "系列名", cls: "border-sky-400/40 bg-sky-400/10 text-sky-200" },
   brand: { label: "品牌名", cls: "border-slate-500/40 bg-slate-700/50 text-slate-200" },
 };
-
-function connText(conn?: string[]): string {
-  return (conn ?? []).map((c) => CONN_CN[c] ?? c).join("+");
-}
-
-function confidenceSourceText(summary?: Record<string, string[]>): string {
-  if (!summary) return "";
-  const official = summary.official?.length ?? 0;
-  const review = summary.review_verified?.length ?? 0;
-  const inferred = summary.rule_inferred?.length ?? 0;
-  const community =
-    (summary.community_likely?.length ?? 0) + (summary.community_unverified?.length ?? 0);
-  const parts = [
-    official ? `官方 ${official}` : "",
-    review ? `评测验证 ${review}` : "",
-    inferred ? `规则推断 ${inferred}` : "",
-    community ? `社区简称 ${community}` : "",
-  ].filter(Boolean);
-  return parts.length ? `来源 ${parts.join(" · ")}` : "";
-}
 
 // 鼠标剪影占位图：缺图或图片加载失败时显示，避免空白/破图。
 function MouseGlyph({ className }: { className?: string }) {
@@ -118,14 +97,16 @@ export type ProductSearchComboboxProps = {
   accent: Accent;
   placeholder?: string;
   onSelect: (result: ProductSearchResult) => void;
+  onQueryChange?: (query: string) => void;
 };
 
-// 带图片候选卡片的产品搜索框：调用 /api/products/search，键盘 ↑↓/Enter/Esc 可操作。
+// 带图片候选卡片的产品搜索框：调用 /api/products/search，方向键 ↑↓/Enter/Esc 可操作。
 export function ProductSearchCombobox({
   category,
   accent,
   placeholder = "搜索型号或简称，如 GPX2 / Viper V3 Pro",
   onSelect,
+  onQueryChange,
 }: ProductSearchComboboxProps) {
   const [query, setQuery] = useState("");
   const [results, setResults] = useState<ProductSearchResult[]>([]);
@@ -189,6 +170,7 @@ export function ProductSearchCombobox({
   function choose(result: ProductSearchResult) {
     onSelect(result);
     setQuery("");
+    onQueryChange?.("");
     setResults([]);
     setOpen(false);
   }
@@ -199,6 +181,7 @@ export function ProductSearchCombobox({
         setOpen(false);
       } else {
         setQuery("");
+        onQueryChange?.("");
       }
       return;
     }
@@ -229,7 +212,10 @@ export function ProductSearchCombobox({
         className={`w-full rounded-md border border-slate-700 bg-slate-950 px-3 py-2 text-sm text-slate-100 outline-none transition ${theme.inputFocus}`}
         placeholder={placeholder}
         value={query}
-        onChange={(event) => setQuery(event.target.value)}
+        onChange={(event) => {
+          setQuery(event.target.value);
+          onQueryChange?.(event.target.value);
+        }}
         onFocus={() => visible.length > 0 && setOpen(true)}
         onKeyDown={handleKeyDown}
         type="text"
@@ -255,7 +241,7 @@ export function ProductSearchCombobox({
         >
           {needsDisambig && visible.length > 0 ? (
             <div className="mb-1.5 rounded-lg border border-amber-400/40 bg-amber-400/10 px-3 py-2 text-[11px] leading-4 text-amber-100">
-              ⚠ {disambigReason || "匹配到多个候选，请选择具体官方型号"}
+              {disambigReason || "匹配到多个候选，请选择具体官方型号"}
             </div>
           ) : null}
           {visible.length === 0 && !loading ? (
@@ -265,25 +251,9 @@ export function ProductSearchCombobox({
               {visible.map((result, index) => {
                 const isActive = index === activeIndex;
                 const product = result.product;
-                const id = result.identity ?? {};
                 const conf = result.match_confidence
                   ? CONFIDENCE_TAG[result.match_confidence]
                   : undefined;
-                const idLine = [
-                  id.family,
-                  id.variant_name ? `变体 ${id.variant_name}` : "",
-                  id.mold_id ? `模具 ${id.mold_id}` : "",
-                ]
-                  .filter(Boolean)
-                  .join(" · ");
-                const specLine = [
-                  id.weight_g != null ? `${id.weight_g}g` : "",
-                  connText(id.connection),
-                  id.click_system ? `点击 ${id.click_system}` : "",
-                ]
-                  .filter(Boolean)
-                  .join(" · ");
-                const sourceLine = confidenceSourceText(id.field_confidence_summary);
                 return (
                   <li key={result.id} role="option" aria-selected={isActive}>
                     <button
@@ -308,15 +278,9 @@ export function ProductSearchCombobox({
                         <span className="block truncate text-sm font-semibold text-slate-100">
                           {result.model}
                         </span>
-                        {idLine ? (
-                          <span className="mt-0.5 block truncate text-[11px] text-slate-400">{idLine}</span>
-                        ) : null}
-                        {specLine ? (
-                          <span className="mt-0.5 block truncate text-[11px] text-slate-500">{specLine}</span>
-                        ) : null}
-                        {sourceLine ? (
-                          <span className="mt-0.5 block truncate text-[10px] text-slate-600">{sourceLine}</span>
-                        ) : null}
+                        <span className="mt-0.5 block truncate text-[11px] text-slate-500">
+                          命中 {result.matched_by}: {result.matched_value}
+                        </span>
                       </span>
                       <span className="flex shrink-0 flex-col items-end gap-1">
                         {conf ? (
