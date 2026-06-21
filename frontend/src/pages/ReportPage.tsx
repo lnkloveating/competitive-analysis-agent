@@ -188,56 +188,82 @@ function IdTags({ ids, tone = "neutral" }: { ids: string[]; tone?: Tone }) {
   );
 }
 
+type ScenarioTone = "success" | "info" | "warning" | "neutral";
+
+function scenarioStatusMeta(status: string): { label: string; tone: ScenarioTone } {
+  if (status === "recommended") return { label: "可推荐", tone: "success" };
+  if (status === "tie") return { label: "均可 / 持平", tone: "info" };
+  if (status === "data_missing") return { label: "数据缺失", tone: "warning" };
+  return { label: "等待测评数据", tone: "warning" }; // pending_review
+}
+
+const SCENARIO_CONF_LABEL: Record<string, string> = {
+  high: "高可信",
+  medium: "中可信",
+  low: "低可信",
+  pending: "待采集",
+};
+
+function scenarioConfTone(conf: string): ScenarioTone {
+  if (conf === "high") return "success";
+  if (conf === "medium") return "info";
+  if (conf === "low") return "warning";
+  return "neutral";
+}
+
 function Recommendation({ report }: { report: FinalReport }) {
-  const recommendation = asRecord(report.final_recommendation);
-  const summary = asRecord(report.summary);
-  const winner =
-    asString(recommendation.recommended_product) ||
-    asString(summary.winner) ||
-    "暂不输出明确购买结论";
-  const reason =
-    asString(recommendation.reason) ||
-    asString(summary.reason) ||
-    "当前报告只整合已验证的硬件事实、证据链和 pending 数据披露。";
-  const topReasons = asStringList(recommendation.top_reasons);
-  const cautions = [
-    ...asStringList(recommendation.cautions),
-    ...asStringList(report.limitations),
-  ];
+  const raw = report.scenario_recommendations;
+  const scenarios = Array.isArray(raw)
+    ? raw.filter((item): item is Record<string, unknown> => Boolean(item) && typeof item === "object")
+    : [];
+
+  if (!scenarios.length) {
+    return (
+      <Section
+        subtitle="按购买诉求分场景给结论，而不是只给一个赢家。"
+        title="按场景推荐"
+      >
+        <div className="rounded-lg border border-slate-800 bg-slate-900/45 p-5 text-sm leading-6 text-slate-400">
+          暂无场景推荐：需要两款已解析产品和硬件 / 价格事实，工作流完成后这里会按场景给出建议。
+        </div>
+      </Section>
+    );
+  }
 
   return (
     <Section
-      subtitle="ReportAgent 只基于前序 Agent 的结构化输出生成，不把缺失的评价、价格或长期口碑伪造成已完成。"
-      title="最终综合建议"
+      subtitle="不给单一赢家：按购买诉求分场景。硬件 / 价格基于已验证事实直接给结论；体验类（FPS、手感、长期可靠性）等待真实测评数据。"
+      title="按场景推荐"
     >
-      <div className="rounded-lg border border-cyan-300/25 bg-cyan-300/10 p-5">
-        <p className="text-sm text-cyan-200">推荐关注</p>
-        <h3 className="mt-2 text-2xl font-semibold text-white">{winner}</h3>
-        <p className="mt-3 text-sm leading-7 text-slate-200">{reason}</p>
-      </div>
-      <div className="mt-4 grid gap-4 lg:grid-cols-2">
-        <div>
-          <p className="text-xs font-semibold uppercase tracking-[0.16em] text-slate-500">依据</p>
-          <ul className="mt-2 space-y-2 text-sm leading-6 text-slate-300">
-            {(topReasons.length ? topReasons : ["已命中的本地硬件事实、结构化证据与质量门控结果。"]).map((item) => (
-              <li className="flex gap-2" key={item}>
-                <span className="mt-2 h-1.5 w-1.5 shrink-0 rounded-full bg-cyan-300" />
-                <span>{item}</span>
-              </li>
-            ))}
-          </ul>
-        </div>
-        <div>
-          <p className="text-xs font-semibold uppercase tracking-[0.16em] text-slate-500">限制</p>
-          <ul className="mt-2 space-y-2 text-sm leading-6 text-slate-300">
-            {(cautions.length ? cautions : ["用户评价、博主测评、实时价格仍等待 MCP 补齐。"]).map((item) => (
-              <li className="flex gap-2" key={item}>
-                <span className="mt-2 h-1.5 w-1.5 shrink-0 rounded-full bg-amber-300" />
-                <span>{item}</span>
-              </li>
-            ))}
-          </ul>
-        </div>
+      <div className="grid gap-3 lg:grid-cols-2">
+        {scenarios.map((scenario, index) => {
+          const status = asString(scenario.status);
+          const meta = scenarioStatusMeta(status);
+          const recommended = asString(scenario.recommended_product);
+          const conf = asString(scenario.confidence);
+          const pending = status === "pending_review";
+          return (
+            <article
+              className={`rounded-lg border p-4 ${
+                pending ? "border-dashed border-amber-400/30 bg-amber-400/5" : "border-slate-800 bg-slate-900/45"
+              }`}
+              key={asString(scenario.key) || index}
+            >
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <h4 className="text-base font-semibold text-white">{asString(scenario.scenario) || `场景 ${index + 1}`}</h4>
+                <StatusBadge label={meta.label} tone={meta.tone} />
+              </div>
+              {recommended ? (
+                <p className="mt-2 text-lg font-semibold text-cyan-200">推荐：{recommended}</p>
+              ) : null}
+              <p className="mt-1 text-sm leading-6 text-slate-200">{asString(scenario.verdict)}</p>
+              <div className="mt-2 flex flex-wrap items-center gap-2">
+                <StatusBadge label={SCENARIO_CONF_LABEL[conf] || conf || "—"} tone={scenarioConfTone(conf)} />
+                <span className="text-xs leading-5 text-slate-500">{asString(scenario.reason)}</span>
+              </div>
+            </article>
+          );
+        })}
       </div>
     </Section>
   );
