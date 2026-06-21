@@ -22,10 +22,9 @@ from app.services import product_catalog_service as catalog
 # 硬维度 -> 由哪些规格字段支撑
 HARD_DIMENSION_SPECS: List[Tuple[str, List[str]]] = [
     ("性能参数", ["sensor", "dpi_max", "polling_rate_hz"]),
-    ("轻量化设计", ["weight_g", "dimensions_mm"]),
+    ("轻量化设计", ["weight_g"]),
     ("无线与续航", ["connection", "battery_hours"]),
     ("软件生态", ["software", "onboard_memory"]),
-    ("握持手感与人体工学", ["shape", "dimensions_mm"]),
 ]
 
 # 暂无实时 MCP 的软性/时效维度 -> 标记 pending_research / evidence_gap，不阻断流程
@@ -282,6 +281,12 @@ def build_compare_payload(
                 "brand": brand,
                 "category": product.get("category", category),
                 "evidence_ids": fact_evidence_ids,
+                "data_status": product.get("data_status", "verified"),
+                "fact_source": (
+                    "official_spec_mcp"
+                    if str(product.get("data_status") or "").startswith("official_spec")
+                    else "local_product_json"
+                ),
                 "specs": {field: product.get(field) for field in FACT_SPEC_FIELDS},
                 "official_url": official,
                 "image_url": product.get("image_url", ""),

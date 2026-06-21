@@ -63,12 +63,47 @@ def _score_products(state: dict) -> List[Dict[str, Any]]:
     return [item for item in scores.get("products", []) if isinstance(item, dict)]
 
 
+def _string_list(value: Any) -> List[str]:
+    if not isinstance(value, list):
+        return []
+    return [_as_text(item) for item in value if _as_text(item)]
+
+
+def _clean_identity(item: Dict[str, Any]) -> Dict[str, Any]:
+    cleaned = {
+        "official_model": _as_text(item.get("official_model") or item.get("model")),
+        "model": _as_text(item.get("model") or item.get("official_model")),
+        "brand": _as_text(item.get("brand")),
+        "family": _as_text(item.get("family")),
+        "variant_name": _as_text(item.get("variant_name")),
+        "variant_type": _as_text(item.get("variant_type")),
+        "aliases": _string_list(item.get("aliases")),
+        "community_aliases": _string_list(item.get("community_aliases")),
+        "alias_confidence": _as_text(item.get("alias_confidence")) or "pending",
+        "official_name_confidence": _as_text(item.get("official_name_confidence")) or "pending",
+        "shape_detail": _as_text(item.get("shape_detail")),
+        "click_system": _as_text(item.get("click_system")),
+        "data_status": _as_text(item.get("data_status")) or "pending",
+        "field_confidence": item.get("field_confidence") if isinstance(item.get("field_confidence"), dict) else {},
+        "official_fields": _string_list(item.get("official_fields")),
+        "review_verified_fields": _string_list(item.get("review_verified_fields")),
+        "rule_inferred_fields": _string_list(item.get("rule_inferred_fields")),
+        "community_unverified_fields": _string_list(item.get("community_unverified_fields")),
+        "pending": item.get("pending") if isinstance(item.get("pending"), list) else _as_text(item.get("pending")),
+    }
+    if not cleaned["official_model"]:
+        cleaned["official_model"] = cleaned["model"] or "待识别产品"
+    if not cleaned["model"]:
+        cleaned["model"] = cleaned["official_model"]
+    return cleaned
+
+
 def _identification(state: dict) -> List[Dict[str, Any]]:
     scores = state.get("product_scores", {})
     if isinstance(scores, dict):
         identities = [item for item in scores.get("identification", []) if isinstance(item, dict)]
         if identities:
-            return identities
+            return [_clean_identity(item) for item in identities]
 
     identities: List[Dict[str, Any]] = []
     for item in state.get("resolved_products", []):
@@ -83,12 +118,11 @@ def _identification(state: dict) -> List[Dict[str, Any]]:
                 "variant_name": item.get("variant_name") or "",
                 "variant_type": item.get("variant_type") or "",
                 "alias_confidence": item.get("match_confidence") or "pending",
-                "mold_id": item.get("mold_id") or "",
                 "click_system": item.get("click_system") or "",
                 "data_status": "resolved",
             }
         )
-    return identities
+    return [_clean_identity(item) for item in identities]
 
 
 def _hardware_specs(state: dict) -> List[Dict[str, Any]]:
@@ -102,8 +136,9 @@ def _hardware_specs(state: dict) -> List[Dict[str, Any]]:
                 "product_id": fact.get("product_id"),
                 "brand": fact.get("brand"),
                 "model": fact.get("model"),
+                "data_status": fact.get("data_status") or fact_specs.get("data_status") or "verified",
+                "fact_source": fact.get("fact_source") or "local_product_json",
                 "weight_g": fact_specs.get("weight_g"),
-                "dimensions_mm": fact_specs.get("dimensions_mm"),
                 "sensor": fact_specs.get("sensor") or "",
                 "dpi_max": fact_specs.get("dpi_max"),
                 "polling_rate_hz": fact_specs.get("polling_rate_hz"),
@@ -114,7 +149,6 @@ def _hardware_specs(state: dict) -> List[Dict[str, Any]]:
                 "software": fact_specs.get("software") or "",
                 "onboard_memory": fact_specs.get("onboard_memory"),
                 "shape": fact_specs.get("shape") or "",
-                "mold_id": fact_specs.get("mold_id") or "",
                 "price_range": {
                     **(fact_specs.get("price_range") if isinstance(fact_specs.get("price_range"), dict) else {}),
                     "status": "reference_only",
@@ -141,11 +175,11 @@ def _feature_tree(state: dict, hardware_specs: List[Dict[str, Any]]) -> Dict[str
             "fields": ["sensor", "dpi_max", "polling_rate_hz"],
         },
         "shape_and_weight": {
-            "name": "模具与轻量化",
+            "name": "轻量化与形态事实",
             "status": hardware_status,
-            "summary": "重量、尺寸、形状与 mold_id 只展示硬件事实，不直接推断握法。",
+            "summary": "重量与形态只作为稳定硬件事实展示；尺寸、模具 ID、握法和手感等待用户评价/测评证据。",
             "source": source,
-            "fields": ["weight_g", "dimensions_mm", "shape_detail", "mold_id"],
+            "fields": ["weight_g", "shape"],
         },
         "wireless_and_battery": {
             "name": "无线与续航",
@@ -373,6 +407,7 @@ def report_agent(state: dict) -> Dict[str, Any]:
         ],
         "product_identification": _identification(state),
         "hardware_specs": hardware_specs,
+        "official_spec_records": state.get("official_spec_records", []),
         "hardware_fact_comparison": state.get("hardware_analysis", {}),
         "product_matrix": state.get("product_matrix", {}),
         "business_matrix": state.get("business_matrix", {}),

@@ -12,7 +12,7 @@ from pathlib import Path
 # 与其它测试一致：关闭 LLM / tracing，避免导入主应用时的外部依赖。
 os.environ.setdefault("LANGCHAIN_TRACING_V2", "false")
 os.environ.setdefault("LANGSMITH_TRACING", "false")
-for _agent in ("RESEARCH", "EVIDENCE", "PRODUCT", "BUSINESS", "RISK", "QUALITY", "STRATEGY"):
+for _agent in ("RESEARCH", "EVIDENCE", "QUALITY"):
     os.environ.setdefault(f"{_agent}_AGENT_USE_LLM", "0")
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
@@ -96,6 +96,27 @@ def test_normalization_ignores_case_space_hyphen():
         for variant in ("gpx2", "G-P-X-2", "  GPX 2 ", "gpX2")
     }
     assert ids == {"logitech-gpx-superlight-2"}, ids
+
+
+def test_brand_prefix_and_missing_g_still_resolve_locally():
+    # 用户经常省略 Logitech 产品名里的 G，或把品牌词写在前面；这仍应走本地事实库。
+    product, matched_by, _matched_value = catalog.resolve_product(
+        "gaming_mouse",
+        "Logitech PRO X SUPERLIGHT 2",
+    )
+    assert product["id"] == "logitech-gpx-superlight-2"
+    assert matched_by in {"model", "brand_model", "alias", "brand_alias"}
+
+
+def test_future_or_unknown_model_does_not_resolve_by_family():
+    # Viper V4 Pro is not in the local catalog. It must go to Search/OfficialSpec MCP,
+    # not fall back to the broad Viper family and pretend to be Viper V3 Pro.
+    for query in ("viper v4 pro", "Razer Viper V4 Pro"):
+        try:
+            catalog.resolve_product("gaming_mouse", query)
+        except catalog.ProductNotFoundError:
+            continue
+        raise AssertionError(f"{query} should not resolve to a local product by family-only matching")
 
 
 def test_unknown_product_raises():
@@ -215,6 +236,8 @@ ALL_TESTS = [
     test_gpx2_dex_and_standard_have_different_molds,
     test_field_confidence_present,
     test_normalization_ignores_case_space_hyphen,
+    test_brand_prefix_and_missing_g_still_resolve_locally,
+    test_future_or_unknown_model_does_not_resolve_by_family,
     test_unknown_product_raises,
     test_unknown_category_raises,
     test_compare_returns_spec_differences,

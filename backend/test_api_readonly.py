@@ -12,6 +12,7 @@ os.environ["LANGSMITH_TRACING"] = "false"
 os.environ["RESEARCH_AGENT_USE_LLM"] = "0"
 os.environ["EVIDENCE_AGENT_USE_LLM"] = "0"
 os.environ["QUALITY_AGENT_USE_LLM"] = "0"
+os.environ["SEARCH_PROVIDER"] = "disabled"
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 load_dotenv(Path(__file__).resolve().parent / ".env")

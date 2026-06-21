@@ -28,12 +28,40 @@ _SAFE_CATEGORY = re.compile(r"^[A-Za-z0-9_-]+$")
 
 # 归一化：去掉空格 / 连字符 / 下划线并转小写
 _NORMALIZE_RE = re.compile(r"[\s\-_]+")
+_TOKEN_RE = re.compile(r"[a-z0-9]+")
+_BRAND_TOKENS = {
+    "asus",
+    "benq",
+    "corsair",
+    "endgame",
+    "gear",
+    "glorious",
+    "lamzu",
+    "logi",
+    "logitech",
+    "pulsar",
+    "razer",
+    "rog",
+    "steelseries",
+    "vgn",
+    "wlmouse",
+    "zowie",
+}
 
 # 各匹配字段的优先级权重（同等匹配质量下，越具体的字段越优先）
-_FIELD_WEIGHT = {"id": 5, "model": 4, "alias": 3, "community_alias": 3, "family": 2, "brand": 1}
+_FIELD_WEIGHT = {
+    "id": 5,
+    "model": 4,
+    "brand_model": 4,
+    "alias": 3,
+    "brand_alias": 3,
+    "community_alias": 3,
+    "family": 2,
+    "brand": 1,
+}
 
 # 官方可信字段 vs 玩家圈/系列字段（用于结果可信度与消歧）
-_VERIFIED_MATCH_FIELDS = {"id", "model", "alias"}
+_VERIFIED_MATCH_FIELDS = {"id", "model", "brand_model", "alias", "brand_alias"}
 
 
 class ProductCatalogError(Exception):
@@ -59,6 +87,41 @@ _LOADED = False
 def normalize(text: Any) -> str:
     """归一化文本用于匹配：小写 + 去空格/连字符/下划线。"""
     return _NORMALIZE_RE.sub("", str(text).strip().lower())
+
+
+def _tokens(text: Any) -> List[str]:
+    return _TOKEN_RE.findall(str(text or "").strip().lower())
+
+
+def _dedupe_adjacent(tokens: List[str]) -> List[str]:
+    deduped: List[str] = []
+    for token in tokens:
+        if not deduped or deduped[-1] != token:
+            deduped.append(token)
+    return deduped
+
+
+def _variant_strings(text: Any) -> set[str]:
+    """为实体匹配生成宽松变体。
+
+    例如 `Logitech PRO X SUPERLIGHT 2` 可以匹配到本地 `G Pro X Superlight 2`：
+    去品牌词后是 `proxsuperlight2`，去掉 Logitech 产品名前缀 `G` 后也是同一串。
+    """
+    normalized = normalize(text)
+    tokens = _dedupe_adjacent(_tokens(text))
+    variants = {normalized} if normalized else set()
+    if not tokens:
+        return variants
+
+    variants.add("".join(tokens))
+    no_brand = [token for token in tokens if token not in _BRAND_TOKENS]
+    if no_brand:
+        variants.add("".join(no_brand))
+        if no_brand[0] == "g" and len(no_brand) > 1:
+            variants.add("".join(no_brand[1:]))
+    if tokens[0] == "g" and len(tokens) > 1:
+        variants.add("".join(tokens[1:]))
+    return {variant for variant in variants if variant}
 
 
 def clear_cache() -> None:
@@ -215,15 +278,21 @@ def _iter_candidates(product: dict):
     """
     yield "id", str(product.get("id", ""))
     yield "model", str(product.get("model", ""))
+    brand = str(product.get("brand", ""))
+    model = str(product.get("model", ""))
+    if brand and model:
+        yield "brand_model", f"{brand} {model}"
     for alias in product.get("aliases", []) or []:
         yield "alias", str(alias)
+        if brand:
+            yield "brand_alias", f"{brand} {alias}"
     for alias in product.get("community_aliases", []) or []:
         yield "community_alias", str(alias)
     yield "family", str(product.get("family", ""))
     yield "brand", str(product.get("brand", ""))
 
 
-def _match_quality(nq: str, ns: str) -> int:
+def _match_quality_variant(nq: str, ns: str) -> int:
     """匹配质量：3=完全相等，2=前缀，1=包含，0=不匹配（均基于归一化串）。"""
     if not ns or not nq:
         return 0
@@ -236,18 +305,25 @@ def _match_quality(nq: str, ns: str) -> int:
     return 0
 
 
-def _best_match(product: dict, nq: str) -> Optional[Tuple[tuple, str, str]]:
+def _best_match(product: dict, query: Any) -> Optional[Tuple[tuple, str, str]]:
     """返回该产品对查询的最佳匹配 (sortkey, matched_by, matched_value)，无匹配返回 None。
 
-    sortkey = (匹配质量, 字段权重, -匹配值长度)，越大越优。
+    sortkey = (匹配质量, 原始串是否完全相等, 字段权重, -匹配值长度)，越大越优。
     """
     best: Optional[Tuple[tuple, str, str]] = None
+    query_variants = _variant_strings(query)
     for field, value in _iter_candidates(product):
-        ns = normalize(value)
-        quality = _match_quality(nq, ns)
+        source_variants = _variant_strings(value)
+        quality = max(
+            (_match_quality_variant(nq, ns) for nq in query_variants for ns in source_variants),
+            default=0,
+        )
         if quality == 0:
             continue
-        sortkey = (quality, _FIELD_WEIGHT[field], -len(ns))
+        field_weight = _FIELD_WEIGHT[field]
+        if field == "id" and normalize(value) != normalize(query):
+            field_weight = 2
+        sortkey = (quality, 1 if normalize(value) == normalize(query) else 0, field_weight, -len(normalize(value)))
         if best is None or sortkey > best[0]:
             best = (sortkey, field, value)
     return best
@@ -288,13 +364,12 @@ def search_products(category: str, q: str) -> List[dict]:
     每条结果含 matched_by / matched_value / match_quality / match_confidence / identity，以及完整 product。
     """
     products = list_products(category)  # 触发 CategoryNotFoundError
-    nq = normalize(q)
-    if not nq:
+    if not normalize(q):
         return []
 
     scored: List[Tuple[tuple, str, str, dict]] = []
     for product in products:
-        match = _best_match(product, nq)
+        match = _best_match(product, q)
         if match is None:
             continue
         sortkey, matched_by, matched_value = match
@@ -365,13 +440,12 @@ def resolve_product(category: str, query: str) -> Tuple[dict, str, str]:
     找不到抛 ProductNotFoundError；品类不存在抛 CategoryNotFoundError。
     """
     products = list_products(category)
-    nq = normalize(query)
-    if not nq:
+    if not normalize(query):
         raise ProductNotFoundError("查询不能为空")
 
     best: Optional[Tuple[tuple, str, str, dict]] = None
     for product in products:
-        match = _best_match(product, nq)
+        match = _best_match(product, query)
         if match is None:
             continue
         sortkey, matched_by, matched_value = match
@@ -382,6 +456,10 @@ def resolve_product(category: str, query: str) -> Tuple[dict, str, str]:
         raise ProductNotFoundError(f"在品类 '{category}' 中未找到匹配 '{query}' 的产品")
 
     _sortkey, matched_by, matched_value, product = best
+    if matched_by in {"brand", "family"}:
+        raise ProductNotFoundError(
+            f"'{query}' only matched broad {matched_by} '{matched_value}', not a concrete product model"
+        )
     return product, matched_by, matched_value
 
 

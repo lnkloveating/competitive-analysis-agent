@@ -76,6 +76,23 @@ AGENT_PROGRESS = {
     "ReportAgent": 100,
 }
 
+NEXT_AGENT_AFTER_NODE = {
+    "research_agent": "CollectorAgent",
+    "collector_agent": "EvidenceAgent",
+    "evidence_agent": "AnalysisAgent",
+    "analysis_agent": "VerificationAgent",
+    "verification_agent": "QualityAgent",
+    "report_agent": "ReportAgent",
+    "human_review": "ReportAgent",
+}
+
+QUALITY_REPAIR_AGENTS = {
+    "ResearchAgent",
+    "CollectorAgent",
+    "EvidenceAgent",
+    "AnalysisAgent",
+}
+
 
 class AnalysisRequest(BaseModel):
     industry_key: str
@@ -116,7 +133,10 @@ def _build_initial_state(request: AnalysisRequest) -> Dict[str, Any]:
             "original_product_inputs": selected_inputs or product_input_names,
             "resolved_products": [],
             "unresolved_products": [],
+            "search_mcp_results": [],
+            "external_product_candidates": [],
             "product_facts": [],
+            "official_spec_records": [],
             "data_requirements": [],
             "official_spec_status": [],
             "review_intel_status": {},
@@ -178,6 +198,25 @@ def _task_progress(task: Dict[str, Any]) -> int:
     return AGENT_PROGRESS.get(current_agent, 0)
 
 
+def _next_running_agent(node_name: str, state: Dict[str, Any]) -> str:
+    if node_name != "quality_agent":
+        return NEXT_AGENT_AFTER_NODE.get(node_name, state.get("current_agent", ""))
+
+    quality_result = state.get("quality_result", {}) or {}
+    quality_status = str(quality_result.get("status") or state.get("quality_status") or "")
+    if (
+        quality_status in {"approved", "approved_with_limitations", "partial_report"}
+        or state.get("degraded_report")
+        or state.get("is_approved")
+    ):
+        return "ReportAgent"
+
+    reject_to = str(quality_result.get("reject_to") or quality_result.get("target_agent") or "")
+    if reject_to in QUALITY_REPAIR_AGENTS:
+        return reject_to
+    return "EvidenceAgent"
+
+
 def _run_workflow(task_id: str, initial_state: Dict[str, Any]) -> None:
     try:
         final_state = dict(initial_state)
@@ -196,7 +235,10 @@ def _run_workflow(task_id: str, initial_state: Dict[str, Any]) -> None:
                 current_agent = update.get("current_agent")
                 with TASK_LOCK:
                     TASKS[task_id]["state"] = dict(final_state)
-                    if current_agent:
+                    next_agent = _next_running_agent(node_name, final_state)
+                    if next_agent:
+                        TASKS[task_id]["current_agent"] = next_agent
+                    elif current_agent:
                         TASKS[task_id]["current_agent"] = current_agent
 
         current_agent = final_state.get("current_agent", "ReportAgent")
@@ -302,6 +344,13 @@ async def get_report(task_id: str):
         "needs_human_review": state.get("needs_human_review", False),
         "review_ticket": state.get("review_ticket", {}),
         "evidence_list": state.get("evidence_list", []),
+        # CollectorAgent 的实体识别明细（命中来源 / 别名警告 / 消歧说明），供前端 Collector 详情页展示。
+        "resolved_products": state.get("resolved_products", []),
+        # 未命中本地库的原始输入（非该品类 / 新品等），供前端展示待 MCP 识别项。
+        "unresolved_products": state.get("unresolved_products", []),
+        "search_mcp_results": state.get("search_mcp_results", []),
+        "external_product_candidates": state.get("external_product_candidates", []),
+        "official_spec_records": state.get("official_spec_records", []),
         "error": task.get("error", ""),
     }
 

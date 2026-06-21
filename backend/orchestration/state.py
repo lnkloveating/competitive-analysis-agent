@@ -74,7 +74,10 @@ class CompetitiveAnalysisState(TypedDict):
     original_product_inputs: List[Dict]
     resolved_products: List[Dict]
     unresolved_products: List[str]
+    search_mcp_results: List[Dict]
+    external_product_candidates: List[Dict]
     product_facts: List[Dict]
+    official_spec_records: List[Dict]
     official_spec_status: List[Dict]
     review_intel_status: Dict
     price_status: Dict

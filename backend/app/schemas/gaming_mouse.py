@@ -38,11 +38,9 @@ GAMING_MOUSE_SCHEMA_FIELDS = [
     "aliases",
     "community_aliases",
     "alias_confidence",
-    "mold_id",
     "shape",
     "shape_detail",
     "weight_g",
-    "dimensions_mm",
     "sensor",
     "dpi_max",
     "polling_rate_hz",
@@ -54,6 +52,7 @@ GAMING_MOUSE_SCHEMA_FIELDS = [
     "onboard_memory",
     "field_confidence",
     "official_spec_status",
+    "official_spec_records",
     "review_intel_status",
     "price_status",
     "feature_tree",
@@ -87,7 +86,6 @@ class ProductIdentitySchema(DomainSchemaModel):
     community_aliases: List[str] = Field(default_factory=list)
     alias_confidence: str = "pending"
     official_name_confidence: str = "pending"
-    mold_id: str = ""
     shape_detail: str = ""
     click_system: str = ""
     data_status: str = "pending"
@@ -104,7 +102,6 @@ class HardwareSpecSchema(DomainSchemaModel):
     brand: str = ""
     model: str = ""
     weight_g: Optional[float] = None
-    dimensions_mm: Optional[DimensionsMmSchema] = None
     sensor: str = ""
     dpi_max: Optional[int] = None
     polling_rate_hz: Optional[int] = None
@@ -115,7 +112,6 @@ class HardwareSpecSchema(DomainSchemaModel):
     software: str = ""
     onboard_memory: Optional[bool] = None
     shape: str = ""
-    mold_id: str = ""
     price_range: Optional[PriceRangeSchema] = None
     field_confidence: Dict[str, ConfidenceLabel | str] = Field(default_factory=dict)
     sources: List[Dict[str, Any]] = Field(default_factory=list)
@@ -155,9 +151,9 @@ class FeatureTreeSchema(DomainSchemaModel):
     )
     shape_and_weight: FeatureNodeSchema = Field(
         default_factory=lambda: FeatureNodeSchema(
-            name="模具与轻量化",
+            name="轻量化与形态事实",
             status="pending",
-            fields=["weight_g", "dimensions_mm", "shape_detail", "mold_id"],
+            fields=["weight_g", "shape"],
         )
     )
     wireless_and_battery: FeatureNodeSchema = Field(
@@ -235,6 +231,7 @@ class GamingMouseFinalReportSchema(DomainSchemaModel):
     executive_summary: Union[str, List[str]] = ""
     product_identification: List[ProductIdentitySchema] = Field(default_factory=list)
     hardware_specs: List[HardwareSpecSchema] = Field(default_factory=list)
+    official_spec_records: List[Dict[str, Any]] = Field(default_factory=list)
     hardware_fact_comparison: Dict[str, Any] = Field(default_factory=dict)
     product_matrix: CompetitiveMatrixSchema = Field(default_factory=CompetitiveMatrixSchema)
     business_matrix: CompetitiveMatrixSchema = Field(default_factory=CompetitiveMatrixSchema)

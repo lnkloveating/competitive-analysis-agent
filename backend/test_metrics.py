@@ -12,6 +12,8 @@ os.environ["LANGSMITH_TRACING"] = "false"
 os.environ["RESEARCH_AGENT_USE_LLM"] = "0"
 os.environ["EVIDENCE_AGENT_USE_LLM"] = "0"
 os.environ["QUALITY_AGENT_USE_LLM"] = "0"
+os.environ["SEARCH_PROVIDER"] = "disabled"
+os.environ["OFFICIAL_SPEC_USE_LLM"] = "0"
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 load_dotenv(Path(__file__).resolve().parent / ".env")
@@ -76,6 +78,7 @@ if __name__ == "__main__":
         **REQUEST_BODY,
         "raw_research": [],
         "evidence_list": [],
+        "official_spec_records": [],
         "claims": [],
         "product_matrix": {},
         "business_matrix": {},

@@ -9,6 +9,7 @@ os.environ["LANGCHAIN_TRACING_V2"] = "false"
 os.environ["LANGSMITH_TRACING"] = "false"
 os.environ["RESEARCH_AGENT_USE_LLM"] = "0"
 os.environ["EVIDENCE_AGENT_USE_LLM"] = "0"
+os.environ["OFFICIAL_SPEC_USE_LLM"] = "0"
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
@@ -41,6 +42,7 @@ def _initial_state() -> dict:
         "resolved_products": [],
         "unresolved_products": [],
         "product_facts": [],
+        "official_spec_records": [],
         "official_spec_status": [],
         "review_intel_status": {},
         "price_status": {},

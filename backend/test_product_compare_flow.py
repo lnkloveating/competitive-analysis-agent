@@ -10,7 +10,9 @@ import os
 import sys
 
 os.environ.setdefault("ENABLE_LANGSMITH", "false")
-for _agent in ("RESEARCH", "EVIDENCE", "PRODUCT", "BUSINESS", "RISK", "QUALITY", "STRATEGY"):
+os.environ["SEARCH_PROVIDER"] = "disabled"
+os.environ["OFFICIAL_SPEC_USE_LLM"] = "0"
+for _agent in ("RESEARCH", "EVIDENCE", "QUALITY"):
     os.environ[f"{_agent}_AGENT_USE_LLM"] = "0"
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
@@ -84,6 +86,7 @@ def test_initial_state_keeps_inputs_only():
     assert len(state["selected_products"]) == 2
     assert state["resolved_products"] == []
     assert state["product_facts"] == []
+    assert state["official_spec_records"] == []
     assert state["evidence_list"] == []
     assert state["claims"] == []
     return state
@@ -120,7 +123,7 @@ def test_full_workflow_gpx2_viper():
 
     assert len(final.get("resolved_products", [])) == 2
     assert len(final.get("product_facts", [])) == 2
-    assert len(final.get("evidence_list", [])) == 20
+    assert len(final.get("evidence_list", [])) == 18
     assert final.get("hardware_analysis", {}).get("scope") == "hardware_facts_only"
 
     quality = final.get("quality_result", {})
@@ -155,7 +158,7 @@ def test_full_workflow_gpx2_viper():
     assert report["user_persona"]["schema_name"] == "gaming_mouse_user_persona"
     assert report["user_persona"]["evidence_status"] == "mcp_not_connected"
     assert report["pricing_model"]["realtime_price_status"] == "mcp_not_connected"
-    assert report["evidence_links"]["evidence_status"]["local_json"]["count"] == 10
+    assert report["evidence_links"]["evidence_status"]["local_json"]["count"] == 8
     return final
 
 
@@ -202,6 +205,13 @@ def test_unknown_products_do_not_use_seed_evidence():
     assert final.get("raw_research", []) == []
     assert final.get("evidence_list", []) == []
     assert final.get("claims", []) == []
+    assert len(final.get("search_mcp_results", [])) == 2
+    assert all(item.get("status") == "mcp_not_connected" for item in final.get("search_mcp_results", []))
+    assert len(final.get("external_product_candidates", [])) == 2
+    assert all(
+        item.get("consumable_by_next_agent") is False
+        for item in final.get("external_product_candidates", [])
+    )
     assert final.get("pending_data"), final
     assert final.get("quality_result", {}).get("status") == "partial_report"
     risk_flags = [item for item in final.get("risk_flags", []) if isinstance(item, dict)]

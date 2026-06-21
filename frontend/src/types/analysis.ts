@@ -260,7 +260,6 @@ export type ProductIdentity = {
   community_aliases?: string[];
   alias_confidence?: ConfidenceLabel;
   official_name_confidence?: ConfidenceLabel;
-  mold_id?: string;
   shape_detail?: string;
   click_system?: string;
   data_status?: string;
@@ -277,7 +276,6 @@ export type HardwareSpec = {
   brand?: string;
   model?: string;
   weight_g?: number | null;
-  dimensions_mm?: DimensionsMm | null;
   sensor?: string;
   dpi_max?: number | null;
   polling_rate_hz?: number | null;
@@ -288,7 +286,6 @@ export type HardwareSpec = {
   software?: string;
   onboard_memory?: boolean | null;
   shape?: string;
-  mold_id?: string;
   price_range?: PriceRange | null;
   field_confidence?: Record<string, ConfidenceLabel>;
   sources?: Array<Record<string, unknown>>;
@@ -369,6 +366,74 @@ export type AgentContribution = {
   status?: string;
 };
 
+export type SearchMcpCandidate = {
+  title?: string;
+  url?: string;
+  domain?: string;
+  snippet?: string;
+  source_type?: string;
+  provider_score?: number;
+  confidence_hint?: number;
+};
+
+export type SearchMcpResult = {
+  status?: string;
+  provider?: string;
+  query?: string;
+  executed_query?: string;
+  category?: string;
+  intent?: string;
+  candidates?: SearchMcpCandidate[];
+  candidate_count?: number;
+  needs_llm_disambiguation?: boolean;
+  latency_ms?: number;
+  cache_hit?: boolean;
+  note?: string;
+};
+
+export type ExternalProductCandidate = {
+  original_input?: string;
+  candidate_status?: string;
+  provider?: string;
+  executed_query?: string;
+  best_candidate?: SearchMcpCandidate | null;
+  official_candidates?: SearchMcpCandidate[];
+  review_candidates?: SearchMcpCandidate[];
+  usable_candidate_count?: number;
+  rejected_candidate_count?: number;
+  needs_llm_disambiguation?: boolean;
+  next_action?: string;
+  note?: string;
+  consumable_by_next_agent?: boolean;
+};
+
+export type OfficialSpecRecord = {
+  input?: string;
+  brand_hint?: string;
+  model_hint?: string;
+  category?: string;
+  source?: string;
+  source_url?: string;
+  source_domain?: string;
+  status?: string;
+  record?: Partial<HardwareSpec> & {
+    official_model?: string;
+    source_title?: string;
+    official_url?: string;
+    missing_fields?: string[];
+    evidence_snippets?: string[];
+    confidence?: string;
+    extraction_method?: string;
+    [key: string]: unknown;
+  };
+  missing_fields?: string[];
+  confidence?: string;
+  field_confidence?: Record<string, ConfidenceLabel | string>;
+  latency_ms?: number;
+  note?: string;
+  collected_at?: string;
+};
+
 export type FinalReport = {
   schema_name?: "gaming_mouse_competitive_report" | string;
   schema_version?: string;
@@ -379,6 +444,7 @@ export type FinalReport = {
   executive_summary?: string | string[];
   product_identification?: ProductIdentity[];
   hardware_specs?: HardwareSpec[];
+  official_spec_records?: OfficialSpecRecord[];
   hardware_fact_comparison?: Record<string, unknown>;
   product_matrix?: CompetitiveMatrix;
   business_matrix?: CompetitiveMatrix;

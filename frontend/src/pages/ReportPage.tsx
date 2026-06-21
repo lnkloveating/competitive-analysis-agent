@@ -5,12 +5,15 @@ import { LoadingState } from "../components/common/LoadingState";
 import { StatusBadge } from "../components/common/StatusBadge";
 import type {
   AgentContribution,
+  ExternalProductCandidate,
   FeatureNode,
   FinalReport,
   HardwareSpec,
+  OfficialSpecRecord,
   ProductIdentity,
   QualityResult,
   RiskFlag,
+  SearchMcpResult,
 } from "../types/analysis";
 
 type ReportPageProps = {
@@ -26,6 +29,9 @@ type ReportResponse = {
   degraded_report?: boolean;
   needs_human_review?: boolean;
   risk_flags?: RiskFlag[];
+  search_mcp_results?: SearchMcpResult[];
+  external_product_candidates?: ExternalProductCandidate[];
+  official_spec_records?: OfficialSpecRecord[];
 };
 
 type Tone = "neutral" | "success" | "warning" | "danger" | "info";
@@ -112,15 +118,6 @@ function riskTypeLabel(value: unknown): string {
     faithfulness: "事实支撑风险",
   };
   return labels[type] ?? asString(value, "风险提示");
-}
-
-function formatDimensions(spec: HardwareSpec) {
-  const dims = spec.dimensions_mm;
-  if (!dims) return "待补齐";
-  const length = dims.length ?? "-";
-  const width = dims.width ?? "-";
-  const height = dims.height ?? "-";
-  return `${length} x ${width} x ${height} mm`;
 }
 
 function formatValue(value: unknown, unit = "", fallback = "待补齐") {
@@ -280,10 +277,6 @@ function ProductIdentitySection({ items }: { items: ProductIdentity[] }) {
                 <dd className="mt-1 text-slate-200">{item.variant_type || "待补齐"}</dd>
               </div>
               <div>
-                <dt className="text-slate-500">模具 ID</dt>
-                <dd className="mt-1 text-slate-200">{item.mold_id || "待补齐"}</dd>
-              </div>
-              <div>
                 <dt className="text-slate-500">点击系统</dt>
                 <dd className="mt-1 text-slate-200">{item.click_system || "待补齐"}</dd>
               </div>
@@ -313,7 +306,6 @@ function HardwareSpecsSection({ specs }: { specs: HardwareSpec[] }) {
 
   const rows = [
     ["重量", (item: HardwareSpec) => formatValue(item.weight_g, "g")],
-    ["尺寸", (item: HardwareSpec) => formatDimensions(item)],
     ["传感器", (item: HardwareSpec) => formatValue(item.sensor)],
     ["最高 DPI", (item: HardwareSpec) => formatValue(item.dpi_max)],
     ["回报率", (item: HardwareSpec) => formatValue(item.polling_rate_hz, "Hz")],
@@ -323,7 +315,6 @@ function HardwareSpecsSection({ specs }: { specs: HardwareSpec[] }) {
     ["点击系统", (item: HardwareSpec) => formatValue(item.click_system)],
     ["驱动 / 软件", (item: HardwareSpec) => formatValue(item.software)],
     ["板载内存", (item: HardwareSpec) => (item.onboard_memory === undefined || item.onboard_memory === null ? "待补齐" : item.onboard_memory ? "支持" : "不支持")],
-    ["模具 ID", (item: HardwareSpec) => formatValue(item.mold_id)],
   ];
 
   return (
