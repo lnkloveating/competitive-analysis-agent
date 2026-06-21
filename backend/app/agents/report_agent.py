@@ -315,6 +315,154 @@ def _final_recommendation(state: dict, score_flow: Dict[str, Any]) -> Dict[str, 
     }
 
 
+def _scenario_recommendations(state: dict) -> List[Dict[str, Any]]:
+    """按"购买场景"给推荐，而不是单一赢家。
+
+    硬件类(性能/轻量/续航/驱动)用本地+官网事实，高可信直接给结论；
+    价格类只做"官方价对官方价、电商价对电商价"，缺一边就判数据缺失；
+    需要真实测评的(FPS/手感/长期可靠性)显示占位，等 ReviewIntelMCP。
+    """
+    products = _score_products(state)
+    price_records = [item for item in state.get("price_records", []) if isinstance(item, dict)]
+    scenarios: List[Dict[str, Any]] = []
+    if len(products) < 2:
+        return scenarios
+
+    def norm(value: Any) -> str:
+        return _as_text(value).lower().replace(" ", "")
+
+    def spec(product: Dict[str, Any], field: str) -> Any:
+        specs = product.get("hardware_specs") if isinstance(product.get("hardware_specs"), dict) else {}
+        return specs.get(field)
+
+    def num(product: Dict[str, Any], field: str) -> float | None:
+        value = spec(product, field)
+        return float(value) if isinstance(value, (int, float)) and not isinstance(value, bool) else None
+
+    def model_of(product: Dict[str, Any]) -> str:
+        return _as_text(product.get("model") or product.get("brand")) or "产品"
+
+    def add(scenario: str, key: str, status: str, recommended: str | None, verdict: str, reason: str, confidence: str) -> None:
+        scenarios.append(
+            {
+                "scenario": scenario,
+                "key": key,
+                "status": status,  # recommended / tie / data_missing / pending_review
+                "recommended_product": recommended,
+                "verdict": verdict,
+                "reason": reason,
+                "confidence": confidence,  # high / medium / low / pending
+            }
+        )
+
+    a, b = products[0], products[1]
+    a_name, b_name = model_of(a), model_of(b)
+
+    # 1) 硬件性能（综合评分）
+    ha, hb = a.get("hardware_score"), b.get("hardware_score")
+    if isinstance(ha, (int, float)) and isinstance(hb, (int, float)):
+        if abs(ha - hb) < 1:
+            add("追求硬件性能", "hardware_performance", "tie", None, f"{a_name} 与 {b_name} 硬件综合接近，基本持平", "基于本地 / 官网硬件事实的综合评分。", "high")
+        else:
+            winner = a_name if ha > hb else b_name
+            add("追求硬件性能", "hardware_performance", "recommended", winner, f"{winner} 硬件综合更强（{max(ha, hb)} vs {min(ha, hb)}）", "综合重量、传感器、回报率、连接、续航、点击系统。", "high")
+
+    # 2) 轻量化
+    wa, wb = num(a, "weight_g"), num(b, "weight_g")
+    if wa is not None and wb is not None:
+        if wa == wb:
+            add("追求极致轻量", "lightweight", "tie", None, f"两款重量相同（{wa} g）", "基于官方重量事实。", "high")
+        else:
+            winner, lo, hi = (a_name, wa, wb) if wa < wb else (b_name, wb, wa)
+            add("追求极致轻量", "lightweight", "recommended", winner, f"{winner} 更轻（{lo} g vs {hi} g）", "基于官方重量事实。", "high")
+    else:
+        add("追求极致轻量", "lightweight", "data_missing", None, "缺少一方重量数据，无法给出建议", "重量字段未抽全。", "pending")
+
+    # 3) 无线与续航
+    bat_a, bat_b = num(a, "battery_hours"), num(b, "battery_hours")
+    if bat_a is not None and bat_b is not None:
+        if bat_a == bat_b:
+            add("无线续航", "battery", "tie", None, f"两款续航相同（{bat_a} 小时）", "基于官方续航事实。", "high")
+        else:
+            winner, hi, lo = (a_name, bat_a, bat_b) if bat_a > bat_b else (b_name, bat_b, bat_a)
+            add("无线续航", "battery", "recommended", winner, f"{winner} 续航更长（{hi}h vs {lo}h）", "基于官方续航事实。", "high")
+    else:
+        add("无线续航", "battery", "data_missing", None, "一方无续航数据（可能有线 / 未抽全），无法对比", "续航字段缺失。", "pending")
+
+    # 4) 驱动与可调性
+    def has_driver(product: Dict[str, Any]) -> bool:
+        sw = _as_text(spec(product, "software")).lower()
+        return bool(sw) and not any(hint in sw for hint in ("无", "免驱", "driverless", "none"))
+
+    da, db = has_driver(a), has_driver(b)
+    if da and db:
+        add("驱动与可调性", "driver", "tie", None, "两款都有配套驱动软件，均可自定义 / 板载", "基于官方软件字段。", "high")
+    elif da and not db:
+        add("驱动与可调性", "driver", "recommended", a_name, f"只有 {a_name} 有配套驱动软件", "基于官方软件字段。", "high")
+    elif db and not da:
+        add("驱动与可调性", "driver", "recommended", b_name, f"只有 {b_name} 有配套驱动软件", "基于官方软件字段。", "high")
+    else:
+        add("驱动与可调性", "driver", "tie", None, "两款均免驱 / 无配套软件，即插即用", "基于官方软件字段。", "high")
+
+    # 5/6) 预算敏感：官方价对官方价、电商价对电商价（缺一边即数据缺失）
+    def price_record_for(name: str) -> Dict[str, Any] | None:
+        for record in price_records:
+            if norm(record.get("model") or record.get("input")) == norm(name):
+                return record
+        return None
+
+    def official_price(record: Dict[str, Any] | None) -> float | None:
+        value = (record.get("price_summary") or {}).get("official_price") if record else None
+        return float(value) if isinstance(value, (int, float)) else None
+
+    def ecom_quote(record: Dict[str, Any] | None) -> Dict[str, Any] | None:
+        if not record:
+            return None
+        quotes = [
+            quote for quote in record.get("quotes", [])
+            if isinstance(quote, dict)
+            and isinstance(quote.get("price"), (int, float))
+            and _as_text(quote.get("source_type")) != "official_store"
+        ]
+        if not quotes:
+            return None
+        rank = {"retailer": 3, "ecommerce_candidate": 2, "search_snippet": 1}
+        return sorted(quotes, key=lambda quote: rank.get(_as_text(quote.get("source_type")), 0), reverse=True)[0]
+
+    record_a, record_b = price_record_for(a_name), price_record_for(b_name)
+    oa, ob = official_price(record_a), official_price(record_b)
+    if oa is not None and ob is not None:
+        if oa == ob:
+            add("预算敏感 · 官方价", "budget_official", "tie", None, f"两款官方价相同（${oa}）", "官方价高可信，仅官方对官方。", "high")
+        else:
+            winner, lo, hi = (a_name, oa, ob) if oa < ob else (b_name, ob, oa)
+            add("预算敏感 · 官方价", "budget_official", "recommended", winner, f"{winner} 官方价更低（${lo} vs ${hi}）", "官方价高可信，仅官方对官方。", "high")
+    else:
+        add("预算敏感 · 官方价", "budget_official", "data_missing", None, "一方缺少官方价（被反爬拦截 / 未采集），数据缺失无法给出建议", "官方价只能与官方价对比。", "pending")
+
+    qa, qb = ecom_quote(record_a), ecom_quote(record_b)
+    if qa and qb:
+        pa, pb = float(qa["price"]), float(qb["price"])
+
+        def is_video(quote: Dict[str, Any]) -> bool:
+            return _as_text(quote.get("source_type")) == "search_snippet" or "youtube" in _as_text(quote.get("source_domain")).lower()
+
+        conf = "low" if (is_video(qa) or is_video(qb)) else "medium"
+        if pa == pb:
+            add("预算敏感 · 电商价", "budget_ecom", "tie", None, f"两款电商价相同（${pa}）", "电商价仅电商对电商；视频来源为低可信。", conf)
+        else:
+            winner, lo, hi = (a_name, pa, pb) if pa < pb else (b_name, pb, pa)
+            add("预算敏感 · 电商价", "budget_ecom", "recommended", winner, f"{winner} 电商价更低（${lo} vs ${hi}）", "电商价仅电商对电商；视频来源为低可信。", conf)
+    else:
+        add("预算敏感 · 电商价", "budget_ecom", "data_missing", None, "一方缺少电商价，数据缺失无法给出建议", "电商价只能与电商价对比。", "pending")
+
+    # 7-9) 需要真实测评数据的场景：占位，等 ReviewIntelMCP
+    for scenario, key in (("追求极限 FPS", "fps"), ("重视手感 / 握法", "grip_feel"), ("长期可靠性", "long_term")):
+        add(scenario, key, "pending_review", None, "等待博主测评 / 用户评价（ReviewIntelMCP）", "需要真实测评 / 评价数据，暂为占位。", "pending")
+
+    return scenarios
+
+
 def _agent_contributions(state: dict) -> List[Dict[str, Any]]:
     defaults = [
         ("ResearchAgent", "调研规划员", "规划本地事实、官网规格、评价测评和实时价格的数据需求。"),
@@ -429,6 +577,7 @@ def report_agent(state: dict) -> Dict[str, Any]:
         "auto_degraded": bool(quality_result.get("auto_degraded")),
         "limitations": quality_result.get("limitations", []),
         "final_recommendation": _final_recommendation(state, score_flow),
+        "scenario_recommendations": _scenario_recommendations(state),
         "final_score": [
             {
                 "product_id": item.get("product_id"),

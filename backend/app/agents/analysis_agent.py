@@ -237,6 +237,45 @@ def _risk_flags_from_state(state: dict, selected: List[Dict[str, Any]], evidence
     return deduped
 
 
+def _price_claims(state: dict, start_index: int) -> List[Dict[str, Any]]:
+    """把实时价格做成 evidence 绑定的 claim，每产品最多两条：官方价 + 电商价，分别链接各自证据。
+
+    定性表述、不写死具体数字（避免数值忠实性误判，价格数值由价格证据本身承载）。
+    官方价 -> 高可信证据 -> 校验时「支撑」；电商价 / 被拦截 -> 低可信证据 -> 「弱支撑」（按事实）。
+    """
+    records = [item for item in state.get("price_records", []) if isinstance(item, dict)]
+    claims: List[Dict[str, Any]] = []
+    index = start_index
+
+    def add(content: str, evidence_id: str, model: str, score: float) -> None:
+        nonlocal index
+        index += 1
+        claims.append(
+            {
+                "claim_id": f"PCL{index:03d}",
+                "content": content,
+                "dimension": "实时价格",
+                "related_platforms": [model],
+                "evidence_ids": [evidence_id],
+                "confidence_score": score,
+                "generated_by": "AnalysisAgent",
+            }
+        )
+
+    for record in records:
+        model = _as_text(record.get("model") or record.get("input")) or "该产品"
+        official_id = _as_text(record.get("official_evidence_id"))
+        ecom_id = _as_text(record.get("ecom_evidence_id"))
+        pending_id = _as_text(record.get("evidence_id"))
+        if official_id:
+            add(f"{model} 官方价来自官方商店（高可信），价格事实可用于对比。", official_id, model, 0.9)
+        if ecom_id:
+            add(f"{model} 电商价来自第三方电商 / 搜索（低可信），可参与对比但不作为最终性价比依据。", ecom_id, model, 0.5)
+        if not official_id and not ecom_id and pending_id:
+            add(f"{model} 未抽到可靠实时价格，官方页可能被反爬拦截。", pending_id, model, 0.4)
+    return claims
+
+
 def _product_compare_analysis(state: dict, started: float) -> Dict[str, Any]:
     selected = [item for item in state.get("selected_products", []) if isinstance(item, dict)]
     evidence_list = [item for item in state.get("evidence_list", []) if isinstance(item, dict)]
@@ -248,6 +287,8 @@ def _product_compare_analysis(state: dict, started: float) -> Dict[str, Any]:
     for claim in comp_claims:
         if isinstance(claim, dict):
             claim["generated_by"] = "AnalysisAgent"
+
+    price_claims = _price_claims(state, len(existing_claims) + len(comp_claims))
 
     product_scores = build_scoreboard(selected)
     hardware_analysis = {
@@ -288,7 +329,7 @@ def _product_compare_analysis(state: dict, started: float) -> Dict[str, Any]:
         "current_agent": "AnalysisAgent",
         "product_matrix": product_matrix,
         "business_matrix": business_matrix,
-        "claims": [*existing_claims, *comp_claims],
+        "claims": [*existing_claims, *comp_claims, *price_claims],
         "product_scores": product_scores,
         "hardware_analysis": hardware_analysis,
         "experience_analysis": _experience_analysis(state),

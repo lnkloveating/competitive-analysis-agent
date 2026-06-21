@@ -31,7 +31,8 @@ HARD_DIMENSION_SPECS: List[Tuple[str, List[str]]] = [
 PENDING_DIMENSIONS: List[str] = [
     "用户口碑",
     "博主测评",
-    "实时价格",
+    # "实时价格" 由 PriceMCP 真实采集（官方价 + 电商价两条证据），不再作为占位维度，
+    # 避免占位证据与真实价格证据重复、以及"实时价格永远未覆盖"误扣分。
     "驱动长期口碑",
     "长期可靠性",
 ]

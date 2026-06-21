@@ -27,7 +27,7 @@ from app.services.official_spec_mcp_service import (
 )
 from app.services.price_mcp_service import (
     collect_prices,
-    merge_price_records_into_evidence,
+    price_records_to_evidence,
     summarize_price_status,
 )
 from app.services.product_compare_service import build_compare_payload
@@ -802,9 +802,8 @@ def collector_agent(state: dict) -> Dict[str, Any]:
         price_records = collect_prices(_price_targets(combined_products), category=category)
         price_status = _price_status(price_records)
         if matched_payload:
-            matched_payload["evidence_list"] = merge_price_records_into_evidence(
-                matched_payload["evidence_list"],
-                price_records,
+            matched_payload["evidence_list"].extend(
+                price_records_to_evidence(price_records, len(matched_payload["evidence_list"]))
             )
         price_collected_count = int(price_status.get("collected_count") or 0)
         price_target_count = int(price_status.get("target_count") or len(price_records) or 0)
@@ -966,9 +965,8 @@ def collector_agent(state: dict) -> Dict[str, Any]:
         )
     price_records = collect_prices(_price_targets(payload["products"]), category=category)
     price_status = _price_status(price_records)
-    payload["evidence_list"] = merge_price_records_into_evidence(
-        payload["evidence_list"],
-        price_records,
+    payload["evidence_list"].extend(
+        price_records_to_evidence(price_records, len(payload["evidence_list"]))
     )
     price_collected_count = int(price_status.get("collected_count") or 0)
     price_target_count = int(price_status.get("target_count") or len(price_records) or 0)

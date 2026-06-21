@@ -251,6 +251,7 @@ class GamingMouseFinalReportSchema(DomainSchemaModel):
     auto_degraded: bool = False
     limitations: List[str] = Field(default_factory=list)
     final_recommendation: Dict[str, Any] = Field(default_factory=dict)
+    scenario_recommendations: List[Dict[str, Any]] = Field(default_factory=list)
     final_score: List[Dict[str, Any]] = Field(default_factory=list)
     used_claim_ids: List[str] = Field(default_factory=list)
     used_evidence_ids: List[str] = Field(default_factory=list)
