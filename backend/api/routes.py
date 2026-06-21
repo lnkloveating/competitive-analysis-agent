@@ -1,12 +1,36 @@
 from __future__ import annotations
 
+import os
 import threading
-from typing import Any, Dict, List
+from pathlib import Path
+from typing import Any, Dict, List, Optional
 from uuid import uuid4
 
+from dotenv import load_dotenv
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
+
+
+def _configure_tracing() -> None:
+    """默认关闭 LangSmith tracing，避免无网络/无效 key 时的报错噪音。
+
+    需要时通过 ENABLE_LANGSMITH=true 打开（保留 .env 里的 LANGCHAIN_* 配置）。
+    必须在导入 workflow（langchain）之前执行；先 load .env 再按需覆盖，
+    后续 agent 内的 load_dotenv(override=False) 不会再覆盖这里已设的值。
+    """
+    load_dotenv(Path(__file__).resolve().parents[1] / ".env")
+    load_dotenv()
+    enabled = os.getenv("ENABLE_LANGSMITH", "").strip().lower() in {"1", "true", "yes", "on"}
+    if not enabled:
+        for var in ("LANGCHAIN_TRACING_V2", "LANGCHAIN_TRACING", "LANGSMITH_TRACING"):
+            os.environ[var] = "false"
+        # 移除 key，避免后台上传 trace 时打印鉴权失败噪音
+        for var in ("LANGCHAIN_API_KEY", "LANGSMITH_API_KEY"):
+            os.environ.pop(var, None)
+
+
+_configure_tracing()
 
 from orchestration.industry_config import INDUSTRY_CONFIGS, get_state_dimensions, get_state_industry_name
 from orchestration.workflow import app as workflow_app
@@ -34,18 +58,39 @@ try:
 except Exception:  # pragma: no cover - 认证可选，失败不影响分析接口
     pass
 
+# 产品规格事实底座只读接口（搜索/列表/详情/对比）。与分析主流程解耦，仅新增、不改 workflow。
+from api.product_routes import router as product_router
+
+app.include_router(product_router)
+
 TASKS: Dict[str, Dict[str, Any]] = {}
 TASK_LOCK = threading.Lock()
 
 AGENT_PROGRESS = {
     "ResearchAgent": 12,
-    "EvidenceAgent": 25,
-    "ProductAgent": 40,
-    "BusinessAgent": 40,
-    "VerificationAgent": 55,
-    "RiskAgent": 68,
-    "QualityAgent": 80,
-    "StrategyAgent": 100,
+    "CollectorAgent": 28,
+    "EvidenceAgent": 42,
+    "AnalysisAgent": 62,
+    "VerificationAgent": 76,
+    "QualityAgent": 88,
+    "ReportAgent": 100,
+}
+
+NEXT_AGENT_AFTER_NODE = {
+    "research_agent": "CollectorAgent",
+    "collector_agent": "EvidenceAgent",
+    "evidence_agent": "AnalysisAgent",
+    "analysis_agent": "VerificationAgent",
+    "verification_agent": "QualityAgent",
+    "report_agent": "ReportAgent",
+    "human_review": "ReportAgent",
+}
+
+QUALITY_REPAIR_AGENTS = {
+    "ResearchAgent",
+    "CollectorAgent",
+    "EvidenceAgent",
+    "AnalysisAgent",
 }
 
 
@@ -57,16 +102,55 @@ class AnalysisRequest(BaseModel):
     target_user: str
     time_range: str
     focus_dimensions: List[str]
+    # 产品对比页带入的两个产品（{id, model, brand, category}）。可选，兼容旧入口。
+    selected_products: Optional[List[Dict[str, Any]]] = None
+
+
+def _product_input_names(request: AnalysisRequest) -> List[str]:
+    names: List[str] = []
+    for value in [request.target_platform, *request.competitors]:
+        text = str(value or "").strip()
+        if text and text not in names:
+            names.append(text)
+    return names[:2]
 
 
 def _build_initial_state(request: AnalysisRequest) -> Dict[str, Any]:
     state = request.model_dump()
+    selected_inputs = state.pop("selected_products", None) or []
+    product_input_names = _product_input_names(request)
     state["industry_name"] = get_state_industry_name(state)
     state["focus_dimensions"] = get_state_dimensions(state)
+
+    compare_mode = bool(selected_inputs) or (
+        request.industry_key == "gaming_mouse" and len(product_input_names) >= 2
+    )
+
     state.update(
         {
+            "product_compare_mode": compare_mode,
+            "selected_products": selected_inputs,
+            "original_product_inputs": selected_inputs or product_input_names,
+            "resolved_products": [],
+            "unresolved_products": [],
+            "search_mcp_results": [],
+            "external_product_candidates": [],
+            "product_facts": [],
+            "official_spec_records": [],
+            "data_requirements": [],
+            "official_spec_status": [],
+            "review_intel_status": {},
+            "price_status": {},
+            "hardware_analysis": {},
+            "experience_analysis": {},
+            "business_analysis": {},
+            "agent_contributions": [],
+            "pending_data": [],
+            "pending_dimensions": [],
+            "score_flow": {},
             "raw_research": [],
             "evidence_list": [],
+            "evidence_status": {},
             "claims": [],
             "product_matrix": {},
             "business_matrix": {},
@@ -86,6 +170,7 @@ def _build_initial_state(request: AnalysisRequest) -> Dict[str, Any]:
             "rejected_agents": [],
             "is_approved": False,
             "needs_human_review": False,
+            "degraded_report": False,
             "quality_status": "",
             "error_log": [],
         }
@@ -113,6 +198,25 @@ def _task_progress(task: Dict[str, Any]) -> int:
     return AGENT_PROGRESS.get(current_agent, 0)
 
 
+def _next_running_agent(node_name: str, state: Dict[str, Any]) -> str:
+    if node_name != "quality_agent":
+        return NEXT_AGENT_AFTER_NODE.get(node_name, state.get("current_agent", ""))
+
+    quality_result = state.get("quality_result", {}) or {}
+    quality_status = str(quality_result.get("status") or state.get("quality_status") or "")
+    if (
+        quality_status in {"approved", "approved_with_limitations", "partial_report"}
+        or state.get("degraded_report")
+        or state.get("is_approved")
+    ):
+        return "ReportAgent"
+
+    reject_to = str(quality_result.get("reject_to") or quality_result.get("target_agent") or "")
+    if reject_to in QUALITY_REPAIR_AGENTS:
+        return reject_to
+    return "EvidenceAgent"
+
+
 def _run_workflow(task_id: str, initial_state: Dict[str, Any]) -> None:
     try:
         final_state = dict(initial_state)
@@ -131,10 +235,13 @@ def _run_workflow(task_id: str, initial_state: Dict[str, Any]) -> None:
                 current_agent = update.get("current_agent")
                 with TASK_LOCK:
                     TASKS[task_id]["state"] = dict(final_state)
-                    if current_agent:
+                    next_agent = _next_running_agent(node_name, final_state)
+                    if next_agent:
+                        TASKS[task_id]["current_agent"] = next_agent
+                    elif current_agent:
                         TASKS[task_id]["current_agent"] = current_agent
 
-        current_agent = final_state.get("current_agent", "StrategyAgent")
+        current_agent = final_state.get("current_agent", "ReportAgent")
 
         with TASK_LOCK:
             TASKS[task_id].update(
@@ -175,6 +282,8 @@ async def get_industries():
             "dimensions": config.get("dimensions", []),
             "description": config.get("description", ""),
             "data_sources": config.get("data_sources", {}),
+            "schema_id": config.get("schema_id", ""),
+            "schema_model": config.get("schema_model", ""),
             "schema_fields": config.get("schema_fields", []),
         }
         for key, config in INDUSTRY_CONFIGS.items()
@@ -205,12 +314,16 @@ async def start_analysis(request: AnalysisRequest):
 async def get_status(task_id: str):
     with TASK_LOCK:
         task = _get_task(task_id).copy()
+        state = dict(task.get("state", {}))
 
     return {
         "task_id": task_id,
         "status": task.get("status", "failed"),
         "current_agent": task.get("current_agent", ""),
         "progress": _task_progress(task),
+        "quality_status": state.get("quality_status", ""),
+        "degraded_report": state.get("degraded_report", False),
+        "needs_human_review": state.get("needs_human_review", False),
         "error": task.get("error", ""),
     }
 
@@ -226,8 +339,18 @@ async def get_report(task_id: str):
         "status": task.get("status", "failed"),
         "final_report": state.get("final_report", {}),
         "quality_result": state.get("quality_result", {}),
+        "quality_status": state.get("quality_status", ""),
+        "degraded_report": state.get("degraded_report", False),
+        "needs_human_review": state.get("needs_human_review", False),
         "review_ticket": state.get("review_ticket", {}),
         "evidence_list": state.get("evidence_list", []),
+        # CollectorAgent 的实体识别明细（命中来源 / 别名警告 / 消歧说明），供前端 Collector 详情页展示。
+        "resolved_products": state.get("resolved_products", []),
+        # 未命中本地库的原始输入（非该品类 / 新品等），供前端展示待 MCP 识别项。
+        "unresolved_products": state.get("unresolved_products", []),
+        "search_mcp_results": state.get("search_mcp_results", []),
+        "external_product_candidates": state.get("external_product_candidates", []),
+        "official_spec_records": state.get("official_spec_records", []),
         "error": task.get("error", ""),
     }
 
@@ -272,6 +395,7 @@ async def get_quality(task_id: str):
         "iteration_count": state.get("iteration_count", 0),
         "rejected_agents": state.get("rejected_agents", []),
         "needs_human_review": state.get("needs_human_review", False),
+        "degraded_report": state.get("degraded_report", False),
         "quality_status": state.get("quality_status", ""),
         "review_ticket": state.get("review_ticket", {}),
     }

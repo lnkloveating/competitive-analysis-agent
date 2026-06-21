@@ -1,137 +1,58 @@
-"""Industry configurations for multi-sector competitive analysis."""
+"""Industry configuration for the current professional gaming-mouse workflow."""
 
 from __future__ import annotations
 
 from typing import Any, Mapping
 
+from app.schemas.gaming_mouse import (
+    GAMING_MOUSE_SCHEMA_FIELDS,
+    GAMING_MOUSE_SCHEMA_ID,
+    GAMING_MOUSE_SCHEMA_MODEL,
+)
 
-COMMON_SCHEMA_FIELDS = [
-    "product_name",
-    "brand",
-    "category",
-    "price",
-    "release_date",
-    "specs",
-    "software_info",
-    "rating",
-    "review_count",
-    "common_pros",
-    "common_cons",
-    "market_share",
-    "growth_trend",
+
+GAMING_MOUSE_DIMENSIONS = [
+    "性能参数",
+    "轻量化设计",
+    "无线与续航",
+    "软件生态",
+    "点击系统",
+    "模具与尺寸",
+    "用户评价与博主测评",
+    "实时价格",
+    "长期可靠性",
 ]
 
-DEFAULT_DATA_SOURCES = {
-    "official": "品牌官网、产品页、软件支持页",
-    "news": "新闻报道、品牌公告、行业资讯",
-    "review": "专业评测、用户评论、电商评价",
-    "report": "财报、行业报告、渠道报告",
-    "user_survey": "用户调研、社区讨论、论坛反馈",
+GAMING_MOUSE_DATA_SOURCES = {
+    "local_product_json": "本地稳定硬件事实库 data/products/gaming_mice.json",
+    "official": "品牌官网、官方产品页、驱动/固件支持页",
+    "review": "专业评测站、博主测评、长视频体验",
+    "user_review": "电商评论、社区口碑、长期使用反馈",
+    "price": "实时价格、折扣、地区可买性",
 }
 
-DEFAULT_DIMENSIONS = ["产品能力", "用户口碑", "定价策略", "市场表现"]
-
 INDUSTRY_CONFIGS = {
-    "gaming_peripherals": {
-        "name": "电竞外设",
-        "competitors": ["罗技", "雷蛇", "海盗船", "SteelSeries"],
-        "dimensions": ["硬件性能", "软件驱动", "用户口碑", "定价策略", "产品线广度"],
-        "data_sources": DEFAULT_DATA_SOURCES.copy(),
-        "schema_fields": COMMON_SCHEMA_FIELDS.copy(),
-    },
     "gaming_mouse": {
         "name": "电竞鼠标",
-        "competitors": ["罗技", "雷蛇", "海盗船"],
+        "competitors": ["Logitech", "Razer", "ZOWIE", "Pulsar", "Lamzu", "Glorious"],
         "representative_products": {
-            "罗技": ["G Pro X Superlight 2", "G502 X Plus"],
-            "雷蛇": ["Viper V3 Pro", "DeathAdder V3 Pro"],
-            "海盗船": ["M75 Air", "SABRE RGB PRO Wireless"],
+            "Logitech": ["G Pro X Superlight 2", "G Pro X Superlight 2 DEX", "G PRO X2 SUPERSTRIKE"],
+            "Razer": ["Viper V3 Pro", "DeathAdder V3 Pro"],
+            "ZOWIE": ["EC2-C", "U2"],
         },
-        "dimensions": [
-            "性能参数",
-            "轻量化设计",
-            "无线与续航",
-            "软件生态",
-            "用户口碑",
-            "价格定位",
-            "电竞品牌影响力",
-            "握持手感与人体工学",
-        ],
-        "description": "聚焦电竞鼠标产品的性能、手感、软件、口碑、价格、电竞品牌影响力和人体工学分析。",
-        "data_sources": DEFAULT_DATA_SOURCES.copy(),
-        "schema_fields": COMMON_SCHEMA_FIELDS.copy(),
-    },
-    "gaming_keyboard": {
-        "name": "电竞键盘",
-        "competitors": ["罗技", "雷蛇", "海盗船", "Cherry"],
-        "representative_products": {
-            "罗技": ["G Pro X 60 HE"],
-            "雷蛇": ["BlackWidow V5 Pro 2026"],
-            "海盗船": ["K100 RGB Apex 2026"],
-            "Cherry": ["MX 3A 磁轴系列"],
-        },
-        "dimensions": [
-            "轴体手感",
-            "键帽材质",
-            "键位布局",
-            "RGB灯效",
-            "热插拔能力",
-            "续航表现",
-            "电竞延迟表现",
-        ],
-        "description": "聚焦电竞键盘的轴体手感、键帽材质、配列布局、灯效、热插拔、续航与电竞延迟表现分析。",
-        "data_sources": DEFAULT_DATA_SOURCES.copy(),
-        "schema_fields": COMMON_SCHEMA_FIELDS.copy(),
-    },
-    "gaming_headset": {
-        "name": "电竞头戴式耳机",
-        "competitors": ["森海塞尔", "索尼", "雷蛇", "赛睿"],
-        "representative_products": {
-            "森海塞尔": ["HD 620S"],
-            "索尼": ["WH-1000XM7"],
-            "雷蛇": ["BlackShark V3 Pro"],
-            "赛睿": ["Arctis Nova Pro 2026"],
-        },
-        "dimensions": [
-            "音频音质",
-            "降噪能力",
-            "麦克风收音效果",
-            "佩戴舒适度",
-            "无线延迟",
-            "续航时长",
-            "头戴重量",
-        ],
-        "description": "聚焦电竞头戴式耳机的音质、降噪、麦克风、佩戴舒适度、无线延迟、续航与重量分析。",
-        "data_sources": DEFAULT_DATA_SOURCES.copy(),
-        "schema_fields": COMMON_SCHEMA_FIELDS.copy(),
-    },
-    "smartphones": {
-        "name": "智能手机",
-        "competitors": ["iPhone", "三星", "华为", "小米"],
-        "dimensions": ["硬件参数", "系统体验", "摄影能力", "定价策略", "生态系统"],
-        "data_sources": DEFAULT_DATA_SOURCES.copy(),
-        "schema_fields": COMMON_SCHEMA_FIELDS.copy(),
-    },
-    "headphones": {
-        "name": "耳机",
-        "competitors": ["索尼", "Bose", "苹果", "森海塞尔"],
-        "dimensions": ["音质参数", "降噪能力", "续航", "定价", "用户口碑"],
-        "data_sources": DEFAULT_DATA_SOURCES.copy(),
-        "schema_fields": COMMON_SCHEMA_FIELDS.copy(),
-    },
-    "cameras": {
-        "name": "摄影器材",
-        "competitors": ["索尼", "佳能", "尼康", "富士"],
-        "dimensions": ["传感器性能", "对焦系统", "视频能力", "定价", "镜头生态"],
-        "data_sources": DEFAULT_DATA_SOURCES.copy(),
-        "schema_fields": COMMON_SCHEMA_FIELDS.copy(),
-    },
+        "dimensions": GAMING_MOUSE_DIMENSIONS,
+        "description": "电竞鼠标垂直竞品分析：官方型号、实体消歧、硬件事实、模具/点击系统、评价测评、实时价格和长期可靠性。",
+        "data_sources": GAMING_MOUSE_DATA_SOURCES,
+        "schema_id": GAMING_MOUSE_SCHEMA_ID,
+        "schema_model": GAMING_MOUSE_SCHEMA_MODEL,
+        "schema_fields": GAMING_MOUSE_SCHEMA_FIELDS.copy(),
+    }
 }
 
 
 def get_industry_config(industry_key: str | None) -> dict[str, Any]:
-    """Return the configured industry by key, or an empty config."""
-    return INDUSTRY_CONFIGS.get(industry_key or "", {})
+    """Return the configured industry by key, defaulting to gaming_mouse."""
+    return INDUSTRY_CONFIGS.get(industry_key or "gaming_mouse", INDUSTRY_CONFIGS["gaming_mouse"])
 
 
 def get_state_industry_name(state: Mapping[str, Any]) -> str:
@@ -141,31 +62,24 @@ def get_state_industry_name(state: Mapping[str, Any]) -> str:
         return industry_name.strip()
 
     config = get_industry_config(state.get("industry_key"))
-    return str(config.get("name") or "通用行业")
+    return str(config.get("name") or "电竞鼠标")
 
 
 def get_state_dimensions(state: Mapping[str, Any]) -> list[str]:
-    """Resolve analysis dimensions from state first, then industry config."""
+    """Resolve analysis dimensions from state first, then gaming-mouse config."""
     dimensions = state.get("focus_dimensions")
     if isinstance(dimensions, list):
         resolved = [str(item).strip() for item in dimensions if str(item).strip()]
         if resolved:
             return resolved
 
-    config = get_industry_config(state.get("industry_key"))
-    configured_dimensions = config.get("dimensions")
-    if isinstance(configured_dimensions, list):
-        resolved = [str(item).strip() for item in configured_dimensions if str(item).strip()]
-        if resolved:
-            return resolved
-
-    return DEFAULT_DIMENSIONS.copy()
+    return GAMING_MOUSE_DIMENSIONS.copy()
 
 
 def get_state_data_sources(state: Mapping[str, Any]) -> dict[str, str]:
-    """Resolve configured source types and descriptions for an industry."""
+    """Resolve configured source types and descriptions."""
     config = get_industry_config(state.get("industry_key"))
     data_sources = config.get("data_sources")
     if isinstance(data_sources, dict) and data_sources:
         return {str(key): str(value) for key, value in data_sources.items()}
-    return DEFAULT_DATA_SOURCES.copy()
+    return GAMING_MOUSE_DATA_SOURCES.copy()

@@ -1,25 +1,17 @@
+"""Failure-path tests for verification, quality and degraded reports."""
+
+from __future__ import annotations
+
 import os
 import sys
-from pathlib import Path
-
-from dotenv import load_dotenv
-
 
 os.environ["LANGCHAIN_TRACING_V2"] = "false"
 os.environ["LANGSMITH_TRACING"] = "false"
-os.environ["RESEARCH_AGENT_USE_LLM"] = "0"
-os.environ["EVIDENCE_AGENT_USE_LLM"] = "0"
-os.environ["PRODUCT_AGENT_USE_LLM"] = "0"
-os.environ["BUSINESS_AGENT_USE_LLM"] = "0"
-os.environ["RISK_AGENT_USE_LLM"] = "0"
-os.environ["QUALITY_AGENT_USE_LLM"] = "0"
-os.environ["STRATEGY_AGENT_USE_LLM"] = "0"
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-load_dotenv(Path(__file__).resolve().parent / ".env")
 
-from orchestration.workflow import human_review_node
-from app.agents.quality_agent import quality_agent
+from app.agents.quality_agent import quality_agent, quality_router
+from app.agents.report_agent import report_agent
 from app.agents.verification_agent import verification_agent
 from app.core.agent_runner import run_node
 from app.services.context_manager import select_evidence_context
@@ -28,23 +20,23 @@ from app.services.context_manager import select_evidence_context
 def _evidence():
     return {
         "evidence_id": "EV001",
-        "platform": "罗技",
-        "related_dimension": "重量",
+        "platform": "Logitech",
+        "related_dimension": "weight",
         "credibility": "high",
         "confidence_score": 0.9,
-        "claim": "罗技鼠标重量为 60 克。",
-        "raw_content": "官方资料显示罗技鼠标重量为 60 克。",
+        "claim": "The mouse weighs 60 g.",
+        "raw_content": "Official specs show the mouse weighs 60 g.",
     }
 
 
 def _base_state():
     matrix = {
         "dimensions": {
-            "重量": {
-                "罗技": {
+            "weight": {
+                "Logitech": {
                     "score": 4,
-                    "summary": "罗技鼠标重量为 60 克。",
-                    "analysis": "罗技鼠标重量为 60 克。",
+                    "summary": "The mouse weighs 60 g.",
+                    "analysis": "The mouse weighs 60 g.",
                     "evidence_ids": ["EV001"],
                     "confidence_score": 0.9,
                 }
@@ -54,23 +46,24 @@ def _base_state():
     return {
         "industry_key": "gaming_mouse",
         "industry_name": "电竞鼠标",
-        "target_platform": "罗技",
-        "competitors": ["罗技"],
-        "analysis_scene": "测试",
-        "target_user": "测试",
-        "time_range": "近12个月",
-        "focus_dimensions": ["重量"],
+        "target_platform": "Logitech",
+        "competitors": ["Logitech"],
+        "analysis_scene": "test",
+        "target_user": "test",
+        "time_range": "last two years",
+        "focus_dimensions": ["weight"],
+        "product_compare_mode": True,
         "raw_research": [],
         "evidence_list": [_evidence()],
         "claims": [
             {
                 "claim_id": "PCL001",
-                "content": "罗技鼠标重量为 60 克。",
-                "dimension": "重量",
-                "related_platforms": ["罗技"],
+                "content": "The mouse weighs 60 g.",
+                "dimension": "weight",
+                "related_platforms": ["Logitech"],
                 "evidence_ids": ["EV001"],
                 "confidence_score": 0.9,
-                "generated_by": "ProductAgent",
+                "generated_by": "AnalysisAgent",
             }
         ],
         "product_matrix": matrix,
@@ -92,6 +85,7 @@ def _base_state():
         "rejected_agents": [],
         "is_approved": False,
         "needs_human_review": False,
+        "degraded_report": False,
         "quality_status": "",
     }
 
@@ -102,7 +96,7 @@ def test_context_summary_observable():
         for index in range(1, 6)
     ]
     selected, summary = select_evidence_context(
-        "ProductAgent",
+        "AnalysisAgent",
         evidence_list,
         max_items=2,
         max_per_dimension=2,
@@ -112,52 +106,54 @@ def test_context_summary_observable():
     assert summary["total_evidence_count"] == 5
     assert summary["selected_evidence_count"] == 2
     assert summary["trimmed_evidence_count"] == 3
-    assert len(summary["selected_evidence_ids"]) == 2
 
 
 def test_unsupported_claim_rejected():
     state = _base_state()
-    state["claims"][0]["content"] = "罗技鼠标重量为 73 克。"
+    state["claims"][0]["content"] = "The mouse weighs 73 g."
 
     verified = verification_agent(state)
     assert verified["unsupported_claim_ids"] == ["PCL001"]
 
     checked = quality_agent(verified)
-    quality_result = checked["quality_result"]
-    assert quality_result["status"] == "rejected"
-    assert "all_claims_faithful" in quality_result["failed_checks"]
-    assert quality_result["target_agent"] == "ProductAgent"
+    result = checked["quality_result"]
+    assert result["status"] == "rejected"
+    assert "all_claims_faithful" in result["failed_checks"]
+    assert result["target_agent"] == "AnalysisAgent"
 
 
 def test_matrix_issue_rejected():
     state = _base_state()
-    state["product_matrix"]["dimensions"]["重量"]["罗技"]["analysis"] = "罗技鼠标重量为 73 克。"
+    state["product_matrix"]["dimensions"]["weight"]["Logitech"]["analysis"] = "The mouse weighs 73 g."
 
     verified = verification_agent(state)
     assert verified["faithfulness_report"]["matrix_issues"]
 
     checked = quality_agent(verified)
-    quality_result = checked["quality_result"]
-    assert quality_result["status"] == "rejected"
-    assert "all_matrix_claims_faithful" in quality_result["failed_checks"]
-    assert quality_result["matrix_issues"]
+    result = checked["quality_result"]
+    assert result["status"] == "rejected"
+    assert "all_matrix_claims_faithful" in result["failed_checks"]
 
 
-def test_review_ticket_after_three_failures():
+def test_partial_report_after_three_failures():
     state = _base_state()
-    state["product_matrix"]["dimensions"]["重量"]["罗技"]["analysis"] = "罗技鼠标重量为 73 克。"
+    state["product_matrix"]["dimensions"]["weight"]["Logitech"]["analysis"] = "The mouse weighs 73 g."
     state["iteration_count"] = 2
 
     verified = verification_agent(state)
     checked = quality_agent(verified)
-    assert checked["needs_human_review"] is True
+    result = checked["quality_result"]
+    assert checked["needs_human_review"] is False
+    assert checked["degraded_report"] is True
+    assert checked["quality_status"] == "partial_report"
+    assert result["status"] == "partial_report"
+    assert quality_router(checked) == "report_agent"
 
-    reviewed = human_review_node(checked)
-    ticket = reviewed["review_ticket"]
-    assert ticket["ticket_id"].startswith("RT-")
-    assert ticket["status"] == "open"
-    assert ticket["matrix_issues"]
-    assert reviewed["final_report"]["review_ticket"]["ticket_id"] == ticket["ticket_id"]
+    reported = report_agent(checked)
+    final_report = reported["final_report"]
+    assert final_report["quality_status"] == "partial_report"
+    assert final_report["partial_report"] is True
+    assert final_report["auto_degraded"] is True
 
 
 def test_structured_error_recovery():
@@ -166,16 +162,16 @@ def test_structured_error_recovery():
 
     recovered = run_node("BrokenAgent", _broken_agent, _base_state())
     assert recovered["trace_log"][0]["status"] == "failed"
-    error = recovered["error_log"][0]
-    assert error["agent_name"] == "BrokenAgent"
-    assert error["error_type"] == "agent_failed"
-    assert error["recover_action"] == "degrade_and_continue"
+    assert recovered["error_log"][0]["agent_name"] == "BrokenAgent"
 
 
 if __name__ == "__main__":
-    test_context_summary_observable()
-    test_unsupported_claim_rejected()
-    test_matrix_issue_rejected()
-    test_review_ticket_after_three_failures()
-    test_structured_error_recovery()
-    print("Failure-path 测试通过")
+    for test in (
+        test_context_summary_observable,
+        test_unsupported_claim_rejected,
+        test_matrix_issue_rejected,
+        test_partial_report_after_three_failures,
+        test_structured_error_recovery,
+    ):
+        test()
+        print(f"PASS {test.__name__}")

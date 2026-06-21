@@ -66,8 +66,33 @@ class CompetitiveAnalysisState(TypedDict):
     target_user: str
     time_range: str
     focus_dimensions: List[str]
+    data_requirements: List[str]
+    # 产品对比模式：从产品对比页带入的结构化产品事实底座。
+    # 这三个通道只在初始 state 写入一次，节点不在并行分支里改写，因此无需 reducer。
+    product_compare_mode: bool
+    selected_products: List[Dict]
+    original_product_inputs: List[Dict]
+    resolved_products: List[Dict]
+    unresolved_products: List[str]
+    search_mcp_results: List[Dict]
+    external_product_candidates: List[Dict]
+    product_facts: List[Dict]
+    official_spec_records: List[Dict]
+    official_spec_status: List[Dict]
+    review_intel_status: Dict
+    price_status: Dict
+    hardware_analysis: Dict
+    experience_analysis: Dict
+    business_analysis: Dict
+    agent_contributions: List[Dict]
+    pending_data: List[Dict]
+    pending_dimensions: List[str]
+    score_flow: Dict
+    # 产品评分（AnalysisAgent 基于硬件 JSON 计算；与报告 quality_score 分离）。
+    product_scores: Dict
     raw_research: List[Dict]
     evidence_list: List[Dict]
+    evidence_status: Dict
     claims: Annotated[List[Dict], merge_claims]
     product_matrix: Dict
     business_matrix: Dict
@@ -86,6 +111,7 @@ class CompetitiveAnalysisState(TypedDict):
     rejected_agents: List[str]
     is_approved: bool
     needs_human_review: bool
+    degraded_report: bool
     quality_status: str
     error_log: List[Dict]
     trace_log: Annotated[List[Dict], merge_trace_log]

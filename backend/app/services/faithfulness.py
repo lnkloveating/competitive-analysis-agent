@@ -22,7 +22,7 @@ from typing import Any, Dict, List
 
 _NUMBER_RE = re.compile(r"\d+(?:[.,]\d+)?%?")
 _TOKEN_RE = re.compile(r"[0-9a-zA-Z一-鿿]+")
-# Generic connective tokens that carry no grounding signal in the templated claims.
+# Common connective tokens that carry no grounding signal in the templated claims.
 _STOPWORDS = {
     "维度",
     "证据",

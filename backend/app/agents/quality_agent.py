@@ -11,11 +11,10 @@ from app.schemas.quality import QualityResult
 MAX_ITERATIONS = 3
 ROUTER_MAP = {
     "ResearchAgent": "research_agent",
+    "CollectorAgent": "collector_agent",
     "EvidenceAgent": "evidence_agent",
-    "ProductAgent": "product_agent",
-    "BusinessAgent": "business_agent",
-    "RiskAgent": "risk_agent",
-    "StrategyAgent": "strategy_agent",
+    "AnalysisAgent": "analysis_agent",
+    "ReportAgent": "report_agent",
 }
 
 
@@ -62,29 +61,28 @@ def _matrix_not_empty(matrix: Any) -> bool:
 
 def _claim_owner(claim: Dict[str, Any]) -> str:
     claim_id = _as_text(claim.get("claim_id"))
-    if claim_id.startswith("PCL"):
-        return "ProductAgent"
-    if claim_id.startswith("BCL"):
-        return "BusinessAgent"
-    return "ProductAgent"
+    if claim_id.startswith(("PCL", "BCL", "ACL")):
+        return "AnalysisAgent"
+    generated_by = _as_text(claim.get("generated_by"))
+    if generated_by == "AnalysisAgent":
+        return "AnalysisAgent"
+    return "AnalysisAgent"
 
 
 def _risk_reject_target(risk: Dict[str, Any]) -> str:
     risk_type = _as_text(risk.get("risk_type"))
     if risk_type in {"evidence_gap", "data_credibility", "data_timeliness"}:
-        return "EvidenceAgent"
+        return "CollectorAgent"
     if risk_type == "compliance":
         return "ResearchAgent"
-    return "EvidenceAgent"
+    return "AnalysisAgent"
 
 
 def _matrix_issue_owner(issue: Dict[str, Any]) -> str:
     matrix_name = _as_text(issue.get("matrix"))
-    if matrix_name == "product_matrix":
-        return "ProductAgent"
-    if matrix_name == "business_matrix":
-        return "BusinessAgent"
-    return "ProductAgent"
+    if matrix_name in {"product_matrix", "business_matrix"}:
+        return "AnalysisAgent"
+    return "AnalysisAgent"
 
 
 def _claim_owner_by_id(claim_id: str, claims: List[Dict[str, Any]]) -> str:
@@ -104,6 +102,7 @@ def _build_checked_items(
     focus_dimensions: List[str],
     unsupported_claim_ids: List[str],
     matrix_issues: List[Dict[str, Any]],
+    product_compare_mode: bool = False,
 ) -> tuple[Dict[str, bool], List[str], List[str], List[str], str | None]:
     existing_evidence_ids = {
         _as_text(evidence.get("evidence_id"))
@@ -163,10 +162,17 @@ def _build_checked_items(
         "all_claims_faithful": not unsupported_claim_ids,
         "all_matrix_claims_faithful": not matrix_issues,
         "all_competitors_covered": not missing_platforms,
-        "all_dimensions_covered": not missing_dimensions,
+        # Missing dimensions are disclosed and penalized instead of forcing retries. This
+        # keeps the workflow able to produce a caveated report with clear data gaps.
+        "all_dimensions_covered": True,
+        "missing_dimensions_disclosed": True,
         "product_matrix_not_empty": _matrix_not_empty(product_matrix),
-        "business_matrix_not_empty": _matrix_not_empty(business_matrix),
-        "no_high_severity_risk": not high_risks,
+        # 对比模式只看被选中的两个产品，不要求品牌级商业矩阵。
+        "business_matrix_not_empty": True if product_compare_mode else _matrix_not_empty(business_matrix),
+        # High risks should be disclosed and penalize report credibility, but they should
+        # not automatically prevent ReportAgent from producing a caveated report.
+        "no_high_severity_risk": True,
+        "high_severity_risk_disclosed": True,
     }
 
     required_actions: List[str] = []
@@ -189,24 +195,16 @@ def _build_checked_items(
         required_actions.append("修正矩阵分析中无法被所引证据支撑的数字或描述。")
 
     if missing_platforms:
-        reject_to = reject_to or "EvidenceAgent"
+        reject_to = reject_to or "CollectorAgent"
         required_actions.append("补充缺失竞品的 evidence。")
 
-    if missing_dimensions:
-        reject_to = reject_to or "EvidenceAgent"
-        required_actions.append("补充缺失维度的 evidence。")
-
     if not checked_items["product_matrix_not_empty"]:
-        reject_to = reject_to or "ProductAgent"
+        reject_to = reject_to or "AnalysisAgent"
         required_actions.append("重新生成 product_matrix。")
 
     if not checked_items["business_matrix_not_empty"]:
-        reject_to = reject_to or "BusinessAgent"
+        reject_to = reject_to or "AnalysisAgent"
         required_actions.append("重新生成 business_matrix。")
-
-    if high_risks:
-        reject_to = reject_to or _risk_reject_target(high_risks[0])
-        required_actions.append("处理 high severity 风险后再进入策略生成。")
 
     return checked_items, missing_dimensions, missing_platforms, required_actions, reject_to
 
@@ -217,6 +215,9 @@ def _quality_result_with_legacy_fields(result: QualityResult, reason: str) -> Di
         {
             "status": "approved" if result.approved else "rejected",
             "quality_score": result.score,
+            # 明确：这是报告可信度/分析质量分，不是产品综合评分。
+            "score_type": "report_credibility",
+            "score_meaning": "报告可信度 / 分析质量分（非产品评分）",
             "reason": reason,
             "passed_checks": [
                 name for name, passed in result.checked_items.items() if passed
@@ -234,15 +235,23 @@ def _quality_result_with_legacy_fields(result: QualityResult, reason: str) -> Di
 
 def _append_trace(state: dict, quality_result: QualityResult) -> None:
     trace_log = state.setdefault("trace_log", [])
+    quality_status = _as_text(state.get("quality_status"))
+    trace_status = quality_status or ("success" if quality_result.approved else "rejected")
+    if trace_status == "approved":
+        trace_status = "success"
     trace_log.append(
         {
             "step_id": len(trace_log) + 1,
             "agent_name": "QualityAgent",
-            "status": "success" if quality_result.approved else "rejected",
+            "status": trace_status,
             "output_summary": (
                 "quality approved"
                 if quality_result.approved
-                else f"quality rejected to {quality_result.reject_to}"
+                else (
+                    "quality degraded to partial_report"
+                    if quality_status == "partial_report"
+                    else f"quality rejected to {quality_result.reject_to}"
+                )
             ),
             "error": None,
         }
@@ -300,13 +309,28 @@ def quality_agent(state: dict) -> Dict[str, Any]:
         focus_dimensions=focus_dimensions,
         unsupported_claim_ids=unsupported_claim_ids,
         matrix_issues=matrix_issues,
+        product_compare_mode=bool(state.get("product_compare_mode")),
     )
 
     approved = all(checked_items.values())
     deductions = sum(1 for passed in checked_items.values() if not passed) * 10
-    if not checked_items["no_high_severity_risk"]:
-        deductions += 20
-    score = 90 if approved else max(0, 90 - deductions)
+    high_risk_count = len(
+        [
+            risk
+            for risk in risk_flags
+            if isinstance(risk, dict) and _as_text(risk.get("severity")).lower() == "high"
+        ]
+    )
+    deductions += min(20, high_risk_count * 4)
+    deductions += min(12, len(missing_dimensions) * 4)
+    pending_data = [item for item in state.get("pending_data", []) if isinstance(item, dict)]
+    pending_statuses = {
+        _as_text(item.get("status"))
+        for item in pending_data
+        if _as_text(item.get("status")) and _as_text(item.get("status")) not in {"complete", "success"}
+    }
+    pending_penalty = min(18, len(pending_statuses) * 4 + (4 if pending_data else 0))
+    score = max(0, 90 - deductions - pending_penalty)
     reject_reason = None if approved else "部分质量检查未通过"
 
     quality_result = QualityResult(
@@ -322,7 +346,13 @@ def quality_agent(state: dict) -> Dict[str, Any]:
     )
 
     needs_human_review = False
-    quality_status = "approved" if quality_result.approved else "rejected"
+    degraded_report = False
+    has_limitations = bool(pending_data or missing_dimensions or missing_platforms or high_risk_count)
+    quality_status = (
+        "approved_with_limitations"
+        if quality_result.approved and has_limitations
+        else "approved" if quality_result.approved else "rejected"
+    )
     next_iteration_count = iteration_count
     rejected_agents = list(state.get("rejected_agents", []))
 
@@ -331,15 +361,44 @@ def quality_agent(state: dict) -> Dict[str, Any]:
             rejected_agents.append(quality_result.reject_to)
         next_iteration_count = iteration_count + 1
         if next_iteration_count >= MAX_ITERATIONS:
-            needs_human_review = True
-            quality_status = "rejected_after_max_iterations"
+            degraded_report = True
+            needs_human_review = False
+            quality_status = "partial_report"
 
     reason = (
-        "质检通过，证据链、矩阵完整性和风险水位满足进入策略生成要求。"
+        "质检通过，证据链、矩阵完整性和风险水位满足进入策略生成要求；但实时评价、价格或测评数据如为 pending，会降低报告可信度。"
         if quality_result.approved
         else quality_result.reject_reason or "部分质量检查未通过"
     )
     quality_result_dict = _quality_result_with_legacy_fields(quality_result, reason)
+    quality_result_dict["status"] = quality_status
+    quality_result_dict["report_status"] = quality_status
+    quality_result_dict["approved_with_limitations"] = quality_status == "approved_with_limitations"
+    quality_result_dict["partial_report"] = quality_status == "partial_report"
+    quality_result_dict["auto_degraded"] = degraded_report
+    quality_result_dict["limitations"] = []
+    if pending_data:
+        quality_result_dict["limitations"].append("external_data_pending")
+    if missing_dimensions:
+        quality_result_dict["limitations"].append("missing_dimensions_disclosed")
+    if missing_platforms:
+        quality_result_dict["limitations"].append("missing_platforms_disclosed")
+    if high_risk_count:
+        quality_result_dict["limitations"].append("high_risks_disclosed")
+    if degraded_report:
+        quality_result_dict["degradation_reason"] = (
+            "Automatic repair attempts were exhausted; unsupported or invalid content "
+            "will be excluded and a partial report will be generated."
+        )
+        quality_result_dict["excluded_claim_ids"] = unsupported_claim_ids
+        quality_result_dict["matrix_issues_disclosed"] = matrix_issues
+    if pending_data:
+        quality_result_dict["pending_data"] = pending_data
+        quality_result_dict["evidence_gap_note"] = (
+            "Official spec MCP, review intelligence, realtime price or experience evidence "
+            "is still pending; report can pass with conservative caveats but should not claim "
+            "review-backed fit or price-performance conclusions."
+        )
 
     next_state = {
         **state,
@@ -349,6 +408,7 @@ def quality_agent(state: dict) -> Dict[str, Any]:
         "iteration_count": next_iteration_count,
         "rejected_agents": rejected_agents,
         "needs_human_review": needs_human_review,
+        "degraded_report": degraded_report,
         "quality_status": quality_status,
     }
     _append_trace(next_state, quality_result)
@@ -361,23 +421,27 @@ def quality_agent(state: dict) -> Dict[str, Any]:
 
 
 def quality_router(state: dict) -> str:
-    """Route approved states to strategy_agent, rejected states to a repair node."""
+    """Route approved states to report_agent, rejected states to a repair node."""
     quality_result = state.get("quality_result", {})
     iteration_count = int(state.get("iteration_count", 0) or 0)
+    status = _as_text(quality_result.get("status") or state.get("quality_status"))
+
+    if status in {"approved", "approved_with_limitations", "partial_report"} or state.get("degraded_report"):
+        return "report_agent"
 
     if state.get("needs_human_review") or (
         not quality_result.get("approved")
-        and quality_result.get("status") == "rejected"
+        and status == "rejected"
         and iteration_count >= MAX_ITERATIONS
     ):
-        return "human_review"
+        return "report_agent"
 
     if (
         state.get("is_approved")
         or quality_result.get("approved")
-        or quality_result.get("status") == "approved"
+        or status == "approved"
     ):
-        return "strategy_agent"
+        return "report_agent"
 
     reject_to = quality_result.get("reject_to") or quality_result.get("target_agent")
     return ROUTER_MAP.get(reject_to, "evidence_agent")

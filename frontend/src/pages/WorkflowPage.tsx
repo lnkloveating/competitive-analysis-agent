@@ -1,800 +1,3082 @@
-import { Fragment, useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState, type ReactNode } from "react";
+import { analysisApi } from "../api/analysisApi";
 import { EmptyState } from "../components/common/EmptyState";
 import { LoadingState } from "../components/common/LoadingState";
 import { StatusBadge } from "../components/common/StatusBadge";
-import { Tooltip } from "../components/common/Tooltip";
-import { analysisApi } from "../api/analysisApi";
-import { getAgentRole } from "../utils/labels";
+import type { AgentSidebarItem } from "../components/layout/Sidebar";
 import type {
   AgentTrace,
   AnalysisStatus,
   ArtifactsSummary,
-  ContextSummary,
+  Claim,
   ErrorLogItem,
-  Metrics,
+  ExternalProductCandidate,
+  FinalReport,
+  OfficialSpecRecord,
   QualityResult,
   ReviewTicket,
+  SearchMcpResult,
 } from "../types/analysis";
 
 type WorkflowPageProps = {
   taskId?: string;
   displayTaskId?: string;
+  agentDetailName?: string | null;
+  onAgentOpen: (agentName: string) => void;
+  onAgentDetailClose: () => void;
+  selectedAgent: string;
+  onSelectedAgentChange: (agentName: string) => void;
+  onSidebarAgentsChange?: (agents: AgentSidebarItem[]) => void;
   onNavigate: (key: string) => void;
-  autoDemoActive?: boolean;
 };
 
-type AgentStatus =
-  | "pending"
-  | "running"
-  | "success"
-  | "rejected"
-  | "failed"
-  | "required";
+type Tone = "neutral" | "success" | "warning" | "danger" | "info";
+type AgentStatus = AgentSidebarItem["status"];
 
-type AgentNode = {
+type AgentDefinition = {
   name: string;
-  label: string;
-  subtitle: string;
+  role: string;
+  summary: string;
+  detail: string;
+  input: string;
+  output: string;
 };
 
-type QualityPayload = {
-  task_id?: string;
+type ReportResponse = {
+  final_report?: FinalReport;
   quality_result?: QualityResult;
-  is_approved?: boolean;
-  iteration_count?: number;
-  rejected_agents?: string[];
-  needs_human_review?: boolean;
   quality_status?: string;
+  degraded_report?: boolean;
+  needs_human_review?: boolean;
   review_ticket?: ReviewTicket;
+  evidence_list?: unknown[];
+  resolved_products?: unknown[];
+  unresolved_products?: string[];
+  search_mcp_results?: SearchMcpResult[];
+  external_product_candidates?: ExternalProductCandidate[];
+  official_spec_records?: OfficialSpecRecord[];
 };
 
-type WorkflowTrace = AgentTrace & {
-  timestamp?: string;
-  time?: string;
-  created_at?: string;
-  current_agent?: string;
-  reject_to?: string | null;
-  target_agent?: string | null;
-  reject_reason?: string | null;
-  reason?: string | null;
-  required_actions?: string[];
-  context_selected_evidence_count?: number;
-  context_trimmed_evidence_count?: number;
-  review_ticket_id?: string;
-};
-
-const agentNodes: AgentNode[] = [
+const AGENTS: AgentDefinition[] = [
   {
     name: "ResearchAgent",
-    label: "调研",
-    subtitle: "公开信息采集",
+    role: "调研规划员",
+    summary: "规划本次分析需要哪些数据",
+    detail: "把用户输入拆成数据需求：本地硬件事实、官网规格、用户评价、博主测评、实时价格、驱动生态。",
+    input: "产品 A / 产品 B + 分析场景",
+    output: "data_requirements / pending_data",
+  },
+  {
+    name: "CollectorAgent",
+    role: "采集与实体识别员",
+    summary: "识别产品，并调度本地库与 MCP 工具层",
+    detail: "完成别名命中、实体消歧、变体识别、本地 JSON 读取；后续会并行调用官网、评价、价格、搜索 MCP。",
+    input: "用户输入 + 本地事实库 + MCP Tool Layer",
+    output: "resolved_products / product_facts / pending external data",
   },
   {
     name: "EvidenceAgent",
-    label: "证据",
-    subtitle: "证据抽取",
+    role: "证据结构化员",
+    summary: "把采集结果变成可追溯 evidence",
+    detail: "统一 evidence_id、source_type、credibility、source_url，让后续 claim 必须绑定证据。",
+    input: "raw_research / local facts / pending records",
+    output: "evidence_list / evidence_status",
   },
   {
-    name: "ProductAgent",
-    label: "产品",
-    subtitle: "产品矩阵",
-  },
-  {
-    name: "BusinessAgent",
-    label: "商业",
-    subtitle: "商业矩阵",
+    name: "AnalysisAgent",
+    role: "分析师",
+    summary: "只分析有证据支撑的事实差异",
+    detail: "当前主要分析硬件事实；没有真实评价/测评证据时，不输出握法、手型、适合游戏等主观结论。",
+    input: "evidence_list + product facts",
+    output: "hardware_analysis / claims / risks",
   },
   {
     name: "VerificationAgent",
-    label: "校验",
-    subtitle: "忠实性校验",
-  },
-  {
-    name: "RiskAgent",
-    label: "风险",
-    subtitle: "风险识别",
+    role: "事实校验员",
+    summary: "检查结论是否被 evidence 支撑",
+    detail: "检查 claim.evidence_ids 是否有效，数字和矩阵结论是否能被引用证据支撑，拦截幻觉结论。",
+    input: "claims / evidence_list / matrices",
+    output: "faithfulness_report / unsupported_claim_ids",
   },
   {
     name: "QualityAgent",
-    label: "质检",
-    subtitle: "质量门控",
+    role: "质量门控员",
+    summary: "决定通过、打回或有限报告",
+    detail: "可以打回 Research、Collector、Evidence、Analysis；多次自动修复仍不足时生成 partial_report。",
+    input: "faithfulness / risks / pending data / coverage",
+    output: "quality_result / reject_to / approved_with_limitations",
   },
   {
-    name: "StrategyAgent",
-    label: "策略",
-    subtitle: "最终报告",
+    name: "ReportAgent",
+    role: "报告撰写员",
+    summary: "生成最终报告",
+    detail: "只整合前面 Agent 的结构化结果，输出最终建议、风险披露、pending 数据说明和证据引用。",
+    input: "verified claims + quality result",
+    output: "final_report / used_claim_ids / used_evidence_ids",
   },
 ];
 
-const humanReviewNode: AgentNode = {
-  name: "HumanReviewRequired",
-  label: "人工审核",
-  subtitle: "Human Review · 质量门控未通过时进入人工复核",
+const MCP_TOOLS = [
+  { name: "本地 JSON 事实库", status: "active", detail: "当前已启用，提供稳定硬件参数和型号别名。" },
+  { name: "官网规格 MCP", status: "active", detail: "已接入，用于抽取官网规格、固件更新、驱动资料。" },
+  { name: "评价/测评 MCP", status: "pending", detail: "后续并行采集用户反馈、博主测评和体验口碑。" },
+  { name: "实时价格 MCP", status: "pending", detail: "后续并行采集价格、折扣和地区可买性。" },
+  { name: "搜索 MCP", status: "active", detail: "已接入，用于识别未知简称、变体和新品的官网候选。" },
+];
+
+const QUALITY_TARGETS = [
+  { name: "ResearchAgent", reason: "数据需求不完整" },
+  { name: "CollectorAgent", reason: "缺少竞品或来源" },
+  { name: "EvidenceAgent", reason: "证据结构不合格" },
+  { name: "AnalysisAgent", reason: "结论没有证据支撑" },
+];
+
+const RESEARCH_REQUIREMENTS = [
+  {
+    name: "硬件数据",
+    status: "complete",
+    owner: "本地 JSON / OfficialSpec MCP",
+    fields: ["重量", "传感器", "DPI", "回报率", "连接方式", "点击系统", "软件"],
+    summary: "如果本地 JSON 命中两款产品，则直接展示硬件事实；否则标记为 pending，等待官网 MCP 补齐。",
+  },
+  {
+    name: "用户评价与电商评论",
+    status: "pending",
+    owner: "ReviewIntel MCP",
+    fields: ["手感", "品控", "售后", "长期使用问题", "适合人群"],
+    summary: "当前不输出体验结论，等待真实评论采集和 LLM 汇总。",
+  },
+  {
+    name: "博主测评与体验口碑",
+    status: "pending",
+    owner: "ReviewIntel MCP",
+    fields: ["握法", "游戏类型", "对比观点", "延迟/续航体验"],
+    summary: "后续采集 Bilibili / YouTube / 专业测评站摘要。",
+  },
+  {
+    name: "实时价格与可买性",
+    status: "pending",
+    owner: "Price MCP",
+    fields: ["当前价格", "折扣", "区域库存", "历史低价"],
+    summary: "价格不再写死，后续由实时 MCP 补齐。",
+  },
+  {
+    name: "驱动生态与软件体验",
+    status: "partial",
+    owner: "CollectorAgent / ReviewIntel MCP",
+    fields: ["驱动名称", "板载内存", "宏/配置", "稳定性反馈"],
+    summary: "本地只保留软件事实，驱动稳定性等待用户评价验证。",
+  },
+];
+
+const SOURCE_PRIORITIES = [
+  {
+    level: "P0",
+    name: "品牌官网 / 官方规格",
+    credibility: "最高",
+    usage: "硬件参数、固件、驱动、官方型号命名",
+  },
+  {
+    level: "P1",
+    name: "专业测评站 / 实测数据",
+    credibility: "高",
+    usage: "传感器表现、延迟、重量校验、续航实测",
+  },
+  {
+    level: "P2",
+    name: "博主测评 / 长视频体验",
+    credibility: "中",
+    usage: "手感、握法、游戏场景、对比体验",
+  },
+  {
+    level: "P3",
+    name: "电商评论 / 社区口碑",
+    credibility: "需交叉验证",
+    usage: "品控、售后、长期可靠性、驱动问题",
+  },
+];
+
+const RESEARCH_HANDOFFS = [
+  {
+    agent: "CollectorAgent",
+    task: "根据数据需求调度本地 JSON 与后续 MCP 工具，完成产品识别和数据采集。",
+  },
+  {
+    agent: "EvidenceAgent",
+    task: "把采集结果统一转换成 evidence，并标注来源、可信度和 pending 状态。",
+  },
+  {
+    agent: "AnalysisAgent",
+    task: "只分析 evidence 支撑的硬件事实差异，外部体验数据缺失时不编结论。",
+  },
+  {
+    agent: "QualityAgent",
+    task: "检查结论是否有证据、pending 是否披露，并据此降低报告可信度。",
+  },
+];
+
+const STATUS_LABEL: Record<AgentStatus, string> = {
+  waiting: "等待",
+  running: "运行中",
+  done: "完成",
+  limited: "有限通过",
+  partial: "有限报告",
+  failed: "失败",
 };
 
-const statusTone: Record<AgentStatus, "neutral" | "success" | "warning" | "danger" | "info"> = {
-  pending: "neutral",
+const STATUS_TONE: Record<AgentStatus, Tone> = {
+  waiting: "neutral",
   running: "info",
-  success: "success",
-  rejected: "warning",
+  done: "success",
+  limited: "warning",
+  partial: "warning",
   failed: "danger",
-  required: "warning",
 };
 
-const statusLabel: Record<AgentStatus, string> = {
-  pending: "等待中",
-  running: "执行中",
-  success: "已完成",
-  rejected: "已打回",
-  failed: "执行失败",
-  required: "待人工审核",
-};
-
-const nodeClasses: Record<AgentStatus, string> = {
-  pending: "border-white/10 bg-slate-900/55 text-slate-300",
-  running:
-    "border-cyan-300/55 bg-cyan-300/10 text-cyan-100 shadow-[0_0_28px_rgba(34,211,238,0.18)]",
-  success:
-    "border-emerald-400/45 bg-emerald-400/10 text-emerald-100 shadow-[0_0_24px_rgba(52,211,153,0.12)]",
-  rejected:
-    "border-amber-400/50 bg-amber-400/10 text-amber-100 shadow-[0_0_24px_rgba(251,191,36,0.12)]",
-  failed:
-    "border-rose-400/55 bg-rose-500/10 text-rose-100 shadow-[0_0_24px_rgba(244,63,94,0.14)]",
-  required:
-    "border-amber-300/60 bg-amber-400/10 text-amber-100 shadow-[0_0_26px_rgba(251,191,36,0.16)]",
-};
-
-function normalizeTrace(traceLog: unknown): WorkflowTrace[] {
-  if (!Array.isArray(traceLog)) {
-    return [];
-  }
-
-  return traceLog
-    .filter((item): item is Record<string, unknown> => Boolean(item) && typeof item === "object")
-    .map((item) => ({
-      step_id: typeof item.step_id === "number" ? item.step_id : undefined,
-      agent_name: typeof item.agent_name === "string" ? item.agent_name : "未知Agent",
-      status: typeof item.status === "string" ? item.status : "pending",
-      input_summary: typeof item.input_summary === "string" ? item.input_summary : undefined,
-      output_summary: typeof item.output_summary === "string" ? item.output_summary : undefined,
-      duration_ms: typeof item.duration_ms === "number" ? item.duration_ms : undefined,
-      context_selected_evidence_count:
-        typeof item.context_selected_evidence_count === "number"
-          ? item.context_selected_evidence_count
-          : undefined,
-      context_trimmed_evidence_count:
-        typeof item.context_trimmed_evidence_count === "number"
-          ? item.context_trimmed_evidence_count
-          : undefined,
-      review_ticket_id:
-        typeof item.review_ticket_id === "string" ? item.review_ticket_id : undefined,
-      error:
-        typeof item.error === "string" || item.error === null
-          ? item.error
-          : undefined,
-      timestamp: typeof item.timestamp === "string" ? item.timestamp : undefined,
-      time: typeof item.time === "string" ? item.time : undefined,
-      created_at: typeof item.created_at === "string" ? item.created_at : undefined,
-      current_agent:
-        typeof item.current_agent === "string" ? item.current_agent : undefined,
-      reject_to:
-        typeof item.reject_to === "string" || item.reject_to === null
-          ? item.reject_to
-          : undefined,
-      target_agent:
-        typeof item.target_agent === "string" || item.target_agent === null
-          ? item.target_agent
-          : undefined,
-      reject_reason:
-        typeof item.reject_reason === "string" || item.reject_reason === null
-          ? item.reject_reason
-          : undefined,
-      reason:
-        typeof item.reason === "string" || item.reason === null
-          ? item.reason
-          : undefined,
-      required_actions: Array.isArray(item.required_actions)
-        ? item.required_actions.filter(
-            (action): action is string => typeof action === "string",
-          )
-        : undefined,
-    }));
+function asRecord(value: unknown): Record<string, unknown> {
+  return value && typeof value === "object" && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : {};
 }
 
-function normalizeStatus(value?: string): string {
-  return (value || "").toLowerCase();
+function asRecords(value: unknown): Record<string, unknown>[] {
+  return Array.isArray(value)
+    ? value.filter(
+        (item): item is Record<string, unknown> =>
+          Boolean(item) && typeof item === "object" && !Array.isArray(item),
+      )
+    : [];
 }
 
-function buildLatestTraceMap(traceLog: WorkflowTrace[]) {
-  return traceLog.reduce<Record<string, WorkflowTrace>>((acc, trace) => {
-    if (trace.agent_name) {
-      acc[trace.agent_name] = trace;
-    }
+function asString(value: unknown, fallback = ""): string {
+  if (typeof value === "string" && value.trim()) return value.trim();
+  if (typeof value === "number" || typeof value === "boolean") return String(value);
+  return fallback;
+}
+
+function asNumber(value: unknown): number | undefined {
+  return typeof value === "number" && Number.isFinite(value) ? value : undefined;
+}
+
+function normalize(value: unknown): string {
+  return asString(value).toLowerCase();
+}
+
+function extractReport(response: ReportResponse | FinalReport | null): Record<string, unknown> {
+  if (!response) return {};
+  const record = asRecord(response);
+  return asRecord(record.final_report ?? response);
+}
+
+function traceMap(traceLog: AgentTrace[]) {
+  return traceLog.reduce<Record<string, AgentTrace>>((acc, trace) => {
+    acc[trace.agent_name] = trace;
     return acc;
   }, {});
 }
 
-function buildTraceHistoryMap(traceLog: WorkflowTrace[]) {
-  return traceLog.reduce<Record<string, WorkflowTrace[]>>((acc, trace) => {
-    if (trace.agent_name) {
-      acc[trace.agent_name] = [...(acc[trace.agent_name] ?? []), trace];
-    }
-
-    return acc;
-  }, {});
-}
-
-function deriveAgentStatus(
-  agentName: string,
-  latestTrace: WorkflowTrace | undefined,
+function qualityStatusText(
   status: AnalysisStatus | null,
-): AgentStatus {
-  const traceStatus = normalizeStatus(latestTrace?.status);
-
-  if (traceStatus === "success") {
-    return "success";
-  }
-
-  if (traceStatus === "rejected") {
-    return "rejected";
-  }
-
-  if (traceStatus === "failed" || traceStatus === "schema_failed") {
-    return "failed";
-  }
-
-  if (traceStatus === "started") {
-    return "running";
-  }
-
-  const taskStatus = normalizeStatus(status?.status);
-  if (status?.current_agent === agentName && taskStatus !== "completed") {
-    return "running";
-  }
-
-  return "pending";
-}
-
-function asList(value: string[] | undefined, fallback?: string): string[] {
-  if (Array.isArray(value) && value.length > 0) {
-    return value;
-  }
-
-  return fallback ? [fallback] : [];
-}
-
-function statusIcon(status: AgentStatus) {
-  if (status === "success") {
-    return "✓";
-  }
-
-  if (status === "rejected" || status === "required") {
-    return "!";
-  }
-
-  if (status === "failed") {
-    return "×";
-  }
-
-  if (status === "running") {
-    return "";
-  }
-
-  return "•";
-}
-
-function AgentCard({
-  badges = [],
-  agent,
-  index,
-  isSelected,
-  onSelect,
-  status,
-  produce,
-}: {
-  badges?: Array<{
-    label: string;
-    tone?: "neutral" | "success" | "warning" | "danger" | "info";
-  }>;
-  agent: AgentNode;
-  index: number;
-  isSelected: boolean;
-  onSelect: () => void;
-  status: AgentStatus;
-  produce: string;
-}) {
+  quality: QualityResult | undefined,
+  reportResponse: ReportResponse | FinalReport | null,
+  report: Record<string, unknown>,
+) {
+  const responseRecord = asRecord(reportResponse);
   return (
-    <Tooltip
-      className="block w-full"
-      width={250}
-      content={
-        <span className="space-y-1">
-          <span className="block text-sm font-semibold text-slate-800">
-            {agent.name}
-          </span>
-          <span className="block">
-            <span className="text-slate-400">作用：</span>
-            {getAgentRole(agent.name)}
-          </span>
-          <span className="block">
-            <span className="text-slate-400">本次产出：</span>
-            {produce}
-          </span>
-          <span className="block">
-            <span className="text-slate-400">状态：</span>
-            {statusLabel[status]}
-          </span>
-        </span>
-      }
-    >
-      <button
-        className={`workflow-node-enter min-h-32 w-full rounded-lg border p-4 text-left transition duration-200 hover:-translate-y-0.5 hover:border-cyan-300/70 ${nodeClasses[status]} ${
-          isSelected ? "ring-2 ring-cyan-300/60" : ""
-        } ${status === "running" ? "workflow-node-pulse" : ""}`}
-        onClick={onSelect}
-        style={{ animationDelay: `${index * 90}ms` }}
-        type="button"
-      >
-        <div className="flex items-start justify-between gap-3">
-          <div>
-            <p className="text-xs uppercase tracking-[0.18em] text-slate-500">
-              Step {String(index + 1).padStart(2, "0")}
-            </p>
-            <h3 className="mt-2 text-base font-semibold text-white">{agent.label}</h3>
-            <p className="mt-1 text-xs text-slate-400">{agent.subtitle}</p>
-          </div>
-          <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full border border-white/15 bg-slate-950/70 text-sm font-bold">
-            {status === "running" ? (
-              <span className="h-2.5 w-2.5 rounded-full bg-cyan-300 shadow-[0_0_16px_rgba(103,232,249,0.9)]" />
-            ) : (
-              statusIcon(status)
-            )}
-          </span>
-        </div>
-        <div className="mt-4">
-          <StatusBadge label={statusLabel[status]} tone={statusTone[status]} />
-          {badges.length > 0 ? (
-            <span className="ml-2 inline-flex flex-wrap gap-2">
-              {badges.map((badge) => (
-                <StatusBadge
-                  key={badge.label}
-                  label={badge.label}
-                  tone={badge.tone ?? "neutral"}
-                />
-              ))}
-            </span>
-          ) : null}
-        </div>
-      </button>
-    </Tooltip>
+    asString(quality?.status) ||
+    asString(responseRecord.quality_status) ||
+    asString(report.quality_status) ||
+    asString(status?.quality_status) ||
+    "pending"
   );
 }
 
-type FlowTone = "pending" | "success" | "running" | "reject" | "failed";
-
-const flowLineClasses: Record<FlowTone, string> = {
-  pending: "workflow-flow-line--pending",
-  success: "workflow-flow-line--success",
-  running: "workflow-flow-line",
-  reject: "workflow-flow-line--reject",
-  failed: "workflow-flow-line--failed",
-};
-
-function flowToneFromStatus(status: AgentStatus): FlowTone {
-  if (status === "success") {
-    return "success";
-  }
-  if (status === "running") {
-    return "running";
-  }
-  if (status === "rejected" || status === "required") {
-    return "reject";
-  }
-  if (status === "failed") {
-    return "failed";
-  }
-  return "pending";
+function isFinalDone(status: AnalysisStatus | null) {
+  return normalize(status?.status) === "completed" || normalize(status?.status) === "failed";
 }
 
-function FlowConnector({ tone = "pending" }: { tone?: FlowTone }) {
+function deriveStatus(
+  agent: AgentDefinition,
+  trace: AgentTrace | undefined,
+  status: AnalysisStatus | null,
+  qualityStatus: string,
+  hasReport: boolean,
+): AgentStatus {
+  if (status?.current_agent === agent.name && !isFinalDone(status)) return "running";
+  const traceStatus = normalize(trace?.status);
+  if (traceStatus === "failed" || traceStatus === "schema_failed") return "failed";
+  if (agent.name === "QualityAgent") {
+    const quality = normalize(qualityStatus);
+    if (quality === "partial_report") return "partial";
+    if (quality === "approved_with_limitations") return "limited";
+    if (quality === "approved") return "done";
+  }
+  if (agent.name === "ReportAgent" && hasReport) return "done";
+  if (trace) return "done";
+  return "waiting";
+}
+
+function qualityTone(qualityStatus: string): Tone {
+  const value = normalize(qualityStatus);
+  if (value === "approved") return "success";
+  if (value === "approved_with_limitations" || value === "partial_report") return "warning";
+  if (value.includes("reject") || value === "failed") return "danger";
+  return "neutral";
+}
+
+function currentIndex(currentAgent: string) {
+  const index = AGENTS.findIndex((agent) => agent.name === currentAgent);
+  return index >= 0 ? index : -1;
+}
+
+function tooltipClass(extra = "") {
+  return `pointer-events-none absolute z-40 hidden w-72 rounded-lg border border-cyan-300/25 bg-slate-950/95 p-3 text-left text-xs leading-5 text-slate-300 shadow-[0_20px_60px_rgba(2,6,23,0.65)] group-hover:block ${extra}`;
+}
+
+function FlowStyles() {
   return (
-    <div className="flex w-12 shrink-0 items-center justify-center">
-      <span className={`h-0.5 w-full min-w-10 rounded-full ${flowLineClasses[tone]}`} />
+    <style>
+      {`
+        @keyframes dag-flow {
+          0% { transform: translateX(0); opacity: 0; }
+          15% { opacity: 1; }
+          85% { opacity: 1; }
+          100% { transform: translateX(34px); opacity: 0; }
+        }
+        @keyframes dag-drop {
+          0% { transform: translateY(0); opacity: .2; }
+          40% { opacity: 1; }
+          100% { transform: translateY(24px); opacity: .2; }
+        }
+        @keyframes agent-card-pulse {
+          0%, 100% { box-shadow: 0 0 0 rgba(34, 211, 238, 0); }
+          50% { box-shadow: 0 0 28px rgba(34, 211, 238, 0.18); }
+        }
+      `}
+    </style>
+  );
+}
+
+function FlowArrow({ active, label }: { active: boolean; label?: string }) {
+  return (
+    <div className="relative flex h-full min-w-7 items-center">
+      <div className={`h-px w-full ${active ? "bg-cyan-300/70" : "bg-slate-700"}`} />
+      {active ? (
+        <span
+          className="absolute left-0 h-1.5 w-1.5 rounded-full bg-cyan-200 shadow-[0_0_12px_rgba(103,232,249,0.9)]"
+          style={{ animation: "dag-flow 1.6s linear infinite" }}
+        />
+      ) : null}
+      {label ? (
+        <span className="absolute -bottom-4 left-1/2 -translate-x-1/2 text-[10px] text-slate-500">
+          {label}
+        </span>
+      ) : null}
     </div>
   );
 }
 
-function includesHumanReview(value?: string | null): boolean {
-  return normalizeStatus(value ?? "").includes("human");
+function AgentNode({
+  agent,
+  status,
+  isCurrent,
+  isSelected,
+  onSelect,
+}: {
+  agent: AgentDefinition;
+  status: AgentStatus;
+  isCurrent: boolean;
+  isSelected: boolean;
+  onSelect: () => void;
+}) {
+  const activeClass = isCurrent
+    ? "border-cyan-300 bg-cyan-400/15 shadow-[0_0_28px_rgba(34,211,238,0.16)]"
+    : status === "done"
+      ? "border-emerald-400/35 bg-emerald-400/10"
+      : status === "limited" || status === "partial"
+        ? "border-amber-400/45 bg-amber-400/10"
+        : status === "failed"
+          ? "border-rose-400/45 bg-rose-500/10"
+          : "border-slate-700 bg-slate-900/70";
+
+  return (
+    <button className="group relative min-w-0 text-left" onClick={onSelect} type="button">
+      <div
+        className={`h-full rounded-lg border p-3 transition hover:-translate-y-0.5 hover:border-cyan-300/60 ${
+          isSelected ? "ring-2 ring-cyan-300/50" : ""
+        } ${activeClass}`}
+      >
+        <div className="flex items-center justify-between gap-2">
+          <p className="truncate text-sm font-semibold text-white">{agent.name}</p>
+          <span
+            className={`h-2 w-2 shrink-0 rounded-full ${
+              isCurrent
+                ? "bg-cyan-300"
+                : status === "done"
+                  ? "bg-emerald-300"
+                  : status === "waiting"
+                    ? "bg-slate-500"
+                    : "bg-amber-300"
+            }`}
+          />
+        </div>
+        <p className="mt-1 line-clamp-2 min-h-8 text-xs leading-4 text-slate-400">
+          {agent.summary}
+        </p>
+        <div className="mt-3">
+          <StatusBadge label={STATUS_LABEL[status]} tone={STATUS_TONE[status]} />
+        </div>
+      </div>
+
+      <div className={tooltipClass("left-0 top-[calc(100%+10px)]")}>
+        <p className="font-semibold text-cyan-100">{agent.role}</p>
+        <p className="mt-2">{agent.detail}</p>
+        <div className="mt-3 grid gap-2 border-t border-slate-800 pt-3">
+          <p>
+            <span className="text-slate-500">输入：</span>
+            {agent.input}
+          </p>
+          <p>
+            <span className="text-slate-500">输出：</span>
+            {agent.output}
+          </p>
+        </div>
+      </div>
+    </button>
+  );
 }
 
-function traceTone(status?: string): "neutral" | "success" | "warning" | "danger" | "info" {
-  const normalized = normalizeStatus(status);
+function McpToolCard({
+  name,
+  status,
+  detail,
+}: {
+  name: string;
+  status: string;
+  detail: string;
+}) {
+  const active = status === "active";
+  return (
+    <div className="group relative">
+      <div
+        className={`h-full rounded-lg border p-3 ${
+          active
+            ? "border-emerald-400/35 bg-emerald-400/10"
+            : "border-dashed border-amber-400/40 bg-amber-400/10"
+        }`}
+      >
+        <div className="flex items-center justify-between gap-2">
+          <p className="text-sm font-semibold text-white">{name}</p>
+          <StatusBadge label={active ? "active" : "pending"} tone={active ? "success" : "warning"} />
+        </div>
+        <p className="mt-2 line-clamp-2 text-xs leading-5 text-slate-400">{detail}</p>
+      </div>
+      <div className={tooltipClass("left-0 top-[calc(100%+10px)]")}>
+        <p className="font-semibold text-cyan-100">{name}</p>
+        <p className="mt-2">{detail}</p>
+        <p className="mt-3 border-t border-slate-800 pt-3 text-slate-500">
+          {active ? "当前流程已使用该数据源。" : "后续接入 MCP 后由 CollectorAgent 并行调用。"}
+        </p>
+      </div>
+    </div>
+  );
+}
 
-  if (normalized === "success" || normalized === "approved") {
-    return "success";
-  }
+function WorkflowDagCanvas({
+  taskId,
+  displayTaskId,
+  taskStatus,
+  currentAgent,
+  progress,
+  agentStatuses,
+  hasReport,
+  selectedAgent,
+  onSelectAgent,
+  onNavigate,
+}: {
+  taskId: string;
+  displayTaskId?: string;
+  taskStatus?: string;
+  currentAgent: string;
+  progress: number;
+  agentStatuses: Record<string, AgentStatus>;
+  hasReport: boolean;
+  selectedAgent: string;
+  onSelectAgent: (agentName: string) => void;
+  onNavigate: (key: string) => void;
+}) {
+  const activeIndex = currentIndex(currentAgent);
+  const completed = normalize(taskStatus) === "completed";
 
-  if (normalized === "rejected" || normalized.includes("human")) {
-    return "warning";
-  }
+  return (
+    <section className="rounded-lg border border-slate-800 bg-slate-950/75 p-5">
+      <FlowStyles />
+      <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+        <div>
+          <p className="text-xs font-semibold uppercase tracking-[0.22em] text-cyan-300">
+            LangGraph DAG
+          </p>
+          <h2 className="mt-2 text-2xl font-semibold text-white">
+            多 Agent 协作与 MCP 采集链路
+          </h2>
+          <div className="mt-3 flex flex-wrap gap-2 text-xs">
+            <StatusBadge label={`任务 ${displayTaskId || taskId}`} tone="info" />
+            <StatusBadge label={taskStatus || "waiting"} tone="neutral" />
+            <StatusBadge label={`当前 ${currentAgent}`} tone="info" />
+            <StatusBadge label={`进度 ${Math.min(100, Math.max(0, progress))}%`} tone="success" />
+          </div>
+        </div>
+        <div className="flex flex-wrap gap-2">
+          <button
+            className="rounded-md border border-slate-700 bg-slate-900/80 px-3 py-2 text-sm font-medium text-slate-200 transition hover:border-cyan-300/50 hover:text-cyan-100"
+            onClick={() => onNavigate("product-compare")}
+            type="button"
+          >
+            重新选择产品
+          </button>
+          <button
+            className={`rounded-md px-3 py-2 text-sm font-semibold transition ${
+              hasReport
+                ? "bg-cyan-300 text-slate-950 hover:bg-cyan-200"
+                : "cursor-not-allowed bg-slate-800 text-slate-500"
+            }`}
+            disabled={!hasReport}
+            onClick={() => hasReport && onNavigate("report")}
+            type="button"
+          >
+            查看最终报告
+          </button>
+        </div>
+      </div>
 
-  if (normalized === "failed" || normalized === "schema_failed") {
-    return "danger";
-  }
+      <div className="mt-5 rounded-lg border border-slate-800 bg-slate-950/80 p-4">
+        <div className="mx-auto w-fit rounded-md border border-cyan-300/35 bg-cyan-400/10 px-5 py-3 text-center text-sm font-semibold text-cyan-100">
+          LangGraph DAG Agent Workflow
+        </div>
+        <div className="relative mx-auto h-7 w-px bg-slate-700">
+          <span
+            className="absolute left-1/2 top-0 h-1.5 w-1.5 -translate-x-1/2 rounded-full bg-cyan-200"
+            style={{ animation: "dag-drop 1.4s ease-in-out infinite" }}
+          />
+        </div>
 
-  if (normalized === "started" || normalized === "running") {
-    return "info";
-  }
+        <div
+          className="grid items-stretch gap-2"
+          style={{
+            gridTemplateColumns:
+              "minmax(105px,1fr) 28px minmax(105px,1fr) 28px minmax(105px,1fr) 28px minmax(105px,1fr) 28px minmax(105px,1fr) 28px minmax(105px,1fr) 28px minmax(105px,1fr)",
+          }}
+        >
+          {AGENTS.map((agent, index) => {
+            const arrowActive = completed || (activeIndex >= 0 && index < activeIndex);
+            return (
+              <div className="contents" key={agent.name}>
+                <AgentNode
+                  agent={agent}
+                  status={agentStatuses[agent.name] ?? "waiting"}
+                  isCurrent={currentAgent === agent.name}
+                  isSelected={selectedAgent === agent.name}
+                  onSelect={() => onSelectAgent(agent.name)}
+                />
+                {index < AGENTS.length - 1 ? (
+                  <FlowArrow active={arrowActive} label={index === 1 ? "facts" : undefined} />
+                ) : null}
+              </div>
+            );
+          })}
+        </div>
 
+        <div className="mt-4 grid gap-4 lg:grid-cols-[minmax(0,1fr)_300px]">
+          <div>
+            <div className="ml-[calc((100%/7)+16px)] w-fit">
+              <div className="mx-auto h-7 w-px border-l border-dashed border-cyan-300/50" />
+              <div className="rounded-md border border-cyan-300/35 bg-cyan-400/10 px-4 py-2 text-center text-sm font-semibold text-cyan-100">
+                MCP Tool Layer
+              </div>
+            </div>
+            <div className="mt-4 grid gap-3 md:grid-cols-5">
+              {MCP_TOOLS.map((tool) => (
+                <McpToolCard
+                  key={tool.name}
+                  name={tool.name}
+                  status={tool.status}
+                  detail={tool.detail}
+                />
+              ))}
+            </div>
+          </div>
+
+          <div className="rounded-lg border border-amber-400/30 bg-amber-400/10 p-4">
+            <p className="text-sm font-semibold text-amber-100">QualityAgent 反馈闭环</p>
+            <div className="mt-3 space-y-2">
+              {QUALITY_TARGETS.map((target) => (
+                <button
+                  className="group relative flex w-full items-center gap-2 text-left"
+                  key={target.name}
+                  onClick={() => onSelectAgent(target.name)}
+                  type="button"
+                >
+                  <span className="rounded-md border border-slate-700 bg-slate-950 px-2 py-1 text-xs text-slate-200">
+                    Quality
+                  </span>
+                  <span className="text-amber-200">↩</span>
+                  <span className="rounded-md border border-amber-400/35 bg-slate-950 px-2 py-1 text-xs text-amber-100">
+                    {target.name}
+                  </span>
+                  <div className={tooltipClass("right-0 top-[calc(100%+8px)]")}>
+                    <p className="font-semibold text-amber-100">打回条件</p>
+                    <p className="mt-2">{target.reason}</p>
+                    <p className="mt-2 text-slate-500">三次自动修复仍不足时生成 partial_report。</p>
+                  </div>
+                </button>
+              ))}
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+  );
+}
+
+function AgentCardGrid({
+  selectedAgent,
+  currentAgent,
+  agentStatuses,
+  traces,
+  onSelectAgent,
+}: {
+  selectedAgent: string;
+  currentAgent: string;
+  agentStatuses: Record<string, AgentStatus>;
+  traces: Record<string, AgentTrace>;
+  onSelectAgent: (agentName: string) => void;
+}) {
+  return (
+    <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
+      {AGENTS.map((agent, index) => {
+        const status = agentStatuses[agent.name] ?? "waiting";
+        const selected = selectedAgent === agent.name;
+        const running = currentAgent === agent.name;
+        const trace = traces[agent.name];
+        return (
+          <button
+            className={`group min-h-[168px] rounded-lg border p-4 text-left transition hover:-translate-y-1 hover:border-cyan-300/60 ${
+              selected
+                ? "border-cyan-300/60 bg-cyan-400/10 ring-2 ring-cyan-300/30"
+                : running
+                  ? "border-cyan-300/50 bg-cyan-400/10"
+                  : status === "done"
+                    ? "border-emerald-400/35 bg-emerald-400/10"
+                    : status === "limited" || status === "partial"
+                      ? "border-amber-400/40 bg-amber-400/10"
+                      : status === "failed"
+                        ? "border-rose-400/45 bg-rose-500/10"
+                        : "border-slate-800 bg-slate-950/70"
+            }`}
+            key={agent.name}
+            onClick={() => onSelectAgent(agent.name)}
+            style={running ? { animation: "agent-card-pulse 1.8s ease-in-out infinite" } : undefined}
+            type="button"
+          >
+            <div className="flex items-start justify-between gap-3">
+              <div>
+                <p className="text-xs font-semibold uppercase tracking-[0.16em] text-slate-500">
+                  {String(index + 1).padStart(2, "0")}
+                </p>
+                <h3 className="mt-2 text-lg font-semibold text-white">{agent.name}</h3>
+                <p className="mt-1 text-sm text-slate-400">{agent.role}</p>
+              </div>
+              <StatusBadge label={STATUS_LABEL[status]} tone={STATUS_TONE[status]} />
+            </div>
+            <p className="mt-4 text-sm leading-6 text-slate-300">{agent.summary}</p>
+            <p className="mt-3 line-clamp-2 text-xs leading-5 text-slate-500">
+              {trace?.output_summary || "点击查看该 Agent 的详细数据占位。"}
+            </p>
+          </button>
+        );
+      })}
+    </div>
+  );
+}
+
+function researchTone(status: string): Tone {
+  const value = normalize(status);
+  if (value === "complete" || value === "active") return "success";
+  if (value === "partial") return "warning";
+  if (value.includes("pending") || value.includes("mcp_not_connected")) return "warning";
+  if (value.includes("fail")) return "danger";
   return "neutral";
 }
 
-function getTraceTime(trace: WorkflowTrace): string | null {
-  return trace.timestamp ?? trace.time ?? trace.created_at ?? null;
-}
+function productLabelsFromReport(report: Record<string, unknown>, unresolved: string[] = []) {
+  const identities = asRecords(report.product_identification);
+  const resolved = asRecords(report.resolved_products);
+  const products = identities.length ? identities : resolved;
+  const labels = products
+    .slice(0, 2)
+    .map((item, index) => {
+      const label =
+        [asString(item.brand), asString(item.model || item.official_model)]
+          .filter(Boolean)
+          .join(" ") ||
+        asString(item.product_name) ||
+        asString(item.id);
+      return label || `产品 ${index + 1}`;
+    })
+    .filter(Boolean);
 
-function latestStatusIsSuccessAfterReject(entries?: WorkflowTrace[]): boolean {
-  if (!entries || entries.length < 2) {
-    return false;
+  // 未命中本地库的输入也占一个产品位（待搜索 / 官网 MCP 识别），保证两个产品都出现。
+  for (const query of unresolved) {
+    if (labels.length >= 2) break;
+    labels.push(`${query}（待搜索 / 官网 MCP 识别）`);
   }
 
-  const latestStatus = normalizeStatus(entries[entries.length - 1]?.status);
+  return labels.length ? labels : ["产品 A（等待 CollectorAgent 识别）", "产品 B（等待 CollectorAgent 识别）"];
+}
+
+function formatValue(value: unknown, fallback = "未找到相应数据") {
+  if (Array.isArray(value)) return value.length ? value.join(" / ") : fallback;
+  if (typeof value === "boolean") return value ? "支持" : "不支持";
+  if (typeof value === "number" && Number.isFinite(value)) return String(value);
+  if (typeof value === "string" && value.trim()) return value.trim();
+  return fallback;
+}
+
+function formatDimensions(value: unknown) {
+  const dims = asRecord(value);
+  const length = asNumber(dims.length);
+  const width = asNumber(dims.width);
+  const height = asNumber(dims.height);
+  if ([length, width, height].every((item) => typeof item === "number")) {
+    return `${length} x ${width} x ${height} mm`;
+  }
+  return "";
+}
+
+function officialSpecRecordsFromReport(report: Record<string, unknown>): OfficialSpecRecord[] {
+  return asRecords(report.official_spec_records) as OfficialSpecRecord[];
+}
+
+function officialSpecPayload(item: OfficialSpecRecord): Record<string, unknown> {
+  return asRecord(item.record);
+}
+
+type HardwareProductSource = "local" | "official";
+
+type HardwareProduct = {
+  id: string;
+  label: string;
+  specs: Record<string, unknown>;
+  source: HardwareProductSource;
+  sourceLabel: string;
+  collectionStatus?: string;
+  missingFields: string[];
+};
+
+function hardwareSourceFromSpec(item: Record<string, unknown>): HardwareProductSource {
+  const source = normalize(item.fact_source);
+  const dataStatus = normalize(item.data_status);
+  return source.includes("official") || dataStatus.startsWith("official_spec") ? "official" : "local";
+}
+
+function hardwareProductsFromReport(report: Record<string, unknown>): HardwareProduct[] {
+  // final_report.hardware_specs 可能包含本地 JSON 产品，也可能包含 OfficialSpecMCP 转成的产品事实。
+  const localProducts = asRecords(report.hardware_specs)
+    .map((item, index) => {
+      const source = hardwareSourceFromSpec(item);
+      return {
+        id: asString(item.product_id) || asString(item.id) || `product-${index + 1}`,
+        label:
+          [asString(item.brand), asString(item.model)].filter(Boolean).join(" ") ||
+          `产品 ${index + 1}`,
+        specs: item,
+        source,
+        sourceLabel: source === "local" ? "本地 JSON" : "官网抽取",
+        collectionStatus: asString(item.data_status),
+        missingFields: [] as string[],
+      };
+    })
+    .filter(hasUsefulHardware);
+
+  const officialProducts = officialSpecRecordsFromReport(report)
+    .map((item, index) => {
+      const record = officialSpecPayload(item);
+      const label =
+        [asString(record.brand), asString(record.official_model) || asString(record.model)]
+          .filter(Boolean)
+          .join(" ") ||
+        asString(item.input) ||
+        `官网产品 ${index + 1}`;
+      return {
+        id: asString(record.product_id) || asString(record.id) || normalize(label) || `official-product-${index + 1}`,
+        label,
+        specs: record,
+        source: "official" as const,
+        sourceLabel: "官网抽取",
+        collectionStatus: asString(item.status),
+        missingFields: [...new Set([...asStrings(item.missing_fields), ...asStrings(record.missing_fields)])],
+      };
+    })
+    .filter(hasUsefulHardware);
+
+  const merged = [...localProducts];
+  for (const product of officialProducts) {
+    const key = normalize(product.label || product.id);
+    const exists = merged.some((item) => normalize(item.label || item.id) === key);
+    if (!exists) merged.push(product);
+  }
+
+  return merged.slice(0, 2);
+}
+
+const HARDWARE_FIELDS = [
+  { key: "weight_g", label: "重量", unit: "g" },
+  { key: "sensor", label: "传感器" },
+  { key: "dpi_max", label: "最高 DPI" },
+  { key: "polling_rate_hz", label: "回报率", unit: "Hz" },
+  { key: "connection", label: "连接方式" },
+  { key: "battery_hours", label: "续航", unit: "h" },
+  { key: "switch_type", label: "微动" },
+  { key: "click_system", label: "点击系统" },
+  { key: "software", label: "驱动 / 软件" },
+  { key: "onboard_memory", label: "板载内存" },
+];
+
+// 字段 key → 中文名（用于"待补字段"等处，避免直接展示 dimensions_mm 这类代码字段名）。
+const HARDWARE_FIELD_LABEL: Record<string, string> = Object.fromEntries(
+  HARDWARE_FIELDS.map((field) => [field.key, field.label]),
+);
+
+const CONNECTION_VALUE_LABEL: Record<string, string> = {
+  "2.4ghz": "2.4G 无线",
+  wired: "有线",
+  bluetooth: "蓝牙",
+};
+
+const CLICK_SYSTEM_VALUE_LABEL: Record<string, string> = {
+  optical: "光学微动",
+  mechanical: "机械微动",
+  hybrid: "混合微动",
+  haptic: "触觉微动",
+};
+
+const CONFIDENCE_CN: Record<string, string> = {
+  high: "高",
+  medium: "中",
+  low: "低",
+  pending: "待定",
+};
+
+// 采集流水线子步骤名 / 状态 → 中文。
+const PIPELINE_STEP_LABEL: Record<string, string> = {
+  ProductResolver: "本地实体识别",
+  SearchMCP: "联网搜索",
+  ProductFact: "产品事实读取",
+  OfficialSpec: "官网规格抽取",
+  ReviewIntel: "评价情报",
+  Price: "实时价格",
+};
+
+const SUBSTEP_STATUS_LABEL: Record<string, string> = {
+  success: "成功",
+  partial: "部分完成",
+  complete: "已完成",
+  collected: "已采集",
+  pending: "待处理",
+  skipped: "跳过",
+  official_candidate_found: "找到官网候选",
+  review_candidate_found: "找到测评候选",
+  low_confidence_candidates: "候选可信度低",
+  off_category_suspected: "疑似非鼠标",
+  mcp_not_connected: "MCP 未接入",
+};
+
+function fieldLabel(key: string): string {
+  return HARDWARE_FIELD_LABEL[key] || key;
+}
+
+function hasHardwareFieldValue(specs: Record<string, unknown>, key: string) {
+  const value = specs[key];
+  if (key === "dimensions_mm") {
+    return Boolean(formatDimensions(value));
+  }
+  if (key === "connection") {
+    return Array.isArray(value) && value.length > 0;
+  }
+  return value !== null && value !== undefined && value !== "" && !(Array.isArray(value) && value.length === 0);
+}
+
+function hardwareValue(specs: Record<string, unknown>, key: string, unit?: string) {
+  if (key === "dimensions_mm") return formatDimensions(specs[key]);
+  const value = specs[key];
+  if (key === "connection") {
+    const items = Array.isArray(value) ? value : [];
+    return items.length
+      ? items.map((item) => CONNECTION_VALUE_LABEL[normalize(item)] || String(item)).join(" / ")
+      : "";
+  }
+  if (key === "click_system" && value) {
+    return CLICK_SYSTEM_VALUE_LABEL[normalize(value)] || String(value);
+  }
+  if (typeof value === "number" && Number.isFinite(value) && unit) return `${value}${unit}`;
+  return formatValue(value, "");
+}
+
+function missingHardwareReason(product: HardwareProduct, key: string): string {
+  if (product.source === "local") return "本地未找到相应数据";
+  const status = normalize(product.collectionStatus);
+  if (status === "fetch_failed") return "疑似反爬拦截";
+  if (status.includes("failed") || status.includes("error")) return "抽取失败";
+  if (status === "insufficient_specs" || product.missingFields.includes(key)) return "官网未披露";
+  if (status === "partial_collected") return "当前来源未找到";
+  return "未找到相应数据";
+}
+
+function hardwareDisplayValue(product: HardwareProduct, field: { key: string; unit?: string }) {
+  const value = hardwareValue(product.specs, field.key, field.unit);
+  return value || missingHardwareReason(product, field.key);
+}
+
+function hasUsefulHardware(product: { specs: Record<string, unknown> }) {
+  return HARDWARE_FIELDS.some((field) => hasHardwareFieldValue(product.specs, field.key));
+}
+
+function HardwareMiniTable({ products }: { products: HardwareProduct[] }) {
+  if (products.length < 2) {
+    return (
+      <div className="rounded-md border border-amber-400/25 bg-amber-400/10 p-3 text-sm leading-6 text-amber-100">
+        本地 JSON 未同时命中两款产品；未命中的产品会交给搜索 / 官网规格 MCP 识别来源。
+      </div>
+    );
+  }
+
   return (
-    latestStatus === "success" &&
-    entries.some((entry) => normalizeStatus(entry.status) === "rejected")
+    <div className="overflow-hidden rounded-md border border-slate-800 bg-slate-950/70">
+      <div className="grid grid-cols-[120px_minmax(0,1fr)_minmax(0,1fr)] border-b border-slate-800 bg-slate-900/70 text-xs font-semibold uppercase tracking-[0.12em] text-slate-500">
+        <div className="p-3">字段</div>
+        {products.map((product) => (
+          <div className="min-w-0 p-3 text-slate-300" key={product.id}>
+            <span className="block truncate">{product.label}</span>
+            <span className={`mt-1 inline-block rounded-full px-2 py-0.5 text-[10px] ${
+              product.source === "local" ? "bg-emerald-400/10 text-emerald-200" : "bg-cyan-400/10 text-cyan-200"
+            }`}>
+              {product.sourceLabel}
+            </span>
+          </div>
+        ))}
+      </div>
+      {HARDWARE_FIELDS.map((field) => (
+        <div
+          className="grid grid-cols-[120px_minmax(0,1fr)_minmax(0,1fr)] border-b border-slate-800/80 last:border-b-0"
+          key={field.key}
+        >
+          <div className="p-3 text-xs text-slate-500">{field.label}</div>
+          {products.map((product) => (
+            <div className="min-w-0 break-words p-3 text-sm text-slate-200" key={product.id}>
+              <span className={hasHardwareFieldValue(product.specs, field.key) ? "text-slate-200" : "text-amber-300/85"}>
+                {hardwareDisplayValue(product, field)}
+              </span>
+            </div>
+          ))}
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function officialSpecDisplayName(item: OfficialSpecRecord, index: number): string {
+  const record = officialSpecPayload(item);
+  return (
+    [asString(record.brand), asString(record.official_model) || asString(record.model)]
+      .filter(Boolean)
+      .join(" ") ||
+    asString(item.input) ||
+    `产品 ${index + 1}`
+  );
+}
+
+function officialSpecStatusTone(status: unknown): Tone {
+  const value = normalize(status);
+  if (value === "collected" || value === "complete") return "success";
+  if (value.includes("partial") || value.includes("missing") || value.includes("insufficient")) return "warning";
+  if (value.includes("error") || value.includes("failed")) return "danger";
+  if (value.includes("pending") || value.includes("not_connected")) return "warning";
+  return "neutral";
+}
+
+function officialSpecStatusLabel(status: unknown): string {
+  const value = normalize(status);
+  const labels: Record<string, string> = {
+    collected: "已采集",
+    complete: "已采集",
+    partial: "部分采集",
+    partial_collected: "部分采集",
+    insufficient_specs: "规格不足",
+    pending: "待采集",
+    mcp_not_connected: "MCP 未接入",
+    mcp_not_configured: "MCP 未配置",
+    mcp_error: "采集异常",
+    llm_error: "LLM 异常",
+    llm_failed: "LLM 抽取失败",
+    fetch_failed: "抓取被拦截",
+    validation_failed: "解析失败",
+    rate_limited: "限流",
+    missing_url: "缺少链接",
+  };
+  return labels[value] || asString(status, "待采集");
+}
+
+function officialSpecConfidence(item: OfficialSpecRecord): string {
+  const record = officialSpecPayload(item);
+  return asString(item.confidence) || asString(record.confidence) || "pending";
+}
+
+function OfficialSpecResultTable({ records }: { records: OfficialSpecRecord[] }) {
+  if (!records.length) return null;
+  const collected = records.filter((item) => normalize(item.status) === "collected").length;
+
+  return (
+    <div className="rounded-lg border border-cyan-300/25 bg-slate-900/45 p-4">
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <div>
+          <p className="text-xs font-semibold uppercase tracking-[0.16em] text-slate-500">Official Spec MCP</p>
+          <h4 className="mt-2 text-lg font-semibold text-white">官网规格抽取 · 数据来源</h4>
+          <p className="mt-1 text-xs leading-5 text-slate-400">
+            先由联网搜索找到官网 / 高可信候选，再由官网规格 MCP + 大模型抽取硬件字段；具体数值见下方对比表。
+          </p>
+        </div>
+        <StatusBadge label={`已采集 ${collected}/${records.length}`} tone={collected === records.length ? "success" : "warning"} />
+      </div>
+
+      <div className="mt-3 grid gap-2 sm:grid-cols-2">
+        {records.map((item, index) => {
+          const record = officialSpecPayload(item);
+          const extra = asRecord(item);
+          const url = asString(item.source_url) || asString(record.official_url);
+          const missing = [...new Set([...asStrings(item.missing_fields), ...asStrings(record.missing_fields)])];
+          const sourceCount = asNumber(extra.merged_source_count) ?? (url ? 1 : 0);
+          const blocked = normalize(item.status) === "fetch_failed";
+          const failed = normalize(item.status).includes("failed") || normalize(item.status).includes("error");
+          return (
+            <div className="rounded-md border border-slate-800 bg-slate-950/60 p-3" key={`source-${item.input || index}`}>
+              <div className="flex items-center justify-between gap-2">
+                <p className="truncate text-sm font-semibold text-slate-100">{officialSpecDisplayName(item, index)}</p>
+                <StatusBadge label={officialSpecStatusLabel(item.status)} tone={officialSpecStatusTone(item.status)} />
+              </div>
+              <div className="mt-2 flex flex-wrap items-center gap-2">
+                <StatusBadge
+                  label={`可信度 ${CONFIDENCE_CN[normalize(officialSpecConfidence(item))] || officialSpecConfidence(item)}`}
+                  tone={officialSpecConfidence(item) === "high" ? "success" : "warning"}
+                />
+                {sourceCount > 1 ? <StatusBadge label={`合并 ${sourceCount} 个来源`} tone="info" /> : null}
+              </div>
+              {isExternalUrl(url) ? (
+                <a className="mt-2 block truncate text-xs text-cyan-300 underline-offset-2 hover:underline" href={url} rel="noreferrer" target="_blank">
+                  {asString(item.source_domain) || url}
+                </a>
+              ) : (
+                <p className="mt-2 text-xs text-slate-500">官网链接待联网搜索补齐</p>
+              )}
+              {blocked ? (
+                <p className="mt-2 rounded border border-rose-400/30 bg-rose-500/10 px-2 py-1 text-[11px] leading-4 text-rose-200">
+                  ⛔ 该来源被反爬拦截，没抓到页面（不是没有数据）；可换一个高可信来源或接入 Tavily extract 后重试。
+                </p>
+              ) : failed ? (
+                <p className="mt-2 text-[11px] leading-4 text-rose-200/90">该来源抽取失败，未贡献字段。</p>
+              ) : missing.length ? (
+                <p className="mt-2 text-[11px] leading-4 text-amber-200/90">
+                  页面已抓到，但其中没有这些字段（不是被拦截）：{missing.map(fieldLabel).join(" / ")}。可换含该参数的高可信来源补齐。
+                </p>
+              ) : (
+                <p className="mt-2 text-[11px] leading-4 text-emerald-200/90">关键字段已从来源页面抽全。</p>
+              )}
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+function ResearchAgentPlanningDetail({
+  agent,
+  status,
+  trace,
+  report,
+  unresolvedProducts,
+  externalProductCandidates,
+}: {
+  agent: AgentDefinition;
+  status: AgentStatus;
+  trace?: AgentTrace;
+  report: Record<string, unknown>;
+  unresolvedProducts: string[];
+  externalProductCandidates: ExternalProductCandidate[];
+}) {
+  const productLabels = productLabelsFromReport(report, unresolvedProducts);
+  const hardwareProducts = hardwareProductsFromReport(report);
+  const localHardwareProducts = hardwareProducts.filter((product) => product.source === "local");
+  const officialHardwareProducts = hardwareProducts.filter((product) => product.source === "official");
+  const localHardwareAvailable = localHardwareProducts.length >= 2 && localHardwareProducts.every(hasUsefulHardware);
+  const hardwareComparisonAvailable = hardwareProducts.length >= 2 && hardwareProducts.every(hasUsefulHardware);
+  const officialCandidateCount = externalProductCandidates.filter(
+    (item) =>
+      item.candidate_status === "official_candidate_found" ||
+      (item.official_candidates?.length ?? 0) > 0,
+  ).length;
+  const searchCandidateCount = externalProductCandidates.filter(
+    (item) => (item.usable_candidate_count ?? 0) > 0,
+  ).length;
+  const searchMcpActive = externalProductCandidates.length > 0;
+  const officialNeed = !localHardwareAvailable;
+  const knownProductCount = localHardwareProducts.filter(hasUsefulHardware).length;
+  const officialHardwareCount = officialHardwareProducts.filter(hasUsefulHardware).length;
+  const localHardwareStatus =
+    localHardwareAvailable ? "ready" : knownProductCount > 0 ? "partial" : "missing";
+  const targetDataCards = [
+    {
+      title: "官网识别 / 搜索 MCP",
+      tone: officialCandidateCount > 0 ? "官网已识别" : searchMcpActive ? "已搜索" : officialNeed ? "待搜索" : "不需要",
+      body:
+        officialCandidateCount > 0
+          ? `SearchMCP 只处理未命中的输入，已找到 ${officialCandidateCount} 个官网候选；本地命中产品不走搜索。`
+          : searchCandidateCount > 0
+            ? `SearchMCP 已找到 ${searchCandidateCount} 个可用候选，但仍需确认官方实体。`
+            : officialNeed
+              ? "本地未完整命中时会调用 SearchMCP 查找官网候选；找到候选前不生成硬件事实。"
+              : "两款产品已由本地 JSON 命中，当前不需要搜索识别。"
+    },
+    {
+      title: "硬件数据",
+      tone:
+        localHardwareStatus === "ready"
+          ? "已采集"
+          : localHardwareStatus === "partial"
+            ? "部分命中"
+            : officialCandidateCount > 0
+              ? "待规格抽取"
+              : "未命中",
+      body: localHardwareAvailable
+        ? "两款产品均命中本地 JSON，可直接读取重量、传感器、DPI、回报率、连接、续航、微动、点击系统、驱动与板载内存。"
+        : hardwareComparisonAvailable
+          ? `当前硬件对比由本地 JSON ${knownProductCount} 款 + 官网抽取 ${officialHardwareCount} 款组成；每个字段会标注来源和缺失原因。`
+        : knownProductCount > 0
+          ? `当前仅有 ${knownProductCount} 款产品命中本地事实库，未命中产品交给 SearchMCP / OfficialSpecMCP 识别并抽取。`
+          : officialCandidateCount > 0
+            ? "官网候选已识别，但还没有抽取到重量、DPI、回报率等规格字段；等待官网规格 MCP。"
+            : "两款输入均未命中本地产品事实库，当前不能生成硬件参数对比或赢家判断，需要先交给搜索/官网 MCP 识别官方型号。",
+    },
+    {
+      title: "官网规格核验",
+      tone: officialHardwareCount > 0 ? "已采集" : officialCandidateCount > 0 ? "官网已识别" : officialNeed ? "待采集" : "暂不需要",
+      body: officialNeed
+        ? officialHardwareCount > 0
+          ? `OfficialSpecMCP 已抽取 ${officialHardwareCount} 款非本地产品的硬件字段；未披露字段会显示原因，不当作本地事实。`
+          : officialCandidateCount > 0
+            ? "已找到官网候选页面，下一步由官网规格 MCP 抽取参数页、固件更新、驱动说明和地区版本差异。"
+            : "用于确认官方型号、参数页、固件更新、驱动说明和地区版本差异；采集完成前不输出硬件赢家结论。"
+        : "本地已有稳定硬件参数，官网规格只作为后续复核来源，不参与当前基础事实判断。",
+    },
+    {
+      title: "评价与测评情报",
+      tone: "pending",
+      body: "用户口碑、博主测评、握法手感、游戏适配和长期可靠性目前不写死，后续由 ReviewIntel MCP 与 LLM 摘要补齐。",
+    },
+    {
+      title: "实时价格",
+      tone: "pending",
+      body: "价格会随时间变化，当前只规划采集任务，不从本地 JSON 生成性价比结论。",
+    },
+  ];
+  const handoffCards = [
+    "CollectorAgent：先查本地事实库；未命中时生成搜索/官网 MCP 待采集任务。",
+    "EvidenceAgent：把硬件事实、来源状态和待补项整理成可追溯 evidence。",
+    "AnalysisAgent：只分析有 evidence 支撑的硬件差异，不提前输出体验结论。",
+    "QualityAgent：检查 pending 是否披露、结论是否都有证据支撑。",
+  ];
+  const researchQuestion = localHardwareAvailable
+    ? "本次先确认两款电竞鼠标的可验证硬件事实差异，再规划外部数据采集：官网规格用于复核参数，用户评价和博主测评用于体验判断，实时价格用于后续性价比分析。"
+    : hardwareComparisonAvailable
+      ? `本次采用混合来源：本地 JSON 命中 ${knownProductCount} 款，官网规格抽取 ${officialHardwareCount} 款；后续评价测评和实时价格仍等待 MCP。`
+    : officialCandidateCount > 0
+      ? "本次已通过 SearchMCP 找到官网候选；下一步需要官网规格 MCP 从候选页面抽取硬件参数，再进入评价测评、实时价格和质量校验。"
+    : "本次先把两个输入作为待识别产品处理：先规划搜索/官网 MCP 确认官方型号和硬件参数，再进入评价测评、实时价格和质量校验；采集完成前不生成硬件赢家或最终推荐。";
+  const researchSummary = localHardwareAvailable
+    ? (trace?.output_summary || "已规划本地事实读取、官网复核、评价测评、实时价格与质量校验任务。")
+    : hardwareComparisonAvailable
+      ? (trace?.output_summary || "已形成混合硬件事实：本地 JSON + 官网规格 MCP，缺失字段将显示原因。")
+    : officialCandidateCount > 0
+      ? (trace?.output_summary || "SearchMCP 已返回官网候选，硬件规格字段等待官网规格 MCP 抽取。")
+    : (trace?.output_summary || "本地事实库未完整命中，已规划搜索/官网 MCP 识别、规格补齐、评价测评和价格采集任务。");
+  const researchRequirements = RESEARCH_REQUIREMENTS.map((item) => {
+    if (item.name !== "硬件数据") return item;
+    return {
+      ...item,
+      status: hardwareComparisonAvailable ? "complete" : "pending",
+      summary: localHardwareAvailable
+        ? "本地 JSON 已命中两款产品，当前可以展示硬件事实；官网规格后续仅用于复核。"
+        : hardwareComparisonAvailable
+          ? "本地 JSON 与官网规格 MCP 已共同形成硬件对比；缺失字段显示具体原因。"
+        : officialCandidateCount > 0
+          ? "SearchMCP 已找到官网候选，但硬件参数字段尚未抽取；等待官网规格 MCP 后再生成硬件对比。"
+        : "本地 JSON 未完整命中两款产品，硬件参数、官方型号和赢家判断都等待搜索/官网 MCP 采集后再生成。",
+    };
+  });
+
+  return (
+    <section className="rounded-lg border border-cyan-300/25 bg-slate-950/75 p-5">
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div>
+          <p className="text-xs font-semibold uppercase tracking-[0.2em] text-cyan-300">
+            Research Plan
+          </p>
+          <h3 className="mt-2 text-2xl font-semibold text-white">{agent.name}</h3>
+          <p className="mt-1 text-sm text-slate-400">
+            调研规划员：把用户输入拆成可执行的数据任务，明确哪些本地已有、哪些需要后续 MCP 补齐。
+          </p>
+        </div>
+        <StatusBadge label={STATUS_LABEL[status]} tone={STATUS_TONE[status]} />
+      </div>
+
+      <div className="mt-5 rounded-lg border border-amber-400/30 bg-amber-400/10 px-4 py-3 text-sm leading-6 text-amber-100">
+        ResearchAgent 不做最终推荐，不判断谁更适合；它只规划数据需求。用户评价、博主测评、
+        实时价格和长期可靠性当前都是占位，等 MCP 与 LLM 摘要接入后替换为真实结果。
+      </div>
+
+      <div className="mt-5 grid gap-4">
+        <div className="h-fit rounded-lg border border-slate-800 bg-slate-900/45 p-4">
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <div>
+              <p className="text-xs font-semibold uppercase tracking-[0.16em] text-slate-500">
+                Research Target
+              </p>
+              <h4 className="mt-2 text-lg font-semibold text-white">本次调研目标</h4>
+            </div>
+            <StatusBadge label="planning only" tone="info" />
+          </div>
+          <div className="mt-4 grid gap-3 sm:grid-cols-2">
+            {productLabels.map((label, index) => (
+              <div className="rounded-md border border-slate-800 bg-slate-950/60 p-3" key={label}>
+                <p className="text-xs uppercase tracking-[0.16em] text-slate-500">
+                  产品 {index === 0 ? "A" : "B"}
+                </p>
+                <p className="mt-2 text-sm font-semibold text-slate-100">{label}</p>
+              </div>
+            ))}
+          </div>
+          <div className="mt-4 rounded-md border border-slate-800 bg-slate-950/60 p-4">
+            <p className="text-xs font-semibold uppercase tracking-[0.16em] text-slate-500">
+              Research Question
+            </p>
+            <p className="mt-2 text-sm leading-6 text-slate-200">
+              {researchQuestion}
+            </p>
+          </div>
+          <div className="mt-4 grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+            {targetDataCards.map((item) => (
+              <article
+                className="rounded-md border border-slate-800 bg-slate-950/60 p-3"
+                key={item.title}
+              >
+                <div className="flex items-start justify-between gap-3">
+                  <h5 className="text-sm font-semibold text-slate-100">{item.title}</h5>
+                  <span className="rounded-full border border-cyan-300/25 bg-cyan-300/10 px-2 py-0.5 text-xs font-semibold text-cyan-100">
+                    {item.tone}
+                  </span>
+                </div>
+                <p className="mt-2 text-xs leading-5 text-slate-400">{item.body}</p>
+              </article>
+            ))}
+          </div>
+          <div className="mt-4 rounded-md border border-slate-800 bg-slate-950/60 p-4">
+            <p className="text-xs font-semibold uppercase tracking-[0.16em] text-slate-500">
+              Handoff
+            </p>
+            <div className="mt-3 grid gap-2 md:grid-cols-2">
+              {handoffCards.map((item) => (
+                <div className="rounded-md border border-slate-800/80 bg-slate-900/50 px-3 py-2 text-xs leading-5 text-slate-300" key={item}>
+                  {item}
+                </div>
+              ))}
+            </div>
+          </div>
+          <p className="mt-4 text-sm leading-6 text-slate-400">
+            当前计划摘要：{researchSummary}
+          </p>
+        </div>
+      </div>
+
+      <div className="mt-5 grid gap-4 xl:grid-cols-2">
+        <div className="rounded-lg border border-slate-800 bg-slate-900/45 p-4">
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <div>
+              <p className="text-xs font-semibold uppercase tracking-[0.16em] text-slate-500">
+                Requirement Matrix
+              </p>
+              <h4 className="mt-2 text-lg font-semibold text-white">数据需求矩阵</h4>
+            </div>
+            <StatusBadge label="pending 不等于失败" tone="warning" />
+          </div>
+          <div className="mt-4 space-y-3">
+            {researchRequirements.map((item) => (
+              <article
+                className="rounded-md border border-slate-800 bg-slate-950/55 p-3 transition hover:border-cyan-300/40"
+                key={item.name}
+              >
+                <div className="flex flex-wrap items-start justify-between gap-3">
+                  <div>
+                    <div className="flex flex-wrap items-center gap-2">
+                      <h5 className="font-semibold text-slate-100">{item.name}</h5>
+                      <StatusBadge label={item.status} tone={researchTone(item.status)} />
+                    </div>
+                    <p className="mt-1 text-xs text-slate-500">{item.owner}</p>
+                  </div>
+                  <StatusBadge
+                    label={
+                      item.status === "complete"
+                        ? "已准备"
+                        : item.status === "partial"
+                          ? "部分事实"
+                          : "等待采集"
+                    }
+                    tone={researchTone(item.status)}
+                  />
+                </div>
+                <p className="mt-3 text-sm leading-6 text-slate-400">{item.summary}</p>
+                <div className="mt-3 flex flex-wrap gap-2">
+                  {item.fields.slice(0, 6).map((field) => (
+                    <span
+                      className="rounded-full border border-slate-700 bg-slate-900 px-2 py-1 text-xs text-slate-300"
+                      key={field}
+                    >
+                      {field}
+                    </span>
+                  ))}
+                </div>
+              </article>
+            ))}
+          </div>
+        </div>
+
+        <div className="space-y-4">
+          <div className="rounded-lg border border-slate-800 bg-slate-900/45 p-4">
+            <p className="text-xs font-semibold uppercase tracking-[0.16em] text-slate-500">
+              Source Priority
+            </p>
+            <h4 className="mt-2 text-lg font-semibold text-white">数据来源优先级</h4>
+            <div className="mt-4 space-y-3">
+              {SOURCE_PRIORITIES.map((source) => (
+                <div className="grid gap-3 rounded-md border border-slate-800 bg-slate-950/55 p-3 sm:grid-cols-[56px_1fr]" key={source.level}>
+                  <div className="flex h-10 w-10 items-center justify-center rounded-full border border-cyan-300/35 bg-cyan-400/10 text-sm font-semibold text-cyan-100">
+                    {source.level}
+                  </div>
+                  <div>
+                    <div className="flex flex-wrap items-center gap-2">
+                      <p className="font-semibold text-slate-100">{source.name}</p>
+                      <StatusBadge label={source.credibility} tone={source.level === "P3" ? "warning" : "success"} />
+                    </div>
+                    <p className="mt-1 text-sm leading-6 text-slate-400">{source.usage}</p>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+
+          <div className="rounded-lg border border-slate-800 bg-slate-900/45 p-4">
+            <div className="flex flex-wrap items-center justify-between gap-3">
+              <div>
+                <p className="text-xs font-semibold uppercase tracking-[0.16em] text-slate-500">
+                  Handoff
+                </p>
+                <h4 className="mt-2 text-lg font-semibold text-white">交给后续 Agent 的任务包</h4>
+              </div>
+              <StatusBadge label={`${RESEARCH_HANDOFFS.length} tasks`} tone="info" />
+            </div>
+            <div className="mt-4 space-y-3">
+              {RESEARCH_HANDOFFS.map((handoff, index) => (
+                <div className="flex gap-3 rounded-md border border-slate-800 bg-slate-950/55 p-3" key={handoff.agent}>
+                  <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full border border-cyan-300/35 text-xs font-semibold text-cyan-100">
+                    {index + 1}
+                  </span>
+                  <div>
+                    <p className="font-semibold text-slate-100">{handoff.agent}</p>
+                    <p className="mt-1 text-sm leading-6 text-slate-400">{handoff.task}</p>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        </div>
+      </div>
+
+    </section>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// 其余 Agent 详情面板：尽量读取工作流已产出的真实数据；MCP 未接入的部分标占位，
+// AnalysisAgent 的 SWOT / AI 解读区预留给 LLM 阶段（不填假数据）。
+// ---------------------------------------------------------------------------
+
+type AgentDetailProps = {
+  agent: AgentDefinition;
+  status: AgentStatus;
+  trace?: AgentTrace;
+  report: Record<string, unknown>;
+  evidenceList: Record<string, unknown>[];
+  claims: Claim[];
+  resolvedProducts: Record<string, unknown>[];
+  unresolvedProducts: string[];
+  searchMcpResults: SearchMcpResult[];
+  externalProductCandidates: ExternalProductCandidate[];
+  quality?: QualityResult;
+  onNavigate?: (key: string) => void;
+};
+
+const MATCH_BY_LABEL: Record<string, string> = {
+  id: "产品 ID",
+  model: "官方型号",
+  alias: "别名",
+  community_alias: "玩家简称",
+  family: "系列",
+  brand: "品牌",
+};
+
+const SOURCE_TYPE_LABEL: Record<string, string> = {
+  official: "官方",
+  news: "新闻",
+  review: "测评",
+  report: "报告 / 财报",
+  ecommerce: "电商",
+  user_review: "用户评论",
+};
+
+const CREDIBILITY_LABEL: Record<string, string> = {
+  high: "高可信",
+  medium: "中可信",
+  low: "低可信",
+};
+
+const QUALITY_CHECK_LABEL: Record<string, string> = {
+  all_claims_have_evidence: "结论都有证据",
+  all_evidence_ids_valid: "引用证据有效",
+  all_claims_faithful: "结论忠实(无幻觉)",
+  all_matrix_claims_faithful: "矩阵数字可溯源",
+  all_competitors_covered: "竞品全覆盖",
+  all_dimensions_covered: "维度覆盖",
+  missing_dimensions_disclosed: "缺口已披露",
+  product_matrix_not_empty: "产品矩阵非空",
+  business_matrix_not_empty: "商业矩阵非空",
+  no_high_severity_risk: "无高危风险",
+  high_severity_risk_disclosed: "高危风险已披露",
+};
+
+function credibilityTone(value: string): Tone {
+  const key = normalize(value);
+  if (key === "high") return "success";
+  if (key === "medium") return "info";
+  if (key === "low") return "warning";
+  return "neutral";
+}
+
+function isExternalUrl(url: string): boolean {
+  return /^https?:\/\//i.test(url);
+}
+
+function asStrings(value: unknown): string[] {
+  return Array.isArray(value) ? value.map((item) => asString(item)).filter(Boolean) : [];
+}
+
+function candidateStatusTone(status: string): Tone {
+  const value = normalize(status);
+  if (value === "official_candidate_found") return "success";
+  if (value === "review_candidate_found") return "info";
+  if (value.includes("low_confidence") || value.includes("off_category")) return "warning";
+  if (value.includes("error") || value.includes("rate_limited")) return "danger";
+  return "neutral";
+}
+
+function candidateStatusLabel(status: string): string {
+  const value = normalize(status);
+  const labels: Record<string, string> = {
+    official_candidate_found: "官网已识别",
+    review_candidate_found: "测评候选",
+    low_confidence_candidates: "低可信候选",
+    off_category_suspected: "疑似非鼠标",
+    no_candidates: "未找到候选",
+    mcp_not_connected: "未连接",
+    mcp_not_configured: "未配置",
+    mcp_error: "调用异常",
+    mcp_http_error: "请求异常",
+    rate_limited: "限流",
+  };
+  return labels[value] || asString(status, "候选");
+}
+
+function AgentDetailFrame({
+  agent,
+  status,
+  eyebrow,
+  description,
+  children,
+}: {
+  agent: AgentDefinition;
+  status: AgentStatus;
+  eyebrow: string;
+  description: string;
+  children: ReactNode;
+}) {
+  return (
+    <section className="rounded-lg border border-cyan-300/25 bg-slate-950/75 p-5">
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div>
+          <p className="text-xs font-semibold uppercase tracking-[0.2em] text-cyan-300">{eyebrow}</p>
+          <h3 className="mt-2 text-2xl font-semibold text-white">{agent.name}</h3>
+          <p className="mt-1 text-sm text-slate-400">{description}</p>
+        </div>
+        <StatusBadge label={STATUS_LABEL[status]} tone={STATUS_TONE[status]} />
+      </div>
+      <div className="mt-5 grid gap-4">{children}</div>
+    </section>
+  );
+}
+
+function StatTile({ label, value, tone = "neutral" }: { label: string; value: ReactNode; tone?: Tone }) {
+  const toneText =
+    tone === "success"
+      ? "text-emerald-200"
+      : tone === "warning"
+        ? "text-amber-200"
+        : tone === "danger"
+          ? "text-rose-200"
+          : tone === "info"
+            ? "text-cyan-200"
+            : "text-slate-100";
+  return (
+    <div className="rounded-md border border-slate-800 bg-slate-950/60 p-3 text-center">
+      <p className={`text-2xl font-semibold ${toneText}`}>{value}</p>
+      <p className="mt-1 text-xs text-slate-500">{label}</p>
+    </div>
+  );
+}
+
+function EmptyAgentNote({ label }: { label: string }) {
+  return (
+    <div className="rounded-md border border-dashed border-slate-700 bg-slate-950/60 p-4 text-sm leading-6 text-slate-500">
+      {label}
+    </div>
+  );
+}
+
+type CompareSlot = {
+  label: string;
+  resolved: boolean;
+  specs?: Record<string, unknown>;
+  source?: HardwareProductSource;
+  sourceLabel?: string;
+  collectionStatus?: string;
+  missingFields?: string[];
+};
+
+type CollectorIdentityCard =
+  | {
+      type: "local";
+      input: string;
+      title: string;
+      matchedBy: string;
+      matchedValue: string;
+      confidence: string;
+      clickSystem: string;
+      aliasWarning: string;
+      disambiguation: string;
+    }
+  | {
+      type: "search";
+      input: string;
+      title: string;
+      url: string;
+      domain: string;
+      candidateStatus: string;
+    };
+
+function CollectorCompareTable({ slots }: { slots: CompareSlot[] }) {
+  const cols = "grid-cols-[120px_minmax(0,1fr)_minmax(0,1fr)]";
+  return (
+    <div className="overflow-hidden rounded-md border border-slate-800 bg-slate-950/70">
+      <div className={`grid ${cols} border-b border-slate-800 bg-slate-900/70 text-xs font-semibold uppercase tracking-[0.12em] text-slate-500`}>
+        <div className="p-3">字段</div>
+        {slots.map((slot, index) => (
+          <div className="min-w-0 p-3" key={index}>
+            <span className="block truncate text-slate-300">{slot.label}</span>
+            <span
+              className={`mt-1 inline-block rounded-full px-2 py-0.5 text-[10px] ${
+                slot.resolved
+                  ? slot.source === "official"
+                    ? "bg-cyan-400/10 text-cyan-200"
+                    : "bg-emerald-400/10 text-emerald-200"
+                  : "bg-amber-400/10 text-amber-200"
+              }`}
+            >
+              {slot.resolved ? slot.sourceLabel || "已识别" : "本地未收录"}
+            </span>
+          </div>
+        ))}
+      </div>
+      {HARDWARE_FIELDS.map((field) => (
+        <div className={`grid ${cols} border-b border-slate-800/80 last:border-b-0`} key={field.key}>
+          <div className="p-3 text-xs text-slate-500">{field.label}</div>
+          {slots.map((slot, index) => (
+            <div className="min-w-0 break-words p-3 text-sm" key={index}>
+              {slot.resolved && slot.specs ? (
+                <span className={hasHardwareFieldValue(slot.specs, field.key) ? "text-slate-200" : "text-amber-300/85"}>
+                  {hardwareDisplayValue(
+                    {
+                      id: `${slot.label}-${index}`,
+                      label: slot.label,
+                      specs: slot.specs,
+                      source: slot.source || "local",
+                      sourceLabel: slot.sourceLabel || "本地 JSON",
+                      collectionStatus: slot.collectionStatus,
+                      missingFields: slot.missingFields || [],
+                    },
+                    field,
+                  )}
+                </span>
+              ) : (
+                <span className="text-amber-300/80">本地未收录</span>
+              )}
+            </div>
+          ))}
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function ExternalCandidateTable({ items }: { items: ExternalProductCandidate[] }) {
+  if (!items.length) return null;
+  return (
+    <div className="overflow-hidden rounded-md border border-slate-800 bg-slate-950/70">
+      <div className="grid grid-cols-[150px_minmax(0,1.4fr)_150px_minmax(0,1fr)] border-b border-slate-800 bg-slate-900/70 text-xs font-semibold uppercase tracking-[0.12em] text-slate-500">
+        <div className="p-3">输入</div>
+        <div className="p-3">官网候选</div>
+        <div className="p-3">网站</div>
+        <div className="p-3">下一步</div>
+      </div>
+      {items.map((item, index) => {
+        const best = item.best_candidate || item.official_candidates?.[0] || item.review_candidates?.[0];
+        const url = asString(best?.url);
+        const title = asString(best?.title, "暂无候选");
+        const domain = asString(best?.domain, "—");
+        const status = asString(item.candidate_status, "pending");
+        return (
+          <div
+            className="grid grid-cols-[150px_minmax(0,1.4fr)_150px_minmax(0,1fr)] border-b border-slate-800/80 last:border-b-0"
+            key={`${item.original_input || index}-${status}`}
+          >
+            <div className="min-w-0 p-3 text-sm font-semibold text-slate-200">{asString(item.original_input, `产品 ${index + 1}`)}</div>
+            <div className="min-w-0 p-3 text-sm">
+              {isExternalUrl(url) ? (
+                <a className="block truncate text-cyan-300 underline-offset-2 hover:underline" href={url} rel="noreferrer" target="_blank">
+                  {title}
+                </a>
+              ) : (
+                <span className="block truncate text-slate-400">{title}</span>
+              )}
+              <div className="mt-1">
+                <StatusBadge
+                  label={candidateStatusLabel(status)}
+                  tone={candidateStatusTone(status)}
+                />
+              </div>
+            </div>
+            <div className="min-w-0 p-3 text-sm text-slate-300">{domain}</div>
+            <div className="min-w-0 p-3 text-xs leading-5 text-slate-400">
+              {asString(item.next_action, item.consumable_by_next_agent ? "交给官网规格 MCP" : "等待进一步确认")}
+            </div>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+function CollectorAgentDetail({
+  agent,
+  status,
+  trace,
+  report,
+  resolvedProducts,
+  unresolvedProducts,
+  externalProductCandidates,
+}: AgentDetailProps) {
+  const identities = asRecords(report.product_identification);
+  const resolved = resolvedProducts.length
+    ? resolvedProducts
+    : identities.filter((item) => !normalize(item.data_status).startsWith("official_spec"));
+  const facts = hardwareProductsFromReport(report);
+  const localFacts = facts.filter((item) => item.source === "local");
+  const officialFacts = facts.filter((item) => item.source === "official");
+  const officialSpecRecords = officialSpecRecordsFromReport(report);
+  const substeps = asRecords(trace?.substeps);
+  const pending = asRecords(report.pending_data);
+  const resolvedCount = localFacts.length;
+  const hardwareReadyCount = facts.filter(hasUsefulHardware).length;
+  const officialCollectedCount = officialSpecRecords.filter((item) => normalize(item.status) === "collected").length;
+  // 产品 A/B 两个对比位：已命中的带硬件数据在前，未命中的作为待搜索位补足。
+  const compareSlots: CompareSlot[] = [
+    ...facts.map((item) => ({
+      label: item.label,
+      resolved: true,
+      specs: item.specs,
+      source: item.source,
+      sourceLabel: item.sourceLabel,
+      collectionStatus: item.collectionStatus,
+      missingFields: item.missingFields,
+    })),
+    ...unresolvedProducts.map((query) => ({ label: query, resolved: false })),
+  ].slice(0, 2);
+  const localIdentityCards: CollectorIdentityCard[] = resolved.map((item) => {
+      const input = asString(item.original_input);
+      const brand = asString(item.official_brand) || asString(item.brand);
+      const model = asString(item.official_model) || asString(item.model) || "本地命中产品";
+      return {
+        type: "local" as const,
+        input,
+        title: [brand, model].filter(Boolean).join(" "),
+        matchedBy: asString(item.matched_by),
+        matchedValue: asString(item.matched_value),
+        confidence: asString(item.match_confidence) || asString(item.official_name_confidence),
+        clickSystem: asString(item.click_system),
+        aliasWarning: asString(item.alias_warning),
+        disambiguation: asString(item.disambiguation_note),
+      };
+    });
+  const searchIdentityCards: CollectorIdentityCard[] = externalProductCandidates.map((candidate) => {
+    const best = candidate.best_candidate || candidate.official_candidates?.[0] || candidate.review_candidates?.[0];
+    const input = asString(candidate.original_input);
+    return {
+      type: "search" as const,
+      input,
+      title: asString(best?.title, input || "官网候选"),
+      url: asString(best?.url),
+      domain: asString(best?.domain),
+      candidateStatus: asString(candidate.candidate_status, "pending"),
+    };
+  });
+  const unresolvedIdentityCards: CollectorIdentityCard[] = unresolvedProducts
+    .filter(
+      (query) =>
+        !externalProductCandidates.some(
+          (candidate) => normalize(candidate.original_input) === normalize(query),
+        ),
+    )
+    .map((query) => ({
+      type: "search" as const,
+      input: query,
+      title: query,
+      url: "",
+      domain: "",
+      candidateStatus: "pending",
+    }));
+  const identityCards: CollectorIdentityCard[] = [
+    ...localIdentityCards,
+    ...searchIdentityCards,
+    ...unresolvedIdentityCards,
+  ].slice(0, 2);
+  const showCompare = compareSlots.length >= 2;
+  const officialCandidateCount = externalProductCandidates.filter(
+    (item) =>
+      item.candidate_status === "official_candidate_found" ||
+      (item.official_candidates?.length ?? 0) > 0,
+  ).length;
+  const hasRun = resolved.length > 0 || facts.length > 0 || substeps.length > 0 || externalProductCandidates.length > 0 || officialSpecRecords.length > 0;
+
+  return (
+    <AgentDetailFrame
+      agent={agent}
+      status={status}
+      eyebrow="Collector"
+      description="采集与实体识别员：读取本地事实库；未命中时调用联网搜索找官网候选，再交给官网规格 MCP 抽取硬件参数。"
+    >
+      {!hasRun ? (
+        <EmptyAgentNote label="CollectorAgent 还未运行或暂无识别结果。开始分析后这里会显示实体识别、本地事实读取和采集流水线。" />
+      ) : (
+        <>
+          <div className="rounded-lg border border-slate-800 bg-slate-900/45 p-4">
+            <div className="flex flex-wrap items-center justify-between gap-3">
+              <div>
+                <p className="text-xs font-semibold uppercase tracking-[0.16em] text-slate-500">Entity Resolution</p>
+                <h4 className="mt-2 text-lg font-semibold text-white">输入识别 / 官网候选</h4>
+              </div>
+              <div className="flex flex-wrap gap-2">
+                <StatusBadge label={`本地命中 ${resolved.length} 款`} tone={resolved.length >= 2 ? "success" : resolved.length ? "warning" : "neutral"} />
+                {officialFacts.length ? (
+                  <StatusBadge label={`官网抽取 ${officialFacts.length} 款`} tone="info" />
+                ) : null}
+                {externalProductCandidates.length ? (
+                  <StatusBadge
+                    label={`官网候选 ${officialCandidateCount} 个`}
+                    tone={officialCandidateCount ? "success" : "warning"}
+                  />
+                ) : null}
+                {officialSpecRecords.length ? (
+                  <StatusBadge
+                    label={`官网规格 ${officialCollectedCount}/${officialSpecRecords.length}`}
+                    tone={officialCollectedCount === officialSpecRecords.length ? "success" : "warning"}
+                  />
+                ) : null}
+              </div>
+            </div>
+            {unresolvedProducts.length > 0 ? (
+              <div className="mt-4 rounded-md border border-amber-400/30 bg-amber-400/10 p-3">
+                <p className="text-xs font-semibold text-amber-100">未命中本地 JSON 的输入</p>
+                {unresolvedProducts.length ? (
+                  <div className="mt-2 flex flex-wrap gap-2">
+                    {unresolvedProducts.map((q) => (
+                      <StatusBadge key={q} label={q} tone="warning" />
+                    ))}
+                  </div>
+                ) : null}
+                <p className="mt-2 text-[11px] leading-4 text-amber-100/80">
+                  联网搜索会先查找官网候选；候选只用于识别官方页面，不直接写入重量、DPI、回报率等硬件字段。
+                </p>
+              </div>
+            ) : null}
+            {externalProductCandidates.length ? (
+              <div className="mt-4">
+                <ExternalCandidateTable items={externalProductCandidates} />
+              </div>
+            ) : null}
+            <div className="mt-4 grid gap-3 sm:grid-cols-2">
+              {identityCards.map((item, index) => {
+                const isLocal = item.type === "local";
+                return (
+                  <div className="rounded-md border border-slate-800 bg-slate-950/60 p-3" key={`${item.input}-${index}`}>
+                    <p className="text-xs uppercase tracking-[0.16em] text-slate-500">产品 {index === 0 ? "A" : "B"}</p>
+                    {item.input ? (
+                      <p className="mt-1 text-xs text-slate-500">
+                        输入「{item.input}」<span className="text-slate-600">→</span>
+                      </p>
+                    ) : null}
+                    {item.type === "search" && isExternalUrl(item.url) ? (
+                      <a
+                        className="mt-0.5 block truncate text-sm font-semibold text-cyan-300 underline-offset-2 hover:underline"
+                        href={item.url}
+                        rel="noreferrer"
+                        target="_blank"
+                      >
+                        {item.title}
+                      </a>
+                    ) : (
+                      <p className="mt-0.5 text-sm font-semibold text-slate-100">{item.title}</p>
+                    )}
+                    <div className="mt-2 flex flex-wrap gap-2">
+                      {isLocal ? (
+                        <>
+                          {item.matchedBy ? (
+                            <StatusBadge
+                              label={`${MATCH_BY_LABEL[item.matchedBy] || item.matchedBy}${item.matchedValue ? `: ${item.matchedValue}` : ""}`}
+                              tone="info"
+                            />
+                          ) : null}
+                          {item.confidence ? (
+                            <StatusBadge
+                              label={`可信 ${item.confidence}`}
+                              tone={item.confidence === "verified" ? "success" : "warning"}
+                            />
+                          ) : null}
+                          {item.clickSystem ? <StatusBadge label={`点击 ${item.clickSystem}`} tone="neutral" /> : null}
+                        </>
+                      ) : (
+                        <>
+                          <StatusBadge label="联网搜索" tone="success" />
+                          <StatusBadge label={candidateStatusLabel(asString(item.candidateStatus))} tone={candidateStatusTone(asString(item.candidateStatus))} />
+                          {item.domain ? <StatusBadge label={item.domain} tone="neutral" /> : null}
+                        </>
+                      )}
+                    </div>
+                    {isLocal && item.aliasWarning ? (
+                      <p className="mt-2 rounded border border-amber-400/30 bg-amber-400/10 px-2 py-1 text-[11px] leading-4 text-amber-100">
+                        ⚠ {item.aliasWarning}
+                      </p>
+                    ) : null}
+                    {isLocal && item.disambiguation ? (
+                      <p className="mt-1 text-[11px] leading-4 text-slate-500">消歧：{item.disambiguation}</p>
+                    ) : null}
+                    {!isLocal ? (
+                      <p className="mt-2 text-[11px] leading-4 text-slate-500">
+                        官网候选已找到，硬件参数交给官网规格 MCP 抽取；未找到字段会说明原因。
+                      </p>
+                    ) : null}
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+
+          {substeps.length ? (
+            <div className="rounded-lg border border-slate-800 bg-slate-900/45 p-4">
+              <p className="text-xs font-semibold uppercase tracking-[0.16em] text-slate-500">Pipeline</p>
+              <h4 className="mt-2 text-lg font-semibold text-white">采集子步骤</h4>
+              <div className="mt-4 grid gap-2 sm:grid-cols-2 xl:grid-cols-3">
+                {substeps.map((step, index) => {
+                  const rawName = asString(step.name) || `step-${index + 1}`;
+                  const rawStatus = asString(step.status) || "pending";
+                  const name = PIPELINE_STEP_LABEL[rawName] || rawName;
+                  const stepStatus = SUBSTEP_STATUS_LABEL[rawStatus] || rawStatus;
+                  const count = asNumber(step.count);
+                  return (
+                    <div className="rounded-md border border-slate-800 bg-slate-950/60 p-3" key={rawName}>
+                      <div className="flex items-center justify-between gap-2">
+                        <p className="text-sm font-semibold text-slate-100">{name}</p>
+                        <StatusBadge label={stepStatus} tone={researchTone(rawStatus)} />
+                      </div>
+                      {typeof count === "number" ? <p className="mt-1 text-xs text-slate-500">数量：{count}</p> : null}
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          ) : null}
+
+          <OfficialSpecResultTable records={officialSpecRecords} />
+
+          <div className="grid gap-4 lg:grid-cols-2">
+            <div className="rounded-lg border border-cyan-300/25 bg-cyan-400/10 p-4">
+              <div className="flex items-start justify-between gap-3">
+                <p className="text-sm font-semibold text-cyan-100">硬件数据</p>
+                <StatusBadge
+                  label={hardwareReadyCount >= 2 ? "已采集" : officialCollectedCount ? "部分采集" : officialCandidateCount ? "待规格抽取" : "待采集"}
+                  tone={hardwareReadyCount >= 2 ? "success" : officialCollectedCount ? "info" : officialCandidateCount ? "info" : "warning"}
+                />
+              </div>
+              <p className="mt-1 text-xs leading-5 text-slate-400">
+                {resolvedCount >= 2
+                  ? "两款产品均已从本地 JSON 读取稳定硬件字段，可进入对比。"
+                  : hardwareReadyCount >= 2
+                    ? `硬件数据由本地 JSON ${resolvedCount} 款 + 官网抽取 ${officialFacts.length} 款组成；缺失字段会说明原因。`
+                  : officialCollectedCount
+                    ? "官网规格 MCP 已抽取到部分硬件字段；未找到的字段会显示官网未披露、抽取失败等原因。"
+                  : resolvedCount === 1
+                    ? "仅命中 1 款，另一款需搜索 / 官网 MCP 识别并抽取。"
+                    : officialCandidateCount
+                      ? "联网搜索已识别官网候选；重量、DPI、回报率等规格字段等待官网规格 MCP 抽取。"
+                      : "两款输入均未命中本地事实库，无硬件字段可读，等待搜索 / 官网 MCP。"}
+              </p>
+              <div className="mt-3 grid grid-cols-2 gap-2">
+                <StatTile label="本地命中" value={resolvedCount} tone={resolvedCount >= 2 ? "success" : resolvedCount ? "warning" : "neutral"} />
+                <StatTile label="官网抽取" value={officialFacts.length} tone={officialFacts.length ? "info" : "neutral"} />
+              </div>
+              <div className="mt-2 grid grid-cols-1 gap-2">
+                <StatTile
+                  label="硬件字段 / 款"
+                  value={hardwareReadyCount >= 1 ? HARDWARE_FIELDS.length : "—"}
+                  tone={hardwareReadyCount >= 1 ? "info" : "neutral"}
+                />
+              </div>
+            </div>
+            <div className="rounded-lg border border-cyan-300/20 bg-slate-950/60 p-4">
+              <div className="flex items-start justify-between gap-3">
+                <p className="text-sm font-semibold text-slate-100">官网规格核验</p>
+                <StatusBadge
+                  label={officialCollectedCount ? "官网已采集" : officialCandidateCount ? "官网已识别" : resolvedCount >= 2 ? "复核可选" : "待搜索"}
+                  tone={officialCollectedCount || officialCandidateCount || resolvedCount >= 2 ? "success" : "warning"}
+                />
+              </div>
+              <p className="mt-1 text-xs leading-5 text-slate-400">
+                {officialCandidateCount
+                  ? officialCollectedCount
+                    ? "官网规格 MCP 已从官方页面抽取规格字段，并写入本次工作流的结构化结果。"
+                    : "已拿到官网候选链接，下一步由官网规格 MCP 从该页面抽取规格表并写入硬件字段。"
+                  : resolvedCount >= 2
+                    ? "本地 JSON 已具备稳定规格，官网核验作为后续复核来源。"
+                    : "未找到官网候选前，不生成官方型号和硬件参数结论。"}
+              </p>
+              <div className="mt-3 flex flex-wrap gap-2">
+                <StatusBadge label="联网搜索 已启用" tone="success" />
+                {officialSpecRecords.length ? <StatusBadge label="官网规格抽取 已启用" tone="success" /> : null}
+                <StatusBadge label={`官网候选 ${externalProductCandidates.length} 个`} tone={externalProductCandidates.length ? "info" : "neutral"} />
+                {pending.length ? <StatusBadge label={`待补 ${pending.length} 项`} tone="warning" /> : null}
+              </div>
+            </div>
+          </div>
+
+          {showCompare ? (
+            <div className="rounded-lg border border-slate-800 bg-slate-900/45 p-4">
+              <p className="text-xs font-semibold uppercase tracking-[0.16em] text-slate-500">Hardware Comparison</p>
+              <h4 className="mt-2 text-lg font-semibold text-white">硬件参数对比</h4>
+              <p className="mt-1 text-xs leading-5 text-slate-400">
+                {resolvedCount >= 2
+                  ? "两款产品的本地 JSON 硬件字段逐项对比（事实底座，非最终购买建议；体验 / 价格等待 MCP）。"
+                  : hardwareReadyCount >= 2
+                    ? "表格混合展示本地 JSON 与官网抽取字段；每列标注来源，缺失字段显示原因。"
+                  : resolvedCount >= 1
+                    ? "已命中产品展示本地 JSON 硬件字段；未命中产品先显示本地未收录，后续由官网抽取补上来源。"
+                    : "两款产品均未命中本地 JSON，表格保留对比位；未找到字段会标注原因。"}
+              </p>
+              <div className="mt-3">
+                {hardwareReadyCount >= 2 ? (
+                  <HardwareMiniTable products={facts} />
+                ) : (
+                  <CollectorCompareTable slots={compareSlots} />
+                )}
+              </div>
+            </div>
+          ) : null}
+        </>
+      )}
+    </AgentDetailFrame>
+  );
+}
+
+function EvidenceAgentDetail({ agent, status, evidenceList, report }: AgentDetailProps) {
+  const items = evidenceList;
+  const officialSpecRecords = officialSpecRecordsFromReport(report);
+  const isPending = (e: Record<string, unknown>) =>
+    Boolean(e.pending_research) || normalize(e.data_status) === "pending_research";
+  const verified = items.filter((e) => !isPending(e));
+  const pendingCount = items.length - verified.length;
+  const credCount = (level: string) => items.filter((e) => normalize(e.credibility) === level).length;
+  const sourceGroups = Object.entries(
+    items.reduce<Record<string, number>>((acc, item) => {
+      const key = asString(item.source_type) || asString(item.used_by_agent) || "unknown";
+      acc[key] = (acc[key] || 0) + 1;
+      return acc;
+    }, {}),
+  ).sort((a, b) => b[1] - a[1]);
+  const officialEvidenceCount = items.filter((item) => {
+    const sourceType = normalize(item.source_type);
+    const agentName = normalize(item.used_by_agent);
+    const title = normalize(item.source_title);
+    return sourceType === "official" || agentName.includes("officialspec") || title.includes("official");
+  }).length;
+  const cols = "grid-cols-[64px_minmax(0,1fr)_88px_84px_minmax(0,1.1fr)]";
+
+  return (
+    <AgentDetailFrame
+      agent={agent}
+      status={status}
+      eyebrow="Evidence"
+      description="证据结构化员：把采集结果统一成可追溯证据，标注来源、可信度与待补状态。"
+    >
+      {items.length === 0 ? (
+        <EmptyAgentNote label="EvidenceAgent 还未产出证据。开始分析后这里会列出每条结构化证据及其来源、可信度与溯源链接。" />
+      ) : (
+        <>
+          <div className="grid grid-cols-2 gap-2 sm:grid-cols-5">
+            <StatTile label="证据总数" value={items.length} tone="info" />
+            <StatTile label="已验证" value={verified.length} tone="success" />
+            <StatTile label="待补 (pending)" value={pendingCount} tone={pendingCount ? "warning" : "neutral"} />
+            <StatTile label="高可信" value={credCount("high")} tone="success" />
+            <StatTile label="低可信" value={credCount("low")} tone={credCount("low") ? "warning" : "neutral"} />
+          </div>
+
+          <div className="grid gap-4 lg:grid-cols-2">
+            <div className="rounded-lg border border-slate-800 bg-slate-900/45 p-4">
+              <div className="flex flex-wrap items-center justify-between gap-3">
+                <div>
+                  <p className="text-xs font-semibold uppercase tracking-[0.16em] text-slate-500">Source Mix</p>
+                  <h4 className="mt-2 text-lg font-semibold text-white">证据来源分布</h4>
+                </div>
+                <StatusBadge label={`官网证据 ${officialEvidenceCount}`} tone={officialEvidenceCount ? "success" : "neutral"} />
+              </div>
+              <div className="mt-3 grid gap-2 sm:grid-cols-2">
+                {sourceGroups.length ? (
+                  sourceGroups.map(([source, count]) => (
+                    <div className="rounded-md border border-slate-800 bg-slate-950/60 p-3" key={source}>
+                      <p className="text-sm font-semibold text-slate-100">
+                        {SOURCE_TYPE_LABEL[normalize(source)] || source}
+                      </p>
+                      <p className="mt-1 text-2xl font-semibold text-cyan-200">{count}</p>
+                    </div>
+                  ))
+                ) : (
+                  <EmptyAgentNote label="暂无来源统计。" />
+                )}
+              </div>
+            </div>
+            <div className="rounded-lg border border-cyan-300/25 bg-cyan-400/10 p-4">
+              <p className="text-xs font-semibold uppercase tracking-[0.16em] text-cyan-200">Official Spec Evidence</p>
+              <h4 className="mt-2 text-lg font-semibold text-white">官网规格证据状态</h4>
+              <p className="mt-2 text-sm leading-6 text-slate-300">
+                {officialSpecRecords.length
+                  ? `已接收 ${officialSpecRecords.length} 条官网规格记录，其中 ${officialSpecRecords.filter((item) => normalize(item.status) === "collected").length} 条完成抽取。`
+                  : "当前没有官网规格记录；如果产品不在本地库，会先由联网搜索找官网候选，再交给官网规格 MCP。"}
+              </p>
+              <div className="mt-3 flex flex-wrap gap-2">
+                {officialSpecRecords.map((item, index) => (
+                  <StatusBadge
+                    key={`${item.input || index}-${item.status || "official"}`}
+                    label={`${officialSpecDisplayName(item, index)} · ${officialSpecStatusLabel(item.status)}`}
+                    tone={officialSpecStatusTone(item.status)}
+                  />
+                ))}
+              </div>
+            </div>
+          </div>
+
+          <div className="overflow-hidden rounded-md border border-slate-800 bg-slate-950/70">
+            <div className={`grid ${cols} border-b border-slate-800 bg-slate-900/70 px-3 py-2 text-xs font-semibold uppercase tracking-[0.1em] text-slate-500`}>
+              <div>ID</div>
+              <div>维度 / 产品</div>
+              <div>来源</div>
+              <div>可信度</div>
+              <div>溯源</div>
+            </div>
+            <div className="max-h-[420px] overflow-y-auto">
+              {items.map((e, index) => {
+                const id = asString(e.evidence_id) || `EV${index + 1}`;
+                const dim = asString(e.related_dimension) || asString(e.dimension);
+                const platform = asString(e.platform);
+                const sourceType = asString(e.source_type);
+                const credibility = asString(e.credibility);
+                const url = asString(e.source_url);
+                const title = asString(e.source_title) || asString(e.source);
+                return (
+                  <div className={`grid ${cols} items-center border-b border-slate-800/70 px-3 py-2 text-xs last:border-b-0`} key={id}>
+                    <div className="font-mono text-slate-400">{id}</div>
+                    <div className="min-w-0">
+                      <p className="truncate text-slate-200">{dim || "—"}</p>
+                      <p className="truncate text-slate-500">{platform}</p>
+                    </div>
+                    <div>
+                      <StatusBadge label={SOURCE_TYPE_LABEL[normalize(sourceType)] || sourceType || "—"} tone="neutral" />
+                    </div>
+                    <div>
+                      <StatusBadge label={CREDIBILITY_LABEL[normalize(credibility)] || credibility || "—"} tone={credibilityTone(credibility)} />
+                    </div>
+                    <div className="min-w-0">
+                      {isExternalUrl(url) ? (
+                        <a className="block truncate text-cyan-300 underline-offset-2 hover:underline" href={url} target="_blank" rel="noreferrer">
+                          {title || url}
+                        </a>
+                      ) : (
+                        <span className="block truncate text-slate-500">
+                          {title || url || "本地 / 占位来源"}
+                          {isPending(e) ? "（待 MCP）" : ""}
+                        </span>
+                      )}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+          <p className="text-xs leading-5 text-slate-500">
+            对比模式下证据为本地结构化硬规格事实，未用 LLM 二次改写数值；外部真实链接将在 MCP 接入后替换占位来源。
+          </p>
+        </>
+      )}
+    </AgentDetailFrame>
+  );
+}
+
+function AnalysisAgentDetail({ agent, status, report, claims }: AgentDetailProps) {
+  const dimensionEntries = Object.entries(asRecord(asRecord(report.product_matrix).dimensions)).slice(0, 6);
+  const hardware = asRecord(report.hardware_fact_comparison);
+  const verdicts = asRecord(hardware.hardware_advantages);
+  const diffSummary = asStrings(hardware.hardware_diff_summary);
+  const scoreFlow = asRecord(report.score_flow);
+  const baseline = asRecord(scoreFlow.baseline_score);
+  const finalScore = asRecord(scoreFlow.final_score);
+  const scoreProducts = asRecords(scoreFlow.products);
+  const risks = asRecords(report.risk_flags);
+  const officialSpecRecords = officialSpecRecordsFromReport(report);
+  const hasRun = dimensionEntries.length > 0 || diffSummary.length > 0 || claims.length > 0 || officialSpecRecords.length > 0;
+
+  const verdictLabels: Array<[string, string]> = [
+    ["strongest_hardware", "硬件最强"],
+    ["best_software", "软件最佳"],
+    ["best_click_system", "点击系统最佳"],
+    ["strongest_overall", "综合最强"],
+  ];
+
+  return (
+    <AgentDetailFrame
+      agent={agent}
+      status={status}
+      eyebrow="Analysis"
+      description="分析师：只分析有证据支撑的硬件事实差异；体验 / 价格结论等待 MCP，SWOT 与 AI 解读等待 LLM 接入。"
+    >
+      {!hasRun ? (
+        <EmptyAgentNote label="AnalysisAgent 还未产出硬件对比。开始分析后这里会显示对比矩阵、硬件裁决、分数流与风险标记。" />
+      ) : (
+        <>
+          {diffSummary.length ? (
+            <div className="rounded-lg border border-slate-800 bg-slate-900/45 p-4">
+              <p className="text-xs font-semibold uppercase tracking-[0.16em] text-slate-500">Hardware Verdict</p>
+              <h4 className="mt-2 text-lg font-semibold text-white">硬件对比结论</h4>
+              <div className="mt-3 flex flex-wrap gap-2">
+                {verdictLabels.map(([key, label]) =>
+                  asString(verdicts[key]) ? (
+                    <StatusBadge key={key} label={`${label}：${asString(verdicts[key])}`} tone="success" />
+                  ) : null,
+                )}
+              </div>
+              <ul className="mt-3 space-y-2">
+                {diffSummary.map((line, index) => (
+                  <li className="rounded-md border border-slate-800 bg-slate-950/60 px-3 py-2 text-sm leading-6 text-slate-300" key={index}>
+                    {line}
+                  </li>
+                ))}
+              </ul>
+            </div>
+          ) : null}
+
+          {claims.length ? (
+            <div className="rounded-lg border border-slate-800 bg-slate-900/45 p-4">
+              <div className="flex flex-wrap items-center justify-between gap-3">
+                <div>
+                  <p className="text-xs font-semibold uppercase tracking-[0.16em] text-slate-500">Evidence-bound Claims</p>
+                  <h4 className="mt-2 text-lg font-semibold text-white">证据绑定结论</h4>
+                </div>
+                <StatusBadge label={`${claims.length} claims`} tone="success" />
+              </div>
+              <div className="mt-3 grid gap-2">
+                {claims.slice(0, 8).map((claim, index) => {
+                  const evidenceIds = asStrings(claim.evidence_ids);
+                  return (
+                    <div className="rounded-md border border-slate-800 bg-slate-950/60 p-3" key={claim.claim_id || index}>
+                      <div className="flex flex-wrap items-start justify-between gap-2">
+                        <div className="min-w-0">
+                          <p className="font-mono text-xs text-cyan-200">{claim.claim_id || `claim-${index + 1}`}</p>
+                          <p className="mt-1 text-sm leading-6 text-slate-200">{claim.content}</p>
+                        </div>
+                        <StatusBadge label={claim.dimension || "hardware"} tone="info" />
+                      </div>
+                      <div className="mt-2 flex flex-wrap gap-1">
+                        {evidenceIds.length ? (
+                          evidenceIds.map((id) => <StatusBadge key={id} label={id} tone="neutral" />)
+                        ) : (
+                          <StatusBadge label="missing evidence_ids" tone="danger" />
+                        )}
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+              <p className="mt-3 text-xs leading-5 text-slate-500">
+                AnalysisAgent 只展示绑定 evidence_ids 的结论；没有评价/价格证据时，不提前生成握法、适合人群或性价比结论。
+              </p>
+            </div>
+          ) : null}
+
+          {dimensionEntries.length ? (
+            <div className="rounded-lg border border-slate-800 bg-slate-900/45 p-4">
+              <p className="text-xs font-semibold uppercase tracking-[0.16em] text-slate-500">Comparison Matrix</p>
+              <h4 className="mt-2 text-lg font-semibold text-white">对比矩阵（每格绑定证据）</h4>
+              <div className="mt-3 space-y-3">
+                {dimensionEntries.map(([dimension, platformMap]) => (
+                  <div className="rounded-md border border-slate-800 bg-slate-950/55 p-3" key={dimension}>
+                    <p className="text-sm font-semibold text-slate-100">{dimension}</p>
+                    <div className="mt-2 grid gap-2 sm:grid-cols-2">
+                      {Object.entries(asRecord(platformMap)).map(([platform, cell]) => {
+                        const c = asRecord(cell);
+                        const evIds = asStrings(c.evidence_ids);
+                        return (
+                          <div className="rounded border border-slate-800/80 bg-slate-900/50 p-2" key={platform}>
+                            <p className="text-xs font-semibold text-cyan-200">{platform}</p>
+                            <p className="mt-1 line-clamp-3 text-xs leading-5 text-slate-400">
+                              {asString(c.analysis) || asString(c.summary) || "—"}
+                            </p>
+                            {evIds.length ? <p className="mt-1 font-mono text-[10px] text-slate-500">{evIds.join(" · ")}</p> : null}
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          ) : null}
+
+          <div className="grid gap-4 lg:grid-cols-2">
+            <div className="rounded-lg border border-slate-800 bg-slate-900/45 p-4">
+              <p className="text-xs font-semibold uppercase tracking-[0.16em] text-slate-500">Score Flow</p>
+              <h4 className="mt-2 text-lg font-semibold text-white">分数流（非最终购买建议）</h4>
+              <div className="mt-3 grid grid-cols-2 gap-2">
+                <StatTile label={asString(baseline.label) || "本地硬件基线"} value={formatValue(baseline.score, "—")} tone="info" />
+                <StatTile label="Agent 最终建议" value={formatValue(finalScore.score, "—")} tone="success" />
+              </div>
+              {scoreProducts.length ? (
+                <div className="mt-3 space-y-2">
+                  {scoreProducts.map((item, index) => (
+                    <div className="rounded-md border border-slate-800 bg-slate-950/60 p-3" key={asString(item.product_id) || index}>
+                      <div className="flex items-center justify-between gap-3">
+                        <p className="truncate text-sm font-semibold text-slate-100">
+                          {asString(item.name) || asString(item.product_id) || `产品 ${index + 1}`}
+                        </p>
+                        <span className="text-lg font-semibold text-cyan-200">
+                          {formatValue(item.final_score ?? item.score, "—")}
+                        </span>
+                      </div>
+                      <p className="mt-1 text-xs leading-5 text-slate-500">
+                        {asString(item.score_note) || asString(item.explanation) || "分数来自已采集硬件事实；体验和价格 pending 时不做修正。"}
+                      </p>
+                    </div>
+                  ))}
+                </div>
+              ) : null}
+              <p className="mt-2 text-xs leading-5 text-slate-500">MCP 维度 pending 时 Agent 调整披露为 0，不做口碑 / 性价比修正。</p>
+            </div>
+            <div className="rounded-lg border border-slate-800 bg-slate-900/45 p-4">
+              <p className="text-xs font-semibold uppercase tracking-[0.16em] text-slate-500">Risk Flags</p>
+              <h4 className="mt-2 text-lg font-semibold text-white">风险标记</h4>
+              <div className="mt-3 space-y-2">
+                {risks.length ? (
+                  risks.slice(0, 5).map((risk, index) => (
+                    <div className="rounded-md border border-slate-800 bg-slate-950/60 p-2" key={index}>
+                      <div className="flex items-center justify-between gap-2">
+                        <p className="text-xs font-semibold text-slate-200">{asString(risk.risk_type) || "risk"}</p>
+                        <StatusBadge label={asString(risk.severity) || "—"} tone={normalize(risk.severity) === "high" ? "danger" : "warning"} />
+                      </div>
+                      <p className="mt-1 line-clamp-2 text-xs leading-5 text-slate-400">{asString(risk.description)}</p>
+                    </div>
+                  ))
+                ) : (
+                  <EmptyAgentNote label="暂无风险标记。" />
+                )}
+              </div>
+            </div>
+          </div>
+        </>
+      )}
+
+      <div className="rounded-lg border border-dashed border-violet-400/35 bg-violet-400/10 p-4">
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <div>
+            <p className="text-xs font-semibold uppercase tracking-[0.16em] text-violet-200">AI Interpretation · 预留</p>
+            <h4 className="mt-2 text-lg font-semibold text-white">SWOT / AI 解读区</h4>
+          </div>
+          <StatusBadge label="LLM 阶段接入" tone="info" />
+        </div>
+        <div className="mt-3 grid gap-2 sm:grid-cols-2 lg:grid-cols-4">
+          {["S 优势", "W 劣势", "O 机会", "T 威胁"].map((label) => (
+            <div className="rounded-md border border-violet-400/25 bg-slate-950/50 p-3" key={label}>
+              <p className="text-sm font-semibold text-violet-100">{label}</p>
+              <p className="mt-1 text-xs leading-5 text-slate-500">LLM 基于硬件证据生成，每点绑定 evidence_id；O/T 依赖口碑 / 价格，标 pending。</p>
+            </div>
+          ))}
+        </div>
+        <p className="mt-3 text-xs leading-5 text-slate-500">
+          🟣 此区由 AnalysisAgent 的 LLM 子步骤填充：SWOT、对比解读叙述、prompt 与 token 消耗。当前为预留框，不占位假数据。
+        </p>
+      </div>
+    </AgentDetailFrame>
+  );
+}
+
+function VerificationAgentDetail({ agent, status, report }: AgentDetailProps) {
+  const faithfulness = asRecord(report.faithfulness_report);
+  const rate = asNumber(faithfulness.faithfulness_rate);
+  const ratePct = typeof rate === "number" ? Math.round(rate * 100) : null;
+  const claimResults = asRecords(faithfulness.claim_results);
+  const matrixIssues = asRecords(faithfulness.matrix_issues);
+  const checked = asNumber(faithfulness.checked_claim_count) ?? claimResults.length;
+  const supported = asNumber(faithfulness.supported_claim_count);
+  const unsupported = asNumber(faithfulness.unsupported_claim_count);
+  const weak = asNumber(faithfulness.weak_claim_count);
+  const hasRun = claimResults.length > 0 || typeof rate === "number";
+
+  return (
+    <AgentDetailFrame
+      agent={agent}
+      status={status}
+      eyebrow="Verification"
+      description="事实校验员：检查每条结论是否被所引证据支撑，拦截无来源的数字（幻觉）。"
+    >
+      {!hasRun ? (
+        <EmptyAgentNote label="VerificationAgent 还未运行。开始分析后这里会显示忠实率、逐条校验结果与矩阵数字校验。" />
+      ) : (
+        <>
+          <div className="rounded-lg border border-slate-800 bg-slate-900/45 p-4">
+            <div className="flex flex-wrap items-center justify-between gap-3">
+              <div>
+                <p className="text-xs font-semibold uppercase tracking-[0.16em] text-slate-500">Faithfulness</p>
+                <h4 className="mt-2 text-lg font-semibold text-white">忠实性校验</h4>
+              </div>
+              <StatusBadge
+                label={`忠实率 ${ratePct ?? "—"}%`}
+                tone={ratePct === null ? "neutral" : ratePct >= 90 ? "success" : ratePct >= 70 ? "warning" : "danger"}
+              />
+            </div>
+            {ratePct !== null ? (
+              <div className="mt-3 h-2 overflow-hidden rounded-full bg-slate-800">
+                <div
+                  className={`h-full rounded-full ${ratePct >= 90 ? "bg-emerald-400" : ratePct >= 70 ? "bg-amber-400" : "bg-rose-400"}`}
+                  style={{ width: `${ratePct}%` }}
+                />
+              </div>
+            ) : null}
+            <div className="mt-4 grid grid-cols-2 gap-2 sm:grid-cols-4">
+              <StatTile label="已检结论" value={checked} tone="info" />
+              <StatTile label="支撑" value={supported ?? "—"} tone="success" />
+              <StatTile label="未支撑(幻觉)" value={unsupported ?? "—"} tone={unsupported ? "danger" : "neutral"} />
+              <StatTile label="弱支撑" value={weak ?? "—"} tone={weak ? "warning" : "neutral"} />
+            </div>
+          </div>
+
+          {claimResults.length ? (
+            <div className="rounded-lg border border-slate-800 bg-slate-900/45 p-4">
+              <p className="text-xs font-semibold uppercase tracking-[0.16em] text-slate-500">Per-claim</p>
+              <h4 className="mt-2 text-lg font-semibold text-white">逐条结论校验</h4>
+              <div className="mt-3 space-y-2">
+                {claimResults.slice(0, 12).map((r, index) => {
+                  const supportedItem = r.supported === true;
+                  const weakItem = Boolean(r.weak);
+                  const grounding = asNumber(r.grounding_score);
+                  const missing = asStrings(r.missing_numbers);
+                  return (
+                    <div className="flex items-start justify-between gap-3 rounded-md border border-slate-800 bg-slate-950/60 px-3 py-2" key={asString(r.claim_id) || index}>
+                      <div className="min-w-0">
+                        <p className="font-mono text-xs text-slate-300">{asString(r.claim_id) || `claim-${index + 1}`}</p>
+                        <p className="mt-0.5 text-xs text-slate-500">
+                          {asString(r.reason) || "grounded"}
+                          {missing.length ? ` · 缺失数字 ${missing.join(", ")}` : ""}
+                          {typeof grounding === "number" ? ` · 词面覆盖 ${Math.round(grounding * 100)}%` : ""}
+                        </p>
+                      </div>
+                      <StatusBadge
+                        label={supportedItem ? (weakItem ? "弱支撑" : "支撑") : "未支撑"}
+                        tone={supportedItem ? (weakItem ? "warning" : "success") : "danger"}
+                      />
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          ) : null}
+
+          <div className="grid gap-4 lg:grid-cols-2">
+            <div className="rounded-lg border border-slate-800 bg-slate-900/45 p-4">
+              <p className="text-xs font-semibold uppercase tracking-[0.16em] text-slate-500">Matrix Numbers</p>
+              <h4 className="mt-2 text-lg font-semibold text-white">矩阵数字校验</h4>
+              {matrixIssues.length ? (
+                <div className="mt-3 space-y-2">
+                  {matrixIssues.map((issue, index) => (
+                    <div className="rounded-md border border-rose-400/30 bg-rose-500/10 px-3 py-2 text-xs leading-5 text-rose-100" key={index}>
+                      {asString(issue.matrix)} · {asString(issue.platform)} · {asString(issue.dimension)}：缺失数字 {asStrings(issue.missing_numbers).join(", ") || "—"}
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <p className="mt-3 rounded-md border border-emerald-400/25 bg-emerald-400/10 px-3 py-2 text-sm text-emerald-100">
+                  矩阵文案中的数字均可在所引证据中找到，无幻觉数字。
+                </p>
+              )}
+            </div>
+            <div className="rounded-lg border border-cyan-300/25 bg-cyan-400/10 p-4">
+              <p className="text-sm font-semibold text-cyan-100">校验规则</p>
+              <ul className="mt-2 space-y-1 text-xs leading-5 text-slate-300">
+                <li>· 结论里出现的数字必须出现在所引证据中，否则判「未支撑」并交质检打回。</li>
+                <li>· 词面覆盖过低记为「弱支撑」（软信号，不打回），避免误杀合理改写。</li>
+                <li>· 校验确定性、无依赖：无论 LLM 是否开启，行为一致。</li>
+              </ul>
+            </div>
+          </div>
+        </>
+      )}
+    </AgentDetailFrame>
+  );
+}
+
+function QualityAgentDetail({ agent, status, report, quality }: AgentDetailProps) {
+  const q = asRecord(quality);
+  const checks = Object.entries(asRecord(q.checked_items));
+  const passedCount = checks.filter(([, v]) => v === true).length;
+  const score = asNumber(q.quality_score) ?? asNumber(q.score);
+  const qStatus = asString(q.status) || asString(report.quality_status) || "pending";
+  const rejectTo = asString(q.reject_to) || asString(q.target_agent);
+  const required = asStrings(q.required_actions);
+  const limitations = asStrings(q.limitations);
+  const iteration = asNumber(asRecord(report.metrics).iteration_count) ?? 0;
+  const approved = qStatus === "approved" || qStatus === "approved_with_limitations";
+  const hasRun = checks.length > 0;
+
+  return (
+    <AgentDetailFrame
+      agent={agent}
+      status={status}
+      eyebrow="Quality"
+      description="质量门控员：跑规则检查，决定通过、有限通过或打回上游 Agent 重做（上限 3 次后降级有限报告）。"
+    >
+      {!hasRun ? (
+        <EmptyAgentNote label="QualityAgent 还未运行。开始分析后这里会显示门控检查、报告可信度分与打回闭环。" />
+      ) : (
+        <>
+          <div className="grid gap-4 lg:grid-cols-[260px_minmax(0,1fr)]">
+            <div className="rounded-lg border border-slate-800 bg-slate-900/45 p-4 text-center">
+              <p className="text-xs font-semibold uppercase tracking-[0.16em] text-slate-500">Report Credibility</p>
+              <p className={`mt-3 text-4xl font-semibold ${approved ? "text-emerald-200" : "text-amber-200"}`}>{score ?? "—"}</p>
+              <p className="mt-1 text-xs text-slate-500">报告可信度 / 分析质量分</p>
+              <div className="mt-3 flex justify-center">
+                <StatusBadge label={qStatus} tone={qualityTone(qStatus)} />
+              </div>
+              <p className="mt-3 rounded-md border border-amber-400/25 bg-amber-400/10 px-2 py-1.5 text-[11px] leading-4 text-amber-100">
+                注意：这是「报告可信度」，不是产品综合评分。
+              </p>
+            </div>
+
+            <div className="rounded-lg border border-slate-800 bg-slate-900/45 p-4">
+              <div className="flex items-center justify-between">
+                <h4 className="text-lg font-semibold text-white">门控检查</h4>
+                <StatusBadge label={`${passedCount}/${checks.length} 通过`} tone={passedCount === checks.length ? "success" : "warning"} />
+              </div>
+              <div className="mt-3 grid grid-cols-1 gap-1.5 sm:grid-cols-2">
+                {checks.map(([key, value]) => {
+                  const ok = value === true;
+                  return (
+                    <div className="flex items-center gap-2 rounded-md border border-slate-800 bg-slate-950/60 px-3 py-1.5 text-xs" key={key}>
+                      <span className={ok ? "text-emerald-300" : "text-rose-300"}>{ok ? "✓" : "✗"}</span>
+                      <span className="text-slate-300">{QUALITY_CHECK_LABEL[key] || key}</span>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          </div>
+
+          <div className="rounded-lg border border-amber-400/30 bg-amber-400/10 p-4">
+            <div className="flex flex-wrap items-center justify-between gap-3">
+              <p className="text-sm font-semibold text-amber-100">反馈闭环</p>
+              <StatusBadge label={`迭代 ${iteration} / 3`} tone={iteration >= 3 ? "danger" : "warning"} />
+            </div>
+            {rejectTo ? (
+              <div className="mt-3 flex items-center gap-2 text-xs">
+                <StatusBadge label="QualityAgent" tone="neutral" />
+                <span className="text-amber-200">↩ 打回</span>
+                <StatusBadge label={rejectTo} tone="warning" />
+              </div>
+            ) : (
+              <p className="mt-3 text-xs leading-5 text-emerald-100">本轮无需打回；如有 pending 数据会降低可信度但不打回。</p>
+            )}
+            {required.length ? (
+              <ul className="mt-3 space-y-1 text-xs leading-5 text-amber-100/90">
+                {required.map((action, index) => (
+                  <li key={index}>· {action}</li>
+                ))}
+              </ul>
+            ) : null}
+            <p className="mt-3 text-[11px] leading-4 text-amber-100/70">连续 3 次自动修复仍不达标时，降级为 partial_report 并披露限制，不阻塞流程。</p>
+          </div>
+
+          {limitations.length ? (
+            <div className="rounded-lg border border-slate-800 bg-slate-900/45 p-4">
+              <p className="text-xs font-semibold uppercase tracking-[0.16em] text-slate-500">Limitations</p>
+              <div className="mt-2 flex flex-wrap gap-2">
+                {limitations.map((lim) => (
+                  <StatusBadge key={lim} label={lim} tone="warning" />
+                ))}
+              </div>
+            </div>
+          ) : null}
+        </>
+      )}
+    </AgentDetailFrame>
+  );
+}
+
+function ReportAgentDetail({ agent, status, report, onNavigate }: AgentDetailProps) {
+  const execSummary = asStrings(report.executive_summary);
+  const rec = asRecord(report.final_recommendation);
+  const finalScores = asRecords(report.final_score);
+  const metrics = asRecord(report.metrics);
+  const summary = asRecord(report.summary);
+  const quality = asString(report.quality_status) || "pending";
+  const hasReport = execSummary.length > 0 || finalScores.length > 0 || Object.keys(rec).length > 0;
+  const pct = (value: unknown) => {
+    const n = asNumber(value);
+    return typeof n === "number" ? `${Math.round(n * 100)}%` : "—";
+  };
+
+  return (
+    <AgentDetailFrame
+      agent={agent}
+      status={status}
+      eyebrow="Report"
+      description="报告撰写员：整合已验证的硬件事实、证据链与质量门控，输出最终竞品报告（不新增证据）。"
+    >
+      {!hasReport ? (
+        <EmptyAgentNote label="ReportAgent 还未生成报告。工作流跑完后这里会显示执行摘要、最终建议、评分与指标。" />
+      ) : (
+        <>
+          <div className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-cyan-300/25 bg-cyan-400/10 p-4">
+            <div>
+              <p className="text-sm font-semibold text-cyan-100">最终报告状态：{quality}</p>
+              <p className="mt-1 text-xs text-slate-400">
+                证据 {formatValue(summary.evidence_count, "—")} 条 · claims {formatValue(summary.claim_count, "—")} 条 · pending {formatValue(summary.pending_count, "—")} 项
+              </p>
+            </div>
+            {onNavigate ? (
+              <button
+                className="rounded-md bg-cyan-300 px-4 py-2 text-sm font-semibold text-slate-950 transition hover:bg-cyan-200"
+                onClick={() => onNavigate("report")}
+                type="button"
+              >
+                查看完整报告
+              </button>
+            ) : null}
+          </div>
+
+          {execSummary.length ? (
+            <div className="rounded-lg border border-slate-800 bg-slate-900/45 p-4">
+              <p className="text-xs font-semibold uppercase tracking-[0.16em] text-slate-500">Executive Summary</p>
+              <h4 className="mt-2 text-lg font-semibold text-white">执行摘要</h4>
+              <ul className="mt-3 space-y-2">
+                {execSummary.map((line, index) => (
+                  <li className="rounded-md border border-slate-800 bg-slate-950/60 px-3 py-2 text-sm leading-6 text-slate-300" key={index}>
+                    {line}
+                  </li>
+                ))}
+              </ul>
+            </div>
+          ) : null}
+
+          <div className="grid gap-4 lg:grid-cols-2">
+            <div className="rounded-lg border border-slate-800 bg-slate-900/45 p-4">
+              <p className="text-xs font-semibold uppercase tracking-[0.16em] text-slate-500">Final Recommendation</p>
+              <h4 className="mt-2 text-lg font-semibold text-white">最终建议</h4>
+              <p className="mt-2 text-sm font-semibold text-cyan-200">{asString(rec.recommended_product) || "待定"}</p>
+              {asString(rec.reason) ? <p className="mt-1 text-xs leading-5 text-slate-400">{asString(rec.reason)}</p> : null}
+              {asStrings(rec.top_reasons).length ? (
+                <ul className="mt-2 space-y-1 text-xs leading-5 text-slate-300">
+                  {asStrings(rec.top_reasons).map((reason, index) => (
+                    <li key={index}>· {reason}</li>
+                  ))}
+                </ul>
+              ) : null}
+              {asStrings(rec.cautions).length ? (
+                <div className="mt-2 rounded-md border border-amber-400/25 bg-amber-400/10 p-2">
+                  <p className="text-[11px] font-semibold text-amber-100">注意</p>
+                  <ul className="mt-1 space-y-1 text-[11px] leading-4 text-amber-100/90">
+                    {asStrings(rec.cautions).map((caution, index) => (
+                      <li key={index}>· {caution}</li>
+                    ))}
+                  </ul>
+                </div>
+              ) : null}
+            </div>
+
+            <div className="rounded-lg border border-slate-800 bg-slate-900/45 p-4">
+              <p className="text-xs font-semibold uppercase tracking-[0.16em] text-slate-500">Score &amp; Metrics</p>
+              <h4 className="mt-2 text-lg font-semibold text-white">评分与指标</h4>
+              {finalScores.length ? (
+                <div className="mt-3 grid grid-cols-2 gap-2">
+                  {finalScores.slice(0, 2).map((s, index) => (
+                    <StatTile key={index} label={asString(s.product) || `产品 ${index + 1}`} value={formatValue(s.score, "—")} tone="info" />
+                  ))}
+                </div>
+              ) : null}
+              <div className="mt-2 grid grid-cols-3 gap-2">
+                <StatTile label="引用率" value={pct(metrics.citation_rate)} tone="success" />
+                <StatTile label="覆盖率" value={pct(metrics.coverage_rate)} tone="info" />
+                <StatTile label="忠实率" value={pct(metrics.faithfulness_rate)} tone="success" />
+              </div>
+              <p className="mt-2 text-[11px] leading-4 text-slate-500">评分为本地硬件事实基线，非最终购买建议；引用率 / 忠实率为报告可信度指标。</p>
+            </div>
+          </div>
+
+          <div className="rounded-lg border border-dashed border-violet-400/35 bg-violet-400/10 p-4 text-xs leading-5 text-slate-400">
+            🟣 SWOT 摘要与 AI 叙述将在 LLM 阶段由 AnalysisAgent 产出后并入本报告。
+          </div>
+        </>
+      )}
+    </AgentDetailFrame>
+  );
+}
+
+function GenericAgentDetail({ agent, status, trace }: AgentDetailProps) {
+  return (
+    <section className="rounded-lg border border-slate-800 bg-slate-950/75 p-5">
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div>
+          <p className="text-xs font-semibold uppercase tracking-[0.2em] text-cyan-300">Agent Detail</p>
+          <h3 className="mt-2 text-2xl font-semibold text-white">{agent.name}</h3>
+          <p className="mt-1 text-sm text-slate-400">{agent.role}</p>
+        </div>
+        <StatusBadge label={STATUS_LABEL[status]} tone={STATUS_TONE[status]} />
+      </div>
+      <div className="mt-5 grid gap-4 md:grid-cols-3">
+        <div className="rounded-lg border border-slate-800 bg-slate-900/60 p-4">
+          <p className="text-xs font-semibold uppercase tracking-[0.16em] text-slate-500">输入</p>
+          <p className="mt-2 text-sm leading-6 text-slate-300">{agent.input}</p>
+        </div>
+        <div className="rounded-lg border border-slate-800 bg-slate-900/60 p-4">
+          <p className="text-xs font-semibold uppercase tracking-[0.16em] text-slate-500">输出</p>
+          <p className="mt-2 text-sm leading-6 text-slate-300">{agent.output}</p>
+        </div>
+        <div className="rounded-lg border border-slate-800 bg-slate-900/60 p-4">
+          <p className="text-xs font-semibold uppercase tracking-[0.16em] text-slate-500">当前摘要</p>
+          <p className="mt-2 text-sm leading-6 text-slate-300">
+            {trace?.output_summary || "完整报告在「竞品分析报告」页查看；该 Agent 的中间产物已并入最终报告。"}
+          </p>
+        </div>
+      </div>
+    </section>
+  );
+}
+
+function AgentDetailPlaceholder(props: AgentDetailProps) {
+  switch (props.agent.name) {
+    case "ResearchAgent":
+      return (
+        <ResearchAgentPlanningDetail
+          agent={props.agent}
+          report={props.report}
+          status={props.status}
+          trace={props.trace}
+          unresolvedProducts={props.unresolvedProducts}
+          externalProductCandidates={props.externalProductCandidates}
+        />
+      );
+    case "CollectorAgent":
+      return <CollectorAgentDetail {...props} />;
+    case "EvidenceAgent":
+      return <EvidenceAgentDetail {...props} />;
+    case "AnalysisAgent":
+      return <AnalysisAgentDetail {...props} />;
+    case "VerificationAgent":
+      return <VerificationAgentDetail {...props} />;
+    case "QualityAgent":
+      return <QualityAgentDetail {...props} />;
+    case "ReportAgent":
+      return <ReportAgentDetail {...props} />;
+    default:
+      return <GenericAgentDetail {...props} />;
+  }
+}
+
+function AgentWorkbench({
+  selectedAgent,
+  onOpenAgent,
+  currentAgent,
+  agentStatuses,
+  traces,
+}: {
+  selectedAgent: string;
+  onOpenAgent: (agentName: string) => void;
+  currentAgent: string;
+  agentStatuses: Record<string, AgentStatus>;
+  traces: Record<string, AgentTrace>;
+}) {
+  const selected = AGENTS.find((agent) => agent.name === selectedAgent) ?? AGENTS[0];
+
+  return (
+    <section className="mt-5 rounded-lg border border-slate-800 bg-slate-950/70 p-5">
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <div>
+          <p className="text-xs font-semibold uppercase tracking-[0.2em] text-cyan-300">
+            Agent Cards
+          </p>
+          <h3 className="mt-2 text-xl font-semibold text-white">七个 Agent 任务卡片</h3>
+        </div>
+        <p className="text-sm text-slate-500">
+          点击左侧控制台 Agent 任务栏或下方卡片，会进入对应 Agent 的独立详情页。
+        </p>
+      </div>
+      <div className="mt-4">
+        <AgentCardGrid
+          agentStatuses={agentStatuses}
+          currentAgent={currentAgent}
+          onSelectAgent={onOpenAgent}
+          selectedAgent={selected.name}
+          traces={traces}
+        />
+      </div>
+    </section>
+  );
+}
+
+function CompetitiveReportEntry({
+  hasReport,
+  onNavigate,
+}: {
+  hasReport: boolean;
+  onNavigate: (key: string) => void;
+}) {
+  return (
+    <section className="mt-5 rounded-lg border border-cyan-300/25 bg-slate-950/75 p-5">
+      <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
+        <div>
+          <p className="text-xs font-semibold uppercase tracking-[0.2em] text-cyan-300">
+            Competitive Report
+          </p>
+          <h3 className="mt-2 text-2xl font-semibold text-white">竞品分析报告</h3>
+          <p className="mt-2 text-sm leading-6 text-slate-400">
+            Agent 工作流完成后，最终报告会汇总硬件事实、证据限制、pending 数据和综合建议。
+          </p>
+        </div>
+        <button
+          className={`rounded-md px-4 py-2 text-sm font-semibold transition ${
+            hasReport
+              ? "bg-cyan-300 text-slate-950 hover:bg-cyan-200"
+              : "cursor-not-allowed border border-slate-700 bg-slate-900/80 text-slate-500"
+          }`}
+          disabled={!hasReport}
+          onClick={() => hasReport && onNavigate("report")}
+          type="button"
+        >
+          {hasReport ? "查看最终报告" : "等待报告生成"}
+        </button>
+      </div>
+    </section>
+  );
+}
+
+function AgentDetailPage({
+  agent,
+  status,
+  trace,
+  report,
+  evidenceList,
+  claims,
+  resolvedProducts,
+  unresolvedProducts,
+  searchMcpResults,
+  externalProductCandidates,
+  quality,
+  onNavigate,
+  onBack,
+}: {
+  agent: AgentDefinition;
+  status: AgentStatus;
+  trace?: AgentTrace;
+  report: Record<string, unknown>;
+  evidenceList: Record<string, unknown>[];
+  claims: Claim[];
+  resolvedProducts: Record<string, unknown>[];
+  unresolvedProducts: string[];
+  searchMcpResults: SearchMcpResult[];
+  externalProductCandidates: ExternalProductCandidate[];
+  quality?: QualityResult;
+  onNavigate?: (key: string) => void;
+  onBack: () => void;
+}) {
+  return (
+    <section className="mx-auto max-w-7xl">
+      <div className="mb-5 flex flex-col gap-3 rounded-lg border border-slate-800 bg-slate-950/75 p-5 lg:flex-row lg:items-center lg:justify-between">
+        <div>
+          <p className="text-xs font-semibold uppercase tracking-[0.2em] text-cyan-300">
+            Agent Detail Page
+          </p>
+          <h2 className="mt-2 text-2xl font-semibold text-white">{agent.name}</h2>
+          <p className="mt-1 text-sm text-slate-400">{agent.role}</p>
+        </div>
+        <button
+          className="rounded-md border border-slate-700 bg-slate-900/80 px-4 py-2 text-sm font-semibold text-slate-200 transition hover:border-cyan-300/50 hover:text-cyan-100"
+          onClick={onBack}
+          type="button"
+        >
+          返回 Agent 工作流
+        </button>
+      </div>
+      <AgentDetailPlaceholder
+        agent={agent}
+        report={report}
+        status={status}
+        trace={trace}
+        evidenceList={evidenceList}
+        claims={claims}
+        resolvedProducts={resolvedProducts}
+        unresolvedProducts={unresolvedProducts}
+        searchMcpResults={searchMcpResults}
+        externalProductCandidates={externalProductCandidates}
+        quality={quality}
+        onNavigate={onNavigate}
+      />
+    </section>
   );
 }
 
 export function WorkflowPage({
   taskId,
   displayTaskId,
+  agentDetailName,
+  onAgentOpen,
+  onAgentDetailClose,
+  selectedAgent,
+  onSelectedAgentChange,
+  onSidebarAgentsChange,
   onNavigate,
-  autoDemoActive = false,
 }: WorkflowPageProps) {
   const [status, setStatus] = useState<AnalysisStatus | null>(null);
-  const [traceLog, setTraceLog] = useState<WorkflowTrace[]>([]);
-  const [qualityPayload, setQualityPayload] = useState<QualityPayload | null>(null);
+  const [traceLog, setTraceLog] = useState<AgentTrace[]>([]);
+  const [quality, setQuality] = useState<QualityResult | undefined>();
+  const [reportResponse, setReportResponse] = useState<ReportResponse | FinalReport | null>(null);
+  const [claims, setClaims] = useState<Claim[]>([]);
   const [artifacts, setArtifacts] = useState<ArtifactsSummary | null>(null);
-  const [metrics, setMetrics] = useState<Metrics | null>(null);
-  const [contextSummary, setContextSummary] = useState<Record<string, ContextSummary>>({});
-  const [errorLog, setErrorLog] = useState<ErrorLogItem[]>([]);
+  const [risks, setRisks] = useState<Record<string, unknown>[]>([]);
+  const [errors, setErrors] = useState<ErrorLogItem[]>([]);
   const [reviewTicket, setReviewTicket] = useState<ReviewTicket | null>(null);
-  const [selectedAgentName, setSelectedAgentName] = useState("ResearchAgent");
-  const [isInitialLoading, setIsInitialLoading] = useState(false);
+  const [isLoading, setIsLoading] = useState(false);
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [lastUpdated, setLastUpdated] = useState<Date | null>(null);
 
   useEffect(() => {
-    setSelectedAgentName("ResearchAgent");
-  }, [taskId]);
-
-  useEffect(() => {
-    if (!taskId) {
-      setStatus(null);
-      setTraceLog([]);
-      setQualityPayload(null);
-      setArtifacts(null);
-      setMetrics(null);
-      setContextSummary({});
-      setErrorLog([]);
-      setReviewTicket(null);
-      setError(null);
-      setLastUpdated(null);
-      return;
-    }
-
-    const activeTaskId = taskId;
+    if (!taskId) return;
+    const activeTaskId: string = taskId;
     let cancelled = false;
-    let timerId: number | undefined;
     let inFlight = false;
+    let timer: number | undefined;
 
-    async function refreshWorkflow() {
-      if (inFlight) {
-        return;
-      }
-
+    async function refresh() {
+      if (inFlight) return;
       inFlight = true;
       setIsRefreshing(true);
-
-      const [statusResult, traceResult, qualityResult, artifactsResult, metricsResult] =
-        await Promise.allSettled([
-          analysisApi.getStatus(activeTaskId),
-          analysisApi.getTrace(activeTaskId),
-          analysisApi.getQuality(activeTaskId),
-          analysisApi.getArtifacts(activeTaskId),
-          analysisApi.getMetrics(activeTaskId),
-        ]);
-
-      if (cancelled) {
-        inFlight = false;
-        return;
-      }
-
-      const failedEndpoints: string[] = [];
-      let nextStatus: AnalysisStatus | null = null;
-
-      if (statusResult.status === "fulfilled") {
-        nextStatus = statusResult.value;
-        setStatus(statusResult.value);
-      } else {
-        failedEndpoints.push("status");
-      }
-
-      if (traceResult.status === "fulfilled") {
-        setTraceLog(normalizeTrace(traceResult.value?.trace_log));
-        setContextSummary(traceResult.value?.context_summary ?? {});
-        setErrorLog(
-          Array.isArray(traceResult.value?.error_log) ? traceResult.value.error_log : [],
-        );
-        setReviewTicket(traceResult.value?.review_ticket ?? null);
-      } else {
-        failedEndpoints.push("trace");
-      }
-
-      if (qualityResult.status === "fulfilled") {
-        setQualityPayload(qualityResult.value);
-        if (qualityResult.value?.review_ticket?.ticket_id) {
-          setReviewTicket(qualityResult.value.review_ticket);
+      try {
+        const [nextStatus, nextTrace, nextQuality, nextReport, nextClaims, nextArtifacts, nextRisks, nextErrors] =
+          await Promise.all([
+            analysisApi.getStatus(activeTaskId),
+            analysisApi.getTrace(activeTaskId),
+            analysisApi.getQuality(activeTaskId),
+            analysisApi.getReport(activeTaskId),
+            analysisApi.getClaims(activeTaskId),
+            analysisApi.getArtifacts(activeTaskId),
+            analysisApi.getRisks(activeTaskId),
+            analysisApi.getErrors(activeTaskId),
+          ]);
+        if (cancelled) return;
+        setStatus(nextStatus);
+        setTraceLog(Array.isArray(nextTrace.trace_log) ? nextTrace.trace_log : []);
+        setQuality(nextQuality.quality_result);
+        setReportResponse(nextReport as ReportResponse);
+        setClaims(Array.isArray(nextClaims.claims) ? nextClaims.claims : []);
+        setArtifacts(nextArtifacts);
+        setRisks(asRecords(nextRisks.risk_flags));
+        setErrors(Array.isArray(nextErrors.error_log) ? nextErrors.error_log : []);
+        setReviewTicket(nextTrace.review_ticket ?? nextQuality.review_ticket ?? null);
+        setError(null);
+        if (nextStatus.current_agent && nextStatus.current_agent !== "ReportAgent") {
+          onSelectedAgentChange(nextStatus.current_agent);
         }
-      } else {
-        failedEndpoints.push("quality");
-      }
-
-      if (artifactsResult.status === "fulfilled") {
-        setArtifacts(artifactsResult.value);
-      }
-
-      if (metricsResult.status === "fulfilled") {
-        setMetrics(metricsResult.value?.metrics ?? null);
-      }
-
-      setError(
-        failedEndpoints.length > 0
-          ? `无法刷新 ${failedEndpoints.join(", ")} 数据。`
-          : null,
-      );
-      setLastUpdated(new Date());
-      setIsInitialLoading(false);
-      setIsRefreshing(false);
-      inFlight = false;
-
-      const taskStatus = normalizeStatus(nextStatus?.status);
-      if ((taskStatus === "completed" || taskStatus === "failed") && timerId) {
-        window.clearInterval(timerId);
-        timerId = undefined;
+        if (isFinalDone(nextStatus) && timer) {
+          window.clearInterval(timer);
+          timer = undefined;
+        }
+      } catch (refreshError) {
+        if (!cancelled) {
+          setError(refreshError instanceof Error ? refreshError.message : "刷新工作流失败");
+        }
+      } finally {
+        if (!cancelled) {
+          setIsLoading(false);
+          setIsRefreshing(false);
+        }
+        inFlight = false;
       }
     }
 
-    setIsInitialLoading(true);
-    refreshWorkflow();
-    timerId = window.setInterval(refreshWorkflow, 1800);
-
+    setIsLoading(true);
+    refresh();
+    timer = window.setInterval(refresh, 700);
     return () => {
       cancelled = true;
-      if (timerId) {
-        window.clearInterval(timerId);
-      }
+      if (timer) window.clearInterval(timer);
     };
-  }, [taskId]);
+  }, [taskId, onSelectedAgentChange]);
 
-  const qualityResult = qualityPayload?.quality_result;
-  const qualityApproved =
-    typeof qualityResult?.approved === "boolean"
-      ? qualityResult.approved
-      : typeof qualityPayload?.is_approved === "boolean"
-        ? qualityPayload.is_approved
-        : undefined;
-  const requiredActions = asList(
-    qualityResult?.required_actions,
-    qualityResult?.required_fix,
+  const report = useMemo(() => {
+    const nextReport = extractReport(reportResponse);
+    const officialSpecs = asRecords(asRecord(reportResponse).official_spec_records) as OfficialSpecRecord[];
+    return officialSpecs.length ? { ...nextReport, official_spec_records: officialSpecs } : nextReport;
+  }, [reportResponse]);
+  const evidenceList = useMemo(
+    () => asRecords(asRecord(reportResponse).evidence_list),
+    [reportResponse],
   );
-  const rejectTo = qualityResult?.reject_to ?? qualityResult?.target_agent ?? null;
-  const rejectReason =
-    qualityResult?.reject_reason ?? qualityResult?.reason ?? qualityResult?.status ?? null;
-  const rejectedAgents = qualityPayload?.rejected_agents ?? [];
-  const uniqueRejectedAgents = Array.from(new Set(rejectedAgents));
-  const normalizedQualityStatus = normalizeStatus(
-    qualityPayload?.quality_status ?? qualityResult?.status,
+  const resolvedProducts = useMemo(
+    () => asRecords(asRecord(reportResponse).resolved_products),
+    [reportResponse],
   );
-  const hasHumanReviewTrace = traceLog.some((trace) => {
-    return (
-      includesHumanReview(trace.agent_name) ||
-      includesHumanReview(trace.current_agent)
+  const unresolvedProducts = useMemo(
+    () => asStrings(asRecord(reportResponse).unresolved_products),
+    [reportResponse],
+  );
+  const searchMcpResults = useMemo(
+    () => asRecords(asRecord(reportResponse).search_mcp_results) as SearchMcpResult[],
+    [reportResponse],
+  );
+  const externalProductCandidates = useMemo(
+    () => asRecords(asRecord(reportResponse).external_product_candidates) as ExternalProductCandidate[],
+    [reportResponse],
+  );
+  const traceByAgent = useMemo(() => traceMap(traceLog), [traceLog]);
+  const qualityStatus = qualityStatusText(status, quality, reportResponse, report);
+  const hasReport = Boolean(
+    artifacts?.has_final_report || Object.keys(report).length > 0 || status?.current_agent === "ReportAgent",
+  );
+  const progress = status?.progress ?? Math.round((traceLog.length / AGENTS.length) * 100);
+  const currentAgent = status?.current_agent || "等待任务";
+
+  const agentStatuses = useMemo(() => AGENTS.reduce<Record<string, AgentStatus>>((acc, agent) => {
+    acc[agent.name] = deriveStatus(agent, traceByAgent[agent.name], status, qualityStatus, hasReport);
+    return acc;
+  }, {}), [hasReport, qualityStatus, status, traceByAgent]);
+
+  useEffect(() => {
+    onSidebarAgentsChange?.(
+      AGENTS.map((agent) => ({
+        name: agent.name,
+        role: agent.role,
+        status: agentStatuses[agent.name] ?? "waiting",
+        current: currentAgent === agent.name,
+        selected: agentDetailName === agent.name,
+      })),
     );
-  });
-  const isHumanReviewRequired = Boolean(
-    qualityPayload?.needs_human_review ||
-      includesHumanReview(qualityPayload?.quality_status) ||
-      includesHumanReview(qualityResult?.status) ||
-      includesHumanReview(status?.current_agent) ||
-      hasHumanReviewTrace,
-  );
-  const isQualityRejected = Boolean(
-    rejectTo ||
-      normalizedQualityStatus === "rejected" ||
-      normalizedQualityStatus.includes("reject"),
-  );
-  const qualityFlowLabel = isHumanReviewRequired
-    ? "进入人工审核"
-      : isQualityRejected
-        ? "质量打回"
-      : qualityApproved === true || normalizedQualityStatus === "approved"
-        ? "质量门控已通过"
-        : "待审查";
-  const qualityFlowTone: "neutral" | "success" | "warning" | "danger" | "info" =
-    isHumanReviewRequired || isQualityRejected
-      ? "warning"
-      : qualityApproved === true || normalizedQualityStatus === "approved"
-        ? "success"
-        : "neutral";
-  const latestTraceByAgent = useMemo(() => buildLatestTraceMap(traceLog), [traceLog]);
-  const traceHistoryByAgent = useMemo(
-    () => buildTraceHistoryMap(traceLog),
-    [traceLog],
-  );
-  const visibleAgentNodes = isHumanReviewRequired
-    ? [...agentNodes, humanReviewNode]
-    : agentNodes;
-  const derivedStatuses = visibleAgentNodes.reduce<Record<string, AgentStatus>>(
-    (acc, agent) => {
-      acc[agent.name] =
-        agent.name === humanReviewNode.name
-          ? "required"
-          : agent.name === "QualityAgent" && isQualityRejected
-            ? "rejected"
-          : deriveAgentStatus(
-              agent.name,
-              latestTraceByAgent[agent.name],
-              status,
-            );
-      return acc;
-    },
-    {},
-  );
-  const rerunAgents = useMemo(() => {
-    return new Set(
-      Object.entries(traceHistoryByAgent)
-        .filter(([, entries]) => latestStatusIsSuccessAfterReject(entries))
-        .map(([agentName]) => agentName),
-    );
-  }, [traceHistoryByAgent]);
-  const contextEntries = useMemo(
-    () =>
-      Object.entries(contextSummary).filter(
-        ([, summary]) => summary && typeof summary === "object",
-      ),
-    [contextSummary],
-  );
 
-  const selectedAgent =
-    visibleAgentNodes.find((agent) => agent.name === selectedAgentName) ??
-    visibleAgentNodes[0];
-  const selectedTrace =
-    latestTraceByAgent[selectedAgent.name] ??
-    (selectedAgent.name === humanReviewNode.name
-      ? latestTraceByAgent.HumanReviewAgent
-      : undefined);
-  const selectedStatus = derivedStatuses[selectedAgent.name] ?? "pending";
-  const selectedRejectTo =
-    selectedTrace?.reject_to ??
-    selectedTrace?.target_agent ??
-    (selectedAgent.name === "QualityAgent" ? rejectTo : null);
-  const selectedRejectReason =
-    selectedTrace?.reject_reason ??
-    selectedTrace?.reason ??
-    (selectedAgent.name === "QualityAgent" ? rejectReason : null);
-  const selectedRequiredActions =
-    selectedTrace?.required_actions ??
-    (selectedAgent.name === "QualityAgent" ? requiredActions : []);
-  function getNodeBadges(agentName: string) {
-    const latestStatus = normalizeStatus(latestTraceByAgent[agentName]?.status);
-    const wasRejectedByQuality = uniqueRejectedAgents.includes(agentName);
+    return () => {
+      onSidebarAgentsChange?.([]);
+    };
+  }, [agentDetailName, agentStatuses, currentAgent, onSidebarAgentsChange]);
 
-    return rerunAgents.has(agentName) ||
-      (wasRejectedByQuality && latestStatus === "success")
-      ? [{ label: "已重跑", tone: "warning" as const }]
-      : [];
-  }
-
-  const qualityScore =
-    qualityResult?.score ??
-    qualityResult?.quality_score ??
-    metrics?.quality_score;
-
-  // 各 Agent 的"本次产出"摘要，尽量从已有 artifacts / metrics / quality / trace 读取。
-  function getAgentProduce(agentName: string): string {
-    const agentStatus = derivedStatuses[agentName] ?? "pending";
-    const outputSummary = latestTraceByAgent[agentName]?.output_summary;
-
-    switch (agentName) {
-      case "ResearchAgent":
-        return typeof artifacts?.raw_research_count === "number"
-          ? `${artifacts.raw_research_count} 条原始调研记录`
-          : outputSummary || "暂无";
-      case "EvidenceAgent": {
-        const count = artifacts?.evidence_count ?? metrics?.evidence_count;
-        return typeof count === "number" ? `${count} 条结构化证据` : outputSummary || "暂无";
-      }
-      case "ProductAgent":
-        return outputSummary ||
-          (artifacts?.has_product_matrix ? "产品分析矩阵已生成" : "暂无");
-      case "BusinessAgent":
-        return outputSummary ||
-          (artifacts?.has_business_matrix ? "商业分析矩阵已生成" : "暂无");
-      case "VerificationAgent": {
-        if (typeof metrics?.faithfulness_rate === "number") {
-          const rate = Math.round(metrics.faithfulness_rate * 100);
-          const unsupported = metrics?.unsupported_claim_count ?? 0;
-          return `忠实率 ${rate}%｜未支撑 ${unsupported} 条`;
-        }
-        return outputSummary || "暂无";
-      }
-      case "RiskAgent":
-        return typeof artifacts?.risk_count === "number"
-          ? `${artifacts.risk_count} 条风险`
-          : outputSummary || "暂无";
-      case "QualityAgent": {
-        const scoreText =
-          typeof qualityScore === "number" ? `质量得分 ${qualityScore}` : "尚未评分";
-        const resultText =
-          qualityApproved === true
-            ? "审查通过"
-            : isQualityRejected
-              ? "已打回"
-              : isHumanReviewRequired
-                ? "待人工审核"
-                : "待审查";
-        return `${scoreText}｜${resultText}`;
-      }
-      case "StrategyAgent":
-        return artifacts?.has_final_report ? "最终报告已生成" : outputSummary || "暂无";
-      case humanReviewNode.name:
-        return "等待人工复核";
-      default:
-        return outputSummary || "暂无";
-    }
-  }
-
-  // 可视化列：Product 与 Business 并行展示为同一列的两行，其余各占一列；
-  // 需要人工复核时在 Strategy 前插入人工复核列。
-  const flowColumns: Array<{ key: string; nodes: AgentNode[] }> = [
-    { key: "research", nodes: [agentNodes[0]] },
-    { key: "evidence", nodes: [agentNodes[1]] },
-    { key: "product-business", nodes: [agentNodes[2], agentNodes[3]] },
-    { key: "verification", nodes: [agentNodes[4]] },
-    { key: "risk", nodes: [agentNodes[5]] },
-    { key: "quality", nodes: [agentNodes[6]] },
-    ...(isHumanReviewRequired
-      ? [{ key: "human", nodes: [humanReviewNode] }]
-      : []),
-    { key: "strategy", nodes: [agentNodes[7]] },
-  ];
-  const orderedNodeNames = flowColumns.flatMap((column) =>
-    column.nodes.map((node) => node.name),
-  );
-  const stepIndexOf = (name: string) => orderedNodeNames.indexOf(name);
-  const columnTone = (column: { nodes: AgentNode[] }) =>
-    flowToneFromStatus(
-      derivedStatuses[column.nodes[column.nodes.length - 1].name] ?? "pending",
-    );
+  const detailAgent = agentDetailName
+    ? (AGENTS.find((agent) => agent.name === agentDetailName) ?? null)
+    : null;
 
   if (!taskId) {
     return (
-      <section className="mx-auto max-w-6xl">
+      <section className="mx-auto max-w-5xl">
         <EmptyState
-          title="暂无任务"
-          description="请先创建 gaming_mouse 分析任务，再查看 Agent 工作流。"
           action={
             <button
               className="rounded-md bg-cyan-300 px-4 py-2 text-sm font-semibold text-slate-950 transition hover:bg-cyan-200"
-              onClick={() => onNavigate("new-analysis")}
+              onClick={() => onNavigate("product-compare")}
               type="button"
             >
-              新建分析
+              回到产品输入
             </button>
           }
+          description="先输入两款电竞鼠标并点击开始分析，系统才会进入多 Agent 工作流。"
+          title="暂无分析任务"
+        />
+      </section>
+    );
+  }
+
+  if (detailAgent) {
+    return (
+      <section>
+        {isLoading ? <LoadingState label="正在读取 Agent 详情..." /> : null}
+        {error ? (
+          <div className="mb-5 rounded-md border border-amber-400/35 bg-amber-400/10 px-4 py-3 text-sm text-amber-100">
+            {error}
+          </div>
+        ) : null}
+        <AgentDetailPage
+          agent={detailAgent}
+          onBack={onAgentDetailClose}
+          report={report}
+          status={agentStatuses[detailAgent.name] ?? "waiting"}
+          trace={traceByAgent[detailAgent.name]}
+          evidenceList={evidenceList}
+          claims={claims}
+          resolvedProducts={resolvedProducts}
+          unresolvedProducts={unresolvedProducts}
+          searchMcpResults={searchMcpResults}
+          externalProductCandidates={externalProductCandidates}
+          quality={quality}
+          onNavigate={onNavigate}
         />
       </section>
     );
@@ -802,470 +3084,35 @@ export function WorkflowPage({
 
   return (
     <section className="mx-auto max-w-7xl">
-      <div className="mb-6 flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
-        <div>
-          <p className="text-sm font-medium text-cyan-300">Agent 工作流</p>
-          <h2 className="mt-2 text-3xl font-semibold text-white">
-            多 Agent 执行路径
-          </h2>
-          <p className="mt-3 max-w-3xl break-all text-sm leading-6 text-slate-400">
-            <span title={`真实任务 ID：${taskId}`}>
-              当前任务：{displayTaskId || taskId}
-            </span>
-          </p>
-        </div>
-        <div className="flex flex-wrap gap-2 lg:justify-end">
-          <StatusBadge label={status?.status ?? "加载中"} tone="info" />
-          <StatusBadge
-            label={`进度 ${status?.progress ?? 0}%`}
-            tone={status?.progress === 100 ? "success" : "neutral"}
-          />
-          <StatusBadge label={qualityFlowLabel} tone={qualityFlowTone} />
-          {isRefreshing ? <StatusBadge label="轮询中" tone="info" /> : null}
-        </div>
-      </div>
+      <WorkflowDagCanvas
+        agentStatuses={agentStatuses}
+        currentAgent={currentAgent}
+        displayTaskId={displayTaskId}
+        hasReport={hasReport}
+        onNavigate={onNavigate}
+        onSelectAgent={onAgentOpen}
+        progress={progress}
+        selectedAgent={selectedAgent}
+        taskId={taskId}
+        taskStatus={status?.status}
+      />
 
-      {autoDemoActive ? (
-        <div className="mb-5 flex items-center gap-3 rounded-lg border border-cyan-200/70 bg-cyan-50/80 px-4 py-3">
-          <span className="relative flex h-2.5 w-2.5">
-            <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-cyan-400 opacity-75" />
-            <span className="relative inline-flex h-2.5 w-2.5 rounded-full bg-cyan-500" />
-          </span>
-          <p className="text-sm font-medium text-cyan-800">
-            当前正在展示：多 Agent 协作流程
-          </p>
-        </div>
-      ) : null}
-
-      {isInitialLoading ? (
-        <LoadingState label="正在读取工作流状态、执行轨迹与质量结果..." />
-      ) : null}
+      {isLoading ? <LoadingState label="正在读取工作流状态..." /> : null}
 
       {error ? (
-        <div className="mb-5 rounded-md border border-amber-400/35 bg-amber-400/10 px-4 py-3 text-sm text-amber-100">
+        <div className="mt-5 rounded-md border border-amber-400/35 bg-amber-400/10 px-4 py-3 text-sm text-amber-100">
           {error}
         </div>
       ) : null}
 
-      <div className="space-y-5">
-        <section className="w-full max-w-full overflow-hidden rounded-lg border border-slate-800 bg-slate-950/70 p-5 shadow-[0_0_40px_rgba(15,23,42,0.45)]">
-          <div className="mb-5 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
-            <div>
-              <h3 className="text-lg font-semibold text-white">Agent 执行路径</h3>
-              <p className="mt-1 text-sm text-slate-400">
-                节点状态来自系统执行记录与当前 Agent。
-              </p>
-            </div>
-            {lastUpdated ? (
-              <p className="text-xs text-slate-500">
-                更新于 {lastUpdated.toLocaleTimeString()}
-              </p>
-            ) : null}
-          </div>
-
-          <div className="-mx-1 w-full max-w-full overflow-x-auto overflow-y-hidden px-1 pb-2">
-            <div className="flex min-w-max items-center gap-4">
-              {flowColumns.map((column, columnIndex) => (
-                <Fragment key={column.key}>
-                  {column.nodes.length > 1 ? (
-                    <div className="grid w-[230px] shrink-0 gap-3">
-                      {column.nodes.map((node) => (
-                        <AgentCard
-                          agent={node}
-                          badges={getNodeBadges(node.name)}
-                          index={stepIndexOf(node.name)}
-                          isSelected={selectedAgentName === node.name}
-                          key={node.name}
-                          onSelect={() => setSelectedAgentName(node.name)}
-                          status={derivedStatuses[node.name] ?? "pending"}
-                          produce={getAgentProduce(node.name)}
-                        />
-                      ))}
-                    </div>
-                  ) : (
-                    <div className="w-[210px] shrink-0">
-                      <AgentCard
-                        agent={column.nodes[0]}
-                        badges={
-                          column.nodes[0].name === humanReviewNode.name
-                            ? [{ label: "人工复核", tone: "warning" }]
-                            : getNodeBadges(column.nodes[0].name)
-                        }
-                        index={stepIndexOf(column.nodes[0].name)}
-                        isSelected={selectedAgentName === column.nodes[0].name}
-                        onSelect={() => setSelectedAgentName(column.nodes[0].name)}
-                        status={derivedStatuses[column.nodes[0].name] ?? "pending"}
-                        produce={getAgentProduce(column.nodes[0].name)}
-                      />
-                    </div>
-                  )}
-                  {columnIndex < flowColumns.length - 1 ? (
-                    <FlowConnector tone={columnTone(column)} />
-                  ) : null}
-                </Fragment>
-              ))}
-            </div>
-          </div>
-        </section>
-
-        <section className="grid min-w-0 gap-3 sm:grid-cols-2 xl:grid-cols-5">
-          <div className="min-w-0 rounded-lg border border-slate-800 bg-slate-900/45 p-4">
-            <p className="text-xs uppercase tracking-[0.18em] text-slate-500">
-              当前 Agent
-            </p>
-            <p className="mt-2 break-words text-sm font-medium text-slate-100">
-              {status?.current_agent || "等待中"}
-            </p>
-          </div>
-          <div className="min-w-0 rounded-lg border border-slate-800 bg-slate-900/45 p-4">
-            <p className="text-xs uppercase tracking-[0.18em] text-slate-500">
-              执行记录数
-            </p>
-            <p className="mt-2 text-sm font-medium text-slate-100">
-              {traceLog.length} 条
-            </p>
-          </div>
-          <div className="min-w-0 rounded-lg border border-slate-800 bg-slate-900/45 p-4">
-            <p className="text-xs uppercase tracking-[0.18em] text-slate-500">
-              质量门控
-            </p>
-            <div className="mt-2 flex flex-wrap items-center gap-2">
-              <StatusBadge label={qualityFlowLabel} tone={qualityFlowTone} />
-              <span className="break-words text-sm font-medium text-slate-100">
-                {qualityPayload?.quality_status || qualityResult?.status || "待处理"}
-              </span>
-            </div>
-          </div>
-          <div className="min-w-0 rounded-lg border border-slate-800 bg-slate-900/45 p-4">
-            <p className="text-xs uppercase tracking-[0.18em] text-slate-500">
-              重试轮次
-            </p>
-            <p className="mt-2 text-sm font-medium text-slate-100">
-              {typeof qualityPayload?.iteration_count === "number"
-                ? `${qualityPayload.iteration_count} / 3`
-                : "暂无"}
-            </p>
-          </div>
-          <div className="min-w-0 rounded-lg border border-slate-800 bg-slate-900/45 p-4">
-            <p className="text-xs uppercase tracking-[0.18em] text-slate-500">
-              打回状态
-            </p>
-            <p className="mt-2 text-sm font-medium text-slate-100">
-              {rejectTo ? `已打回 ${rejectTo}` : "本次流程未触发打回"}
-            </p>
-          </div>
-        </section>
-
-        <section className="grid min-w-0 gap-4 xl:grid-cols-3">
-          <div className="min-w-0 rounded-lg border border-slate-800 bg-slate-950/70 p-5">
-            <div className="flex items-start justify-between gap-3">
-              <div>
-                <h3 className="text-lg font-semibold text-white">上下文管理</h3>
-                <p className="mt-1 text-sm text-slate-400">
-                  展示进入大模型 prompt 前的证据裁剪结果。
-                </p>
-              </div>
-              <StatusBadge label={`${contextEntries.length} 个 Agent`} tone="info" />
-            </div>
-            <div className="mt-4 space-y-3">
-              {contextEntries.length > 0 ? (
-                contextEntries.map(([agentName, summary]) => (
-                  <div
-                    className="rounded-lg border border-slate-800 bg-slate-900/45 p-4"
-                    key={agentName}
-                  >
-                    <div className="flex flex-wrap items-center justify-between gap-2">
-                      <span className="text-sm font-semibold text-slate-100">
-                        {agentName}
-                      </span>
-                      <StatusBadge
-                        label={`裁剪 ${summary.trimmed_evidence_count ?? 0} 条`}
-                        tone={(summary.trimmed_evidence_count ?? 0) > 0 ? "warning" : "success"}
-                      />
-                    </div>
-                    <p className="mt-2 text-sm text-slate-400">
-                      原始 {summary.total_evidence_count ?? 0} 条，进入 prompt{" "}
-                      {summary.selected_evidence_count ?? 0} 条
-                    </p>
-                    {summary.selected_evidence_ids?.length ? (
-                      <p className="mt-2 break-words font-mono text-xs text-slate-500">
-                        {summary.selected_evidence_ids.slice(0, 8).join(" · ")}
-                      </p>
-                    ) : null}
-                  </div>
-                ))
-              ) : (
-                <p className="rounded-md border border-slate-800 bg-slate-900/45 px-4 py-3 text-sm text-slate-400">
-                  暂无上下文摘要。
-                </p>
-              )}
-            </div>
-          </div>
-
-          <div className="min-w-0 rounded-lg border border-slate-800 bg-slate-950/70 p-5">
-            <div className="flex items-start justify-between gap-3">
-              <div>
-                <h3 className="text-lg font-semibold text-white">错误恢复</h3>
-                <p className="mt-1 text-sm text-slate-400">
-                  Agent 异常会记录恢复动作，流程继续降级执行。
-                </p>
-              </div>
-              <StatusBadge
-                label={`${errorLog.length} 条`}
-                tone={errorLog.length > 0 ? "warning" : "success"}
-              />
-            </div>
-            <div className="mt-4 space-y-3">
-              {errorLog.length > 0 ? (
-                errorLog.slice(0, 4).map((item, index) => (
-                  <div
-                    className="rounded-lg border border-amber-400/25 bg-amber-400/10 p-4"
-                    key={item.error_id ?? `${item.agent_name}-${index}`}
-                  >
-                    <div className="flex flex-wrap items-center gap-2">
-                      <StatusBadge label={item.agent_name ?? "UnknownAgent"} tone="warning" />
-                      <span className="break-words text-sm text-amber-100">
-                        {item.error_type ?? "error"}
-                      </span>
-                    </div>
-                    <p className="mt-2 break-words text-sm leading-6 text-slate-200">
-                      {item.message || "无错误详情"}
-                    </p>
-                    <p className="mt-2 text-xs text-slate-500">
-                      恢复动作：{item.recover_action || "record_only"}
-                    </p>
-                  </div>
-                ))
-              ) : (
-                <p className="rounded-md border border-emerald-400/25 bg-emerald-400/10 px-4 py-3 text-sm text-emerald-100">
-                  本次流程未出现需要降级恢复的错误。
-                </p>
-              )}
-            </div>
-          </div>
-
-          <div className="min-w-0 rounded-lg border border-slate-800 bg-slate-950/70 p-5">
-            <div className="flex items-start justify-between gap-3">
-              <div>
-                <h3 className="text-lg font-semibold text-white">人工审核单</h3>
-                <p className="mt-1 text-sm text-slate-400">
-                  三次自动修复仍失败时生成 ReviewTicket。
-                </p>
-              </div>
-              <StatusBadge
-                label={reviewTicket?.ticket_id ? "已生成" : "未触发"}
-                tone={reviewTicket?.ticket_id ? "warning" : "neutral"}
-              />
-            </div>
-            {reviewTicket?.ticket_id ? (
-              <dl className="mt-4 space-y-3 text-sm">
-                <div>
-                  <dt className="text-slate-500">Ticket ID</dt>
-                  <dd className="mt-1 break-words font-mono text-slate-100">
-                    {reviewTicket.ticket_id}
-                  </dd>
-                </div>
-                <div>
-                  <dt className="text-slate-500">目标 Agent</dt>
-                  <dd className="mt-1 text-slate-100">
-                    {reviewTicket.target_agent || "未指定"}
-                  </dd>
-                </div>
-                <div>
-                  <dt className="text-slate-500">失败检查项</dt>
-                  <dd className="mt-2 flex flex-wrap gap-2">
-                    {(reviewTicket.failed_checks ?? []).length > 0 ? (
-                      reviewTicket.failed_checks?.map((item) => (
-                        <StatusBadge key={item} label={item} tone="warning" />
-                      ))
-                    ) : (
-                      <span className="text-slate-400">无</span>
-                    )}
-                  </dd>
-                </div>
-              </dl>
-            ) : (
-              <p className="mt-4 rounded-md border border-slate-800 bg-slate-900/45 px-4 py-3 text-sm text-slate-400">
-                质量门控尚未触发人工审核。
-              </p>
-            )}
-          </div>
-        </section>
-
-        <section className="min-w-0 overflow-hidden rounded-lg border border-slate-800 bg-slate-950/80 p-5">
-            <div className="flex items-start justify-between gap-3">
-              <div>
-                <p className="text-xs uppercase tracking-[0.18em] text-slate-500">
-                  Agent 详情
-                </p>
-                <h3 className="mt-2 break-words text-xl font-semibold text-white">
-                  {selectedAgent.name}
-                </h3>
-              </div>
-              <StatusBadge
-                label={statusLabel[selectedStatus]}
-                tone={statusTone[selectedStatus]}
-              />
-            </div>
-
-            <dl className="mt-5 space-y-4 text-sm">
-              <div>
-                <dt className="text-slate-500">作用</dt>
-                <dd className="mt-1 break-words text-slate-100">
-                  {getAgentRole(selectedAgent.name)}
-                </dd>
-              </div>
-              <div>
-                <dt className="text-slate-500">最新执行状态</dt>
-                <dd className="mt-1 break-words text-slate-100">
-                  {statusLabel[selectedStatus]}
-                </dd>
-              </div>
-              <div>
-                <dt className="text-slate-500">本次产出</dt>
-                <dd className="mt-1 break-words text-slate-100">
-                  {getAgentProduce(selectedAgent.name)}
-                </dd>
-              </div>
-              <div>
-                <dt className="text-slate-500">输出摘要</dt>
-                <dd className="mt-1 break-words leading-6 text-slate-200">
-                  {selectedTrace?.output_summary || "暂无输出摘要。"}
-                </dd>
-              </div>
-              <div>
-                <dt className="text-slate-500">打回原因</dt>
-                <dd className="mt-1 break-words leading-6 text-slate-200">
-                  {selectedRejectReason || "无"}
-                </dd>
-              </div>
-              <div>
-                <dt className="text-slate-500">修复建议</dt>
-                <dd className="mt-2">
-                  {selectedRequiredActions.length > 0 ? (
-                    <div className="flex flex-wrap gap-2">
-                      {selectedRequiredActions.map((action) => (
-                        <StatusBadge key={action} label={action} tone="warning" />
-                      ))}
-                    </div>
-                  ) : (
-                    <span className="text-slate-400">无</span>
-                  )}
-                </dd>
-              </div>
-              <div>
-                <dt className="text-slate-500">打回目标</dt>
-                <dd className="mt-1 break-words text-slate-100">
-                  {selectedRejectTo || "无"}
-                </dd>
-              </div>
-              <div>
-                <dt className="text-slate-500">执行耗时</dt>
-                <dd className="mt-1 text-slate-100">
-                  {typeof selectedTrace?.duration_ms === "number"
-                    ? `${selectedTrace.duration_ms} ms`
-                    : "未返回"}
-                </dd>
-              </div>
-              <div>
-                <dt className="text-slate-500">错误信息</dt>
-                <dd className="mt-1 break-words leading-6 text-slate-200">
-                  {selectedTrace?.error || "无"}
-                </dd>
-              </div>
-            </dl>
-
-        </section>
-
-        <section className="w-full max-w-full overflow-hidden rounded-lg border border-slate-800 bg-slate-950/70 p-5">
-          <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
-            <div>
-              <h3 className="text-lg font-semibold text-white">
-                执行时间线
-              </h3>
-              <p className="mt-1 text-sm text-slate-400">
-                按时间展示系统返回的执行记录。
-              </p>
-            </div>
-            <StatusBadge label={`${traceLog.length} 条记录`} tone="neutral" />
-          </div>
-
-          {traceLog.length === 0 ? (
-            <p className="mt-4 rounded-md border border-slate-800 bg-slate-900/45 px-4 py-3 text-sm text-slate-400">
-              暂无执行轨迹。
-            </p>
-          ) : (
-            <div className="mt-4 space-y-3">
-              {traceLog.map((trace, index) => {
-                const traceRejectTo =
-                  trace.reject_to ??
-                  trace.target_agent ??
-                  (trace.agent_name === "QualityAgent" ? rejectTo : null);
-                const traceReason =
-                  trace.reject_reason ??
-                  trace.reason ??
-                  (trace.agent_name === "QualityAgent" ? rejectReason : null);
-                const traceTime = getTraceTime(trace);
-                const isLatestTraceForAgent =
-                  trace ===
-                  traceHistoryByAgent[trace.agent_name]?.[
-                    traceHistoryByAgent[trace.agent_name].length - 1
-                  ];
-                const isRerunSuccess =
-                  normalizeStatus(trace.status) === "success" &&
-                  (latestStatusIsSuccessAfterReject(
-                    traceHistoryByAgent[trace.agent_name],
-                  ) ||
-                    uniqueRejectedAgents.includes(trace.agent_name));
-
-                return (
-                  <article
-                    className="min-w-0 rounded-lg border border-slate-800 bg-slate-900/45 p-4"
-                    key={`${trace.agent_name}-${trace.step_id ?? index}`}
-                  >
-                    <div className="flex min-w-0 flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
-                      <div className="min-w-0">
-                        <div className="flex flex-wrap items-center gap-2">
-                          <span className="font-mono text-xs text-slate-500">
-                            {traceTime || `Step ${trace.step_id ?? index + 1}`}
-                          </span>
-                          <span className="break-words text-sm font-semibold text-white">
-                            {trace.agent_name}
-                          </span>
-                          <StatusBadge
-                            label={trace.status}
-                            tone={traceTone(trace.status)}
-                          />
-                          {isLatestTraceForAgent && isRerunSuccess ? (
-                            <StatusBadge label="已重跑" tone="warning" />
-                          ) : null}
-                        </div>
-                        {trace.output_summary ? (
-                          <p className="mt-3 break-words text-sm leading-6 text-slate-300">
-                            {trace.output_summary}
-                          </p>
-                        ) : null}
-                        {traceRejectTo || traceReason ? (
-                          <p className="mt-2 break-words text-sm leading-6 text-amber-100">
-                            {traceRejectTo ? `打回目标：${traceRejectTo}` : ""}
-                            {traceRejectTo && traceReason ? " | " : ""}
-                            {traceReason ? `原因：${traceReason}` : ""}
-                          </p>
-                        ) : null}
-                      </div>
-                      {typeof trace.duration_ms === "number" ? (
-                        <span className="shrink-0 rounded-md border border-slate-700 bg-slate-950 px-3 py-2 text-xs text-slate-300">
-                          {trace.duration_ms} ms
-                        </span>
-                      ) : null}
-                    </div>
-                  </article>
-                );
-              })}
-            </div>
-          )}
-        </section>
-      </div>
+      <AgentWorkbench
+        agentStatuses={agentStatuses}
+        currentAgent={currentAgent}
+        selectedAgent={selectedAgent}
+        onOpenAgent={onAgentOpen}
+        traces={traceByAgent}
+      />
+      <CompetitiveReportEntry hasReport={hasReport} onNavigate={onNavigate} />
     </section>
   );
 }

@@ -32,6 +32,7 @@ class StateSnapshot(BaseModel):
     rejected_agents: List[str] = Field(default_factory=list)
     is_approved: bool = False
     needs_human_review: bool = False
+    degraded_report: bool = False
     quality_status: str = ""
     error_log: List[Dict[str, Any]] = Field(default_factory=list)
     trace_log: List[Dict[str, Any]] = Field(default_factory=list)

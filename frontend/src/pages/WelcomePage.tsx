@@ -16,14 +16,13 @@ type AgentNode = {
 };
 
 const agentLabels: Array<Omit<AgentNode, "x" | "y">> = [
-  { key: "research", zh: "调研", en: "Research", role: "收集公开资料与竞品信息" },
+  { key: "research", zh: "调研", en: "Research", role: "规划本次需要采集和补齐的数据" },
+  { key: "collector", zh: "采集", en: "Collector", role: "产品识别、本地事实读取与 MCP 调度" },
   { key: "evidence", zh: "证据", en: "Evidence", role: "抽取结构化证据并标记可信度" },
-  { key: "product", zh: "产品", en: "Product", role: "生成产品维度分析矩阵" },
-  { key: "business", zh: "商业", en: "Business", role: "分析定位、价格与市场策略" },
+  { key: "analysis", zh: "分析", en: "Analysis", role: "只分析有证据支撑的事实差异" },
   { key: "verification", zh: "校验", en: "Verification", role: "忠实性校验，剔除无证据支撑的结论" },
-  { key: "risk", zh: "风险", en: "Risk", role: "识别数据缺口与潜在风险" },
   { key: "quality", zh: "质检", en: "Quality", role: "检查证据覆盖与结论可靠性" },
-  { key: "strategy", zh: "策略", en: "Strategy", role: "生成最终竞品策略报告" },
+  { key: "report", zh: "报告", en: "Report", role: "生成专业电竞鼠标 final_report" },
 ];
 
 // 在以 (50,50) 为圆心、半径 36 的圆上均匀分布 Agent 节点（数量由 agentLabels 决定，viewBox 0-100 单位）。
@@ -38,13 +37,13 @@ const agentNodes: AgentNode[] = agentLabels.map((label, index) => {
   };
 });
 
-// 能力流程带：公开信息 → 证据抽取 → 结论追踪 → 质量门控 → 策略报告
+// 能力流程带：数据规划 → 证据结构化 → 事实校验 → 质量门控 → 专业报告
 const capabilitySteps = [
-  { zh: "公开信息", tip: "从公开网页、评测、电商和用户口碑中收集资料" },
+  { zh: "数据规划", tip: "拆解本地事实、官网规格、评价测评和实时价格需求" },
   { zh: "证据抽取", tip: "提取可引用证据并生成 Evidence ID" },
-  { zh: "结论追踪", tip: "将 Evidence 绑定到 Product Claim 和 Business Claim" },
+  { zh: "事实校验", tip: "检查 Claim 是否被 evidence_ids 支撑" },
   { zh: "质量门控", tip: "检查覆盖率、证据完整性与风险水位" },
-  { zh: "策略报告", tip: "生成可追溯的竞品策略报告" },
+  { zh: "专业报告", tip: "生成电竞鼠标专业 schema 报告" },
 ];
 
 // 右侧 Agent 网络下方的系统状态。
@@ -52,18 +51,17 @@ const systemStatus = [
   "多 Agent 网络已就绪",
   "证据抽取管线待命",
   "质量门控已开启",
-  "策略报告引擎就绪",
+  "专业报告引擎就绪",
 ];
 
 const agentSummary: Array<{ en: string; zh: string }> = [
-  { en: "Research", zh: "公开调研" },
-  { en: "Evidence", zh: "证据抽取" },
-  { en: "Product", zh: "产品分析" },
-  { en: "Business", zh: "商业分析" },
-  { en: "Verification", zh: "忠实性校验" },
-  { en: "Risk", zh: "风险识别" },
+  { en: "Research", zh: "调研规划" },
+  { en: "Collector", zh: "采集识别" },
+  { en: "Evidence", zh: "证据结构化" },
+  { en: "Analysis", zh: "事实分析" },
+  { en: "Verification", zh: "忠实校验" },
   { en: "Quality", zh: "质量审查" },
-  { en: "Strategy", zh: "报告生成" },
+  { en: "Report", zh: "报告生成" },
 ];
 
 function usePrefersReducedMotion() {
@@ -270,7 +268,7 @@ export function WelcomePage({ onLogin }: WelcomePageProps) {
             className="welcome-fade-up mt-6 max-w-lg text-base leading-7 text-[#9fb2d4]"
             style={{ animationDelay: "0.36s" }}
           >
-            多 Agent 协同完成公开调研、证据抽取、结论追踪、质量审查与策略报告生成。面向产品团队的竞品分析系统，从公开资料中抽取证据，生成可追溯的策略报告。
+            多 Agent 协同完成数据规划、证据结构化、事实校验、质量审查与专业报告生成。当前聚焦电竞鼠标竞品分析，从稳定硬件事实和可追溯证据生成可信报告。
           </p>
 
           {/* 能力流程带 */}

@@ -9,13 +9,16 @@ import type {
   AgentTrace,
   ContextSummary,
   ErrorLogItem,
+  ExternalProductCandidate,
   QualityResult,
   Metrics,
+  OfficialSpecRecord,
   RiskFlag,
   ArtifactsSummary,
   FaithfulnessReport,
   FinalReport,
   ReviewTicket,
+  SearchMcpResult,
 } from "../types/analysis";
 
 export const analysisApi = {
@@ -34,9 +37,20 @@ export const analysisApi = {
     apiGet<
       | {
           task_id?: string;
+          status?: string;
           final_report?: FinalReport;
           quality_result?: QualityResult;
+          quality_status?: string;
+          degraded_report?: boolean;
+          needs_human_review?: boolean;
           review_ticket?: ReviewTicket;
+          evidence_list?: unknown[];
+          resolved_products?: unknown[];
+          unresolved_products?: string[];
+          search_mcp_results?: SearchMcpResult[];
+          external_product_candidates?: ExternalProductCandidate[];
+          official_spec_records?: OfficialSpecRecord[];
+          error?: string;
         }
       | FinalReport
     >(
@@ -72,6 +86,7 @@ export const analysisApi = {
       iteration_count?: number;
       rejected_agents?: string[];
       needs_human_review?: boolean;
+      degraded_report?: boolean;
       quality_status?: string;
       review_ticket?: ReviewTicket;
     }>(`/api/analysis/${taskId}/quality`),

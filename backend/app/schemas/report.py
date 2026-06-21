@@ -1,15 +1,11 @@
-from typing import Any, Dict, List
+from typing import List
 
 from pydantic import BaseModel
 
-
-class StrategyRecommendation(BaseModel):
-    recommendation: str
-    supporting_claim_ids: List[str]
-    supporting_evidence_ids: List[str]
+from app.schemas.gaming_mouse import GamingMouseFinalReportSchema
 
 
-class StrategyAgentOutput(BaseModel):
-    final_report: Dict[str, Any]
+class ReportAgentOutput(BaseModel):
+    final_report: GamingMouseFinalReportSchema
     used_claim_ids: List[str]
     used_evidence_ids: List[str]

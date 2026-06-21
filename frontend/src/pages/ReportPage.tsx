@@ -1,14 +1,19 @@
 import { useEffect, useMemo, useState } from "react";
+import { analysisApi } from "../api/analysisApi";
 import { EmptyState } from "../components/common/EmptyState";
-import { InteractiveBars, type BarDatum } from "../components/common/InteractiveBars";
 import { LoadingState } from "../components/common/LoadingState";
 import { StatusBadge } from "../components/common/StatusBadge";
-import { analysisApi } from "../api/analysisApi";
 import type {
+  AgentContribution,
+  ExternalProductCandidate,
+  FeatureNode,
   FinalReport,
-  Metrics,
+  HardwareSpec,
+  OfficialSpecRecord,
+  ProductIdentity,
   QualityResult,
   RiskFlag,
+  SearchMcpResult,
 } from "../types/analysis";
 
 type ReportPageProps = {
@@ -17,69 +22,26 @@ type ReportPageProps = {
   onNavigate: (key: string) => void;
 };
 
-type ReportApiResponse = {
-  task_id?: string;
-  status?: string;
+type ReportResponse = {
   final_report?: FinalReport;
   quality_result?: QualityResult;
-  metrics?: Metrics;
-  needs_human_review?: boolean;
   quality_status?: string;
-  iteration_count?: number;
-  rejected_agents?: string[];
+  degraded_report?: boolean;
+  needs_human_review?: boolean;
   risk_flags?: RiskFlag[];
-  risks?: RiskFlag[];
-  error?: string;
+  search_mcp_results?: SearchMcpResult[];
+  external_product_candidates?: ExternalProductCandidate[];
+  official_spec_records?: OfficialSpecRecord[];
 };
 
-type RankingItem = {
-  platform?: string;
-  rank?: number;
-  score?: number;
-  summary?: string;
-  supporting_evidence_ids?: string[];
-};
+type Tone = "neutral" | "success" | "warning" | "danger" | "info";
 
-type RecommendationItem = {
-  recommendation?: string;
-  supporting_claim_ids?: string[];
-  supporting_evidence_ids?: string[];
-  confidence_score?: number;
-};
-
-type ReportRisk = RiskFlag & {
-  level?: string;
-  risk_level?: string;
-  message?: string;
-  reason?: string;
-  content?: string;
-};
-
-type Swot = Record<string, string[]>;
-
-type ReportGateState = {
-  kind: "official" | "draft" | "human_review" | "risk";
-  title: string;
-  description: string;
-  tone: "success" | "warning" | "danger";
-  notice: string;
-};
-
-const MAX_RETRY_COUNT = 3;
-
-const swotKeys = ["strengths", "weaknesses", "opportunities", "threats"];
-
-const swotLabels: Record<string, string> = {
-  strengths: "优势",
-  weaknesses: "劣势",
-  opportunities: "机会",
-  threats: "威胁",
-};
-
-const riskTone: Record<string, "danger" | "warning" | "success" | "neutral"> = {
-  high: "danger",
-  medium: "warning",
-  low: "success",
+const FEATURE_LABELS: Record<string, string> = {
+  performance: "性能参数",
+  shape_and_weight: "模具与轻量化",
+  wireless_and_battery: "无线与续航",
+  click_system: "点击系统",
+  software_ecosystem: "驱动生态",
 };
 
 function asRecord(value: unknown): Record<string, unknown> {
@@ -88,637 +50,587 @@ function asRecord(value: unknown): Record<string, unknown> {
     : {};
 }
 
-function asOptionalString(value: unknown): string | null {
-  return typeof value === "string" && value.trim().length > 0 ? value : null;
+function asRecords(value: unknown): Record<string, unknown>[] {
+  return Array.isArray(value)
+    ? value.filter(
+        (item): item is Record<string, unknown> =>
+          Boolean(item) && typeof item === "object" && !Array.isArray(item),
+      )
+    : [];
 }
 
-function asString(value: unknown, fallback = "未返回") {
-  return asOptionalString(value) ?? fallback;
-}
-
-function formatUnknownItem(item: unknown): string | null {
-  if (typeof item === "string" && item.trim().length > 0) {
-    return item;
-  }
-
-  if (typeof item === "number" || typeof item === "boolean") {
-    return String(item);
-  }
-
-  const record = asRecord(item);
-  if (Object.keys(record).length === 0) {
-    return null;
-  }
-
-  return (
-    asOptionalString(record.id) ??
-    asOptionalString(record.claim_id) ??
-    asOptionalString(record.evidence_id) ??
-    asOptionalString(record.agent_name) ??
-    asOptionalString(record.name) ??
-    asOptionalString(record.key) ??
-    asOptionalString(record.description) ??
-    asOptionalString(record.message) ??
-    asOptionalString(record.reason) ??
-    asOptionalString(record.content)
-  );
-}
-
-function asStringList(value: unknown): string[] {
-  const items = Array.isArray(value) ? value : value ? [value] : [];
-  return items
-    .map(formatUnknownItem)
-    .filter((item): item is string => Boolean(item));
+function asString(value: unknown, fallback = ""): string {
+  if (typeof value === "string" && value.trim()) return value.trim();
+  if (typeof value === "number" || typeof value === "boolean") return String(value);
+  return fallback;
 }
 
 function asNumber(value: unknown): number | undefined {
   return typeof value === "number" && Number.isFinite(value) ? value : undefined;
 }
 
-function asBoolean(value: unknown): boolean | undefined {
-  return typeof value === "boolean" ? value : undefined;
+function asStringList(value: unknown): string[] {
+  if (!Array.isArray(value)) return [];
+  return value.map((item) => asString(item)).filter(Boolean);
 }
 
-function normalizeStatus(value: unknown): string {
-  return typeof value === "string" ? value.trim().toLowerCase() : "";
+function normalize(value: unknown): string {
+  return asString(value).toLowerCase();
 }
 
-function mergeUnique(...groups: string[][]): string[] {
-  return Array.from(new Set(groups.flat().filter(Boolean)));
-}
-
-function normalizeReport(
-  response: ReportApiResponse | FinalReport | null,
-): FinalReport {
-  if (!response) {
-    return {};
-  }
-
+function extractReport(response: ReportResponse | FinalReport | null): FinalReport {
+  if (!response) return {};
   const record = asRecord(response);
-  return asRecord(record.final_report ?? response);
+  return asRecord(record.final_report ?? response) as FinalReport;
 }
 
-function getQualityResult(
-  response: ReportApiResponse | FinalReport | null,
-  report: FinalReport,
-) {
-  const responseRecord = asRecord(response);
-  const reportRecord = asRecord(report);
-  return asRecord(responseRecord.quality_result ?? reportRecord.quality_result);
+function qualityFrom(response: ReportResponse | FinalReport | null, report: FinalReport) {
+  const record = asRecord(response);
+  return asRecord(record.quality_result ?? report.quality_result);
 }
 
-function normalizeExecutiveSummary(report: FinalReport): string[] {
-  return asStringList(asRecord(report).executive_summary);
+function qualityTone(status: string): Tone {
+  const value = normalize(status);
+  if (value === "approved") return "success";
+  if (value === "approved_with_limitations" || value === "partial_report") return "warning";
+  if (value.includes("reject") || value.includes("fail")) return "danger";
+  return "neutral";
 }
 
-function normalizeRanking(report: FinalReport): RankingItem[] {
-  const record = asRecord(report);
-  const ranking = record.competitor_ranking ?? record.competitive_ranking ?? [];
-
-  if (!Array.isArray(ranking)) {
-    return [];
+function statusTone(status?: string): Tone {
+  const value = normalize(status);
+  if (["available", "complete", "success", "official"].includes(value)) return "success";
+  if (["partial", "reference_only", "approved_with_limitations"].includes(value)) return "warning";
+  if (["failed", "rejected"].includes(value)) return "danger";
+  if (value.includes("pending") || value.includes("not_connected") || value === "insufficient_evidence") {
+    return "warning";
   }
-
-  return ranking.map((item) => {
-    const itemRecord = asRecord(item);
-    return {
-      platform: asString(itemRecord.platform, "未知平台"),
-      rank: asNumber(itemRecord.rank),
-      score: asNumber(itemRecord.score),
-      summary: asString(itemRecord.summary, ""),
-      supporting_evidence_ids: asStringList(itemRecord.supporting_evidence_ids),
-    };
-  });
+  return "neutral";
 }
 
-function normalizeSwot(report: FinalReport): Swot {
-  const record = asRecord(report);
-  const swot = asRecord(record.swot ?? record.swot_analysis);
-
-  return swotKeys.reduce<Swot>((acc, key) => {
-    acc[key] = asStringList(swot[key]);
-    return acc;
-  }, {});
-}
-
-function normalizeRecommendations(report: FinalReport): RecommendationItem[] {
-  const record = asRecord(report);
-  const recommendations =
-    record.strategic_recommendations ?? record.recommendations ?? [];
-
-  if (!Array.isArray(recommendations)) {
-    return [];
-  }
-
-  return recommendations.map((item) => {
-    const itemRecord = asRecord(item);
-    return {
-      recommendation: asString(itemRecord.recommendation, "未返回"),
-      supporting_claim_ids: asStringList(itemRecord.supporting_claim_ids),
-      supporting_evidence_ids: asStringList(itemRecord.supporting_evidence_ids),
-      confidence_score: asNumber(itemRecord.confidence_score),
-    };
-  });
-}
-
-function normalizeRisk(item: unknown): ReportRisk {
-  const itemRecord = asRecord(item);
-  const severity =
-    asOptionalString(itemRecord.severity) ??
-    asOptionalString(itemRecord.level) ??
-    asOptionalString(itemRecord.risk_level) ??
-    "unknown";
-  const description =
-    asOptionalString(itemRecord.description) ??
-    asOptionalString(itemRecord.message) ??
-    asOptionalString(itemRecord.reason) ??
-    asOptionalString(itemRecord.content) ??
-    "系统暂未返回风险描述。";
-
-  return {
-    risk_type: asString(itemRecord.risk_type, "unknown"),
-    severity,
-    level: asOptionalString(itemRecord.level) ?? undefined,
-    risk_level: asOptionalString(itemRecord.risk_level) ?? undefined,
-    description,
-    message: asOptionalString(itemRecord.message) ?? undefined,
-    reason: asOptionalString(itemRecord.reason) ?? undefined,
-    content: asOptionalString(itemRecord.content) ?? undefined,
-    related_platforms: asStringList(itemRecord.related_platforms),
-    related_dimensions: asStringList(itemRecord.related_dimensions),
+function riskTypeLabel(value: unknown): string {
+  const type = normalize(value);
+  const labels: Record<string, string> = {
+    data_credibility: "数据可信度风险",
+    data_timeliness: "实时性待补齐",
+    evidence_gap: "数据缺口",
+    compliance: "合规风险",
+    faithfulness: "事实支撑风险",
   };
+  return labels[type] ?? asString(value, "风险提示");
 }
 
-function normalizeRisks(report: FinalReport, riskFlags: RiskFlag[]): ReportRisk[] {
-  const reportRecord = asRecord(report);
-  const reportRisks =
-    reportRecord.risk_disclosure ?? reportRecord.risks ?? reportRecord.risk_flags;
-  const source = riskFlags.length > 0 ? riskFlags : reportRisks;
-
-  if (!Array.isArray(source)) {
-    return [];
+function formatValue(value: unknown, unit = "", fallback = "待补齐") {
+  if (value === null || value === undefined || value === "" || (Array.isArray(value) && !value.length)) {
+    return fallback;
   }
-
-  return source.map(normalizeRisk);
+  if (Array.isArray(value)) return value.join(" / ");
+  return `${value}${unit}`;
 }
 
-function getRiskSeverity(risk: ReportRisk) {
-  const riskRecord = asRecord(risk);
-  return normalizeStatus(
-    riskRecord.severity ?? riskRecord.level ?? riskRecord.risk_level,
-  );
+function pendingData(report: FinalReport, quality: Record<string, unknown>) {
+  const fromReport = asRecords(report.pending_data);
+  if (fromReport.length) return fromReport;
+  const links = asRecord(report.evidence_links);
+  const fromLinks = asRecords(links.pending_data);
+  if (fromLinks.length) return fromLinks;
+  return asRecords(quality.pending_data);
 }
 
-function getQualitySummary(
-  response: ReportApiResponse | FinalReport | null,
-  report: FinalReport,
-  usedClaimIds: string[],
-  usedEvidenceIds: string[],
-) {
-  const responseRecord = asRecord(response);
-  const reportRecord = asRecord(report);
-  const qualityRecord = getQualityResult(response, report);
-  const metricsRecord = asRecord(responseRecord.metrics);
-  const rawQualityStatus =
-    asOptionalString(responseRecord.quality_status) ??
-    asOptionalString(reportRecord.quality_status) ??
-    asOptionalString(qualityRecord.status);
-  const normalizedQualityStatus = normalizeStatus(rawQualityStatus);
-  const needsHumanReview =
-    responseRecord.needs_human_review === true ||
-    reportRecord.needs_human_review === true ||
-    qualityRecord.needs_human_review === true ||
-    normalizedQualityStatus.includes("human") ||
-    normalizedQualityStatus === "rejected_after_max_iterations" ||
-    normalizedQualityStatus === "requires_human_review";
-
-  return {
-    status: rawQualityStatus ?? "暂无",
-    normalizedStatus: normalizedQualityStatus,
-    score:
-      asNumber(qualityRecord.score) ??
-      asNumber(qualityRecord.quality_score) ??
-      asNumber(reportRecord.quality_score) ??
-      asNumber(metricsRecord.quality_score),
-    iterationCount:
-      asNumber(responseRecord.iteration_count) ??
-      asNumber(reportRecord.iteration_count) ??
-      asNumber(qualityRecord.iteration_count) ??
-      asNumber(metricsRecord.iteration_count),
-    rejectedAgents: mergeUnique(
-      asStringList(responseRecord.rejected_agents),
-      asStringList(reportRecord.rejected_agents),
-      asStringList(qualityRecord.rejected_agents),
-    ),
-    needsHumanReview,
-    approved:
-      asBoolean(qualityRecord.approved) ??
-      asBoolean(responseRecord.is_approved) ??
-      asBoolean(reportRecord.is_approved),
-    usedClaimCount: usedClaimIds.length,
-    usedEvidenceCount: usedEvidenceIds.length,
-  };
+function compactPending(item: Record<string, unknown>) {
+  const agent = asString(item.agent);
+  const status = asString(item.status, "pending");
+  const fields = asStringList(item.fields);
+  const note = asString(item.note);
+  const label = agent || asString(item.dimension) || asString(item.field) || "待补充数据";
+  if (fields.length) return `${label}：${fields.slice(0, 5).join("、")}（${status}）`;
+  return `${label}（${status}${note ? `，${note}` : ""}）`;
 }
 
-function isApprovedStatus(status: string) {
-  return ["approved", "pass", "passed", "success"].includes(status);
-}
-
-function isRejectedStatus(status: string) {
-  return (
-    status.includes("reject") ||
-    status.includes("fail") ||
-    status === "not_approved"
-  );
-}
-
-function getReportGateState({
-  hasHighRisk,
-  qualitySummary,
+function Section({
+  children,
+  title,
+  subtitle,
 }: {
-  hasHighRisk: boolean;
-  qualitySummary: ReturnType<typeof getQualitySummary>;
-}): ReportGateState {
-  const { approved, needsHumanReview, normalizedStatus } = qualitySummary;
-
-  if (needsHumanReview) {
-    return {
-      kind: "human_review",
-      title: "等待人工审核",
-      description:
-        "自动质量修复已达到上限，当前报告需要人工复核后才能作为正式结果。",
-      tone: "warning",
-      notice: "等待人工审核后发布正式报告。",
-    };
-  }
-
-  if (approved === true || isApprovedStatus(normalizedStatus)) {
-    return {
-      kind: "official",
-      title: "正式报告",
-      description: "本报告已通过质量门控审查，可作为当前任务的正式输出。",
-      tone: "success",
-      notice: "",
-    };
-  }
-
-  if (approved === false || isRejectedStatus(normalizedStatus)) {
-    return {
-      kind: "draft",
-      title: "报告已被质量门控拦截",
-      description:
-        "当前分析结果未通过质量审查，以下内容仅作为草稿参考，不应作为正式结论使用。",
-      tone: "danger",
-      notice: "草稿报告，仅供排查和人工审核参考。",
-    };
-  }
-
-  if (hasHighRisk) {
-    return {
-      kind: "risk",
-      title: "存在高风险项",
-      description:
-        "RiskAgent 识别到高严重风险，请先处理风险后再使用报告结论。",
-      tone: "danger",
-      notice: "草稿报告，仅供风险排查和人工审核参考。",
-    };
-  }
-
-  return {
-    kind: "draft",
-    title: "草稿报告",
-    description:
-      "当前报告尚未确认通过质量门控，以下内容仅作为草稿参考。",
-    tone: "warning",
-    notice: "草稿报告，仅供排查和人工审核参考。",
-  };
-}
-
-function IdTags({
-  ids,
-  tone = "neutral",
-}: {
-  ids: string[];
-  tone?: "neutral" | "info";
+  children: React.ReactNode;
+  title: string;
+  subtitle?: string;
 }) {
-  if (ids.length === 0) {
-    return <span className="text-sm text-slate-500">无</span>;
-  }
+  return (
+    <section className="rounded-lg border border-slate-800 bg-slate-950/72 p-5">
+      <div className="mb-4">
+        <h3 className="text-lg font-semibold text-white">{title}</h3>
+        {subtitle ? <p className="mt-1 text-sm leading-6 text-slate-400">{subtitle}</p> : null}
+      </div>
+      {children}
+    </section>
+  );
+}
 
+function Metric({ label, value, note }: { label: string; value: string; note?: string }) {
+  return (
+    <div className="rounded-md border border-slate-800 bg-slate-900/45 p-4">
+      <p className="text-xs uppercase tracking-[0.16em] text-slate-500">{label}</p>
+      <p className="mt-2 text-xl font-semibold text-slate-100">{value}</p>
+      {note ? <p className="mt-1 text-xs leading-5 text-slate-500">{note}</p> : null}
+    </div>
+  );
+}
+
+function IdTags({ ids, tone = "neutral" }: { ids: string[]; tone?: Tone }) {
+  if (!ids.length) return <span className="text-sm text-slate-500">暂无</span>;
   return (
     <div className="flex flex-wrap gap-2">
-      {ids.map((id) => (
+      {ids.slice(0, 16).map((id) => (
         <StatusBadge key={id} label={id} tone={tone} />
       ))}
     </div>
   );
 }
 
-function ReportGateBanner({
-  highRiskCount,
-  state,
-}: {
-  highRiskCount: number;
-  state: ReportGateState;
-}) {
-  const classes =
-    state.tone === "success"
-      ? "border-emerald-400/35 bg-emerald-400/10 text-emerald-100"
-      : state.tone === "danger"
-        ? "border-rose-400/35 bg-rose-500/10 text-rose-100"
-        : "border-amber-400/35 bg-amber-400/10 text-amber-100";
+function Recommendation({ report }: { report: FinalReport }) {
+  const recommendation = asRecord(report.final_recommendation);
+  const summary = asRecord(report.summary);
+  const winner =
+    asString(recommendation.recommended_product) ||
+    asString(summary.winner) ||
+    "暂不输出明确购买结论";
+  const reason =
+    asString(recommendation.reason) ||
+    asString(summary.reason) ||
+    "当前报告只整合已验证的硬件事实、证据链和 pending 数据披露。";
+  const topReasons = asStringList(recommendation.top_reasons);
+  const cautions = [
+    ...asStringList(recommendation.cautions),
+    ...asStringList(report.limitations),
+  ];
 
   return (
-    <section className={`rounded-lg border p-5 ${classes}`}>
-      <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
+    <Section
+      subtitle="ReportAgent 只基于前序 Agent 的结构化输出生成，不把缺失的评价、价格或长期口碑伪造成已完成。"
+      title="最终综合建议"
+    >
+      <div className="rounded-lg border border-cyan-300/25 bg-cyan-300/10 p-5">
+        <p className="text-sm text-cyan-200">推荐关注</p>
+        <h3 className="mt-2 text-2xl font-semibold text-white">{winner}</h3>
+        <p className="mt-3 text-sm leading-7 text-slate-200">{reason}</p>
+      </div>
+      <div className="mt-4 grid gap-4 lg:grid-cols-2">
         <div>
-          <h3 className="text-lg font-semibold">{state.title}</h3>
-          <p className="mt-2 text-sm leading-6 opacity-90">{state.description}</p>
+          <p className="text-xs font-semibold uppercase tracking-[0.16em] text-slate-500">依据</p>
+          <ul className="mt-2 space-y-2 text-sm leading-6 text-slate-300">
+            {(topReasons.length ? topReasons : ["已命中的本地硬件事实、结构化证据与质量门控结果。"]).map((item) => (
+              <li className="flex gap-2" key={item}>
+                <span className="mt-2 h-1.5 w-1.5 shrink-0 rounded-full bg-cyan-300" />
+                <span>{item}</span>
+              </li>
+            ))}
+          </ul>
         </div>
-        <div className="flex flex-wrap gap-2 lg:justify-end">
-          <StatusBadge label={state.title} tone={state.tone} />
-          {highRiskCount > 0 ? (
-            <StatusBadge label={`高风险 ${highRiskCount} 项`} tone="danger" />
-          ) : null}
+        <div>
+          <p className="text-xs font-semibold uppercase tracking-[0.16em] text-slate-500">限制</p>
+          <ul className="mt-2 space-y-2 text-sm leading-6 text-slate-300">
+            {(cautions.length ? cautions : ["用户评价、博主测评、实时价格仍等待 MCP 补齐。"]).map((item) => (
+              <li className="flex gap-2" key={item}>
+                <span className="mt-2 h-1.5 w-1.5 shrink-0 rounded-full bg-amber-300" />
+                <span>{item}</span>
+              </li>
+            ))}
+          </ul>
         </div>
       </div>
-    </section>
+    </Section>
   );
 }
 
-function QualitySummaryCard({
-  qualitySummary,
-}: {
-  qualitySummary: ReturnType<typeof getQualitySummary>;
-}) {
-  const retryText =
-    typeof qualitySummary.iterationCount === "number"
-      ? `${qualitySummary.iterationCount} / ${MAX_RETRY_COUNT}`
-      : "暂无";
-  const scoreText =
-    typeof qualitySummary.score === "number"
-      ? qualitySummary.score.toFixed(1)
-      : "暂无";
-
+function ProductIdentitySection({ items }: { items: ProductIdentity[] }) {
+  if (!items.length) return null;
   return (
-    <section className="rounded-lg border border-slate-800 bg-slate-950/75 p-5">
-      <div className="mb-5 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
-        <div>
-          <h3 className="text-lg font-semibold text-white">质量审查摘要</h3>
-          <p className="mt-1 text-sm text-slate-400">
-            汇总 QualityAgent 门控状态与报告引用规模。
-          </p>
-        </div>
-        <StatusBadge
-          label={qualitySummary.needsHumanReview ? "需要人工审核" : qualitySummary.status}
-          tone={qualitySummary.needsHumanReview ? "warning" : "info"}
-        />
+    <Section
+      subtitle="这里对应 ProductResolver 与本地事实库的实体消歧结果。"
+      title="产品识别与变体"
+    >
+      <div className="grid gap-3 lg:grid-cols-2">
+        {items.map((item, index) => (
+          <article
+            className="rounded-lg border border-slate-800 bg-slate-900/45 p-4"
+            key={`${item.official_model || item.model || index}`}
+          >
+            <div className="flex flex-wrap items-center gap-2">
+              <h4 className="text-base font-semibold text-white">
+                {item.brand} {item.official_model || item.model || "待识别产品"}
+              </h4>
+              <StatusBadge label={item.data_status || "pending"} tone={statusTone(item.data_status)} />
+              {item.alias_confidence ? (
+                <StatusBadge label={`别名 ${item.alias_confidence}`} tone={statusTone(item.alias_confidence)} />
+              ) : null}
+            </div>
+            <dl className="mt-4 grid gap-3 text-sm sm:grid-cols-2">
+              <div>
+                <dt className="text-slate-500">系列 / 变体</dt>
+                <dd className="mt-1 text-slate-200">
+                  {item.family || "待补齐"} / {item.variant_name || "标准或待识别"}
+                </dd>
+              </div>
+              <div>
+                <dt className="text-slate-500">变体类型</dt>
+                <dd className="mt-1 text-slate-200">{item.variant_type || "待补齐"}</dd>
+              </div>
+              <div>
+                <dt className="text-slate-500">点击系统</dt>
+                <dd className="mt-1 text-slate-200">{item.click_system || "待补齐"}</dd>
+              </div>
+            </dl>
+            <div className="mt-4 flex flex-wrap gap-2">
+              {(item.community_aliases || []).slice(0, 6).map((alias) => (
+                <StatusBadge key={alias} label={alias} tone="neutral" />
+              ))}
+            </div>
+          </article>
+        ))}
       </div>
-
-      <dl className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
-        <div className="rounded-md border border-slate-800 bg-slate-900/45 p-4">
-          <dt className="text-xs uppercase tracking-[0.16em] text-slate-500">
-            质量状态
-          </dt>
-          <dd className="mt-2 break-words text-sm font-semibold text-slate-100">
-            {qualitySummary.status}
-          </dd>
-        </div>
-        <div className="rounded-md border border-slate-800 bg-slate-900/45 p-4">
-          <dt className="text-xs uppercase tracking-[0.16em] text-slate-500">
-            质量得分
-          </dt>
-          <dd className="mt-2 text-sm font-semibold text-slate-100">
-            {scoreText}
-          </dd>
-        </div>
-        <div className="rounded-md border border-slate-800 bg-slate-900/45 p-4">
-          <dt className="text-xs uppercase tracking-[0.16em] text-slate-500">
-            重试轮次
-          </dt>
-          <dd className="mt-2 text-sm font-semibold text-slate-100">
-            {retryText}
-          </dd>
-        </div>
-        <div className="rounded-md border border-slate-800 bg-slate-900/45 p-4">
-          <dt className="text-xs uppercase tracking-[0.16em] text-slate-500">
-            是否需要人工审核
-          </dt>
-          <dd className="mt-2 text-sm font-semibold text-slate-100">
-            {qualitySummary.needsHumanReview ? "是" : "否"}
-          </dd>
-        </div>
-        <div className="rounded-md border border-slate-800 bg-slate-900/45 p-4 md:col-span-2">
-          <dt className="text-xs uppercase tracking-[0.16em] text-slate-500">
-            被打回 Agent
-          </dt>
-          <dd className="mt-2">
-            <IdTags ids={qualitySummary.rejectedAgents} />
-          </dd>
-        </div>
-        <div className="rounded-md border border-slate-800 bg-slate-900/45 p-4">
-          <dt className="text-xs uppercase tracking-[0.16em] text-slate-500">
-            使用 Claim
-          </dt>
-          <dd className="mt-2 text-sm font-semibold text-slate-100">
-            {qualitySummary.usedClaimCount} 条
-          </dd>
-        </div>
-        <div className="rounded-md border border-slate-800 bg-slate-900/45 p-4">
-          <dt className="text-xs uppercase tracking-[0.16em] text-slate-500">
-            使用 Evidence
-          </dt>
-          <dd className="mt-2 text-sm font-semibold text-slate-100">
-            {qualitySummary.usedEvidenceCount} 条
-          </dd>
-        </div>
-      </dl>
-    </section>
+    </Section>
   );
 }
 
-function DraftNotice({ state }: { state: ReportGateState }) {
-  if (state.kind === "official") {
-    return null;
+function HardwareSpecsSection({ specs }: { specs: HardwareSpec[] }) {
+  if (!specs.length) {
+    return (
+      <Section title="硬件规格" subtitle="本地事实库未命中时，这里会等待官网规格 MCP 补齐。">
+        <div className="rounded-md border border-dashed border-amber-300/35 bg-amber-300/10 p-4 text-sm leading-6 text-amber-100">
+          当前没有可展示的本地硬件事实。后续接入搜索/官网 MCP 后，将先识别官方型号，再补齐硬件参数。
+        </div>
+      </Section>
+    );
   }
 
-  const classes =
-    state.kind === "draft" || state.kind === "risk"
-      ? "border-rose-400/30 bg-rose-500/10 text-rose-100"
-      : "border-amber-400/35 bg-amber-400/10 text-amber-100";
+  const rows = [
+    ["重量", (item: HardwareSpec) => formatValue(item.weight_g, "g")],
+    ["传感器", (item: HardwareSpec) => formatValue(item.sensor)],
+    ["最高 DPI", (item: HardwareSpec) => formatValue(item.dpi_max)],
+    ["回报率", (item: HardwareSpec) => formatValue(item.polling_rate_hz, "Hz")],
+    ["连接方式", (item: HardwareSpec) => formatValue(item.connection)],
+    ["续航", (item: HardwareSpec) => formatValue(item.battery_hours, "h")],
+    ["微动", (item: HardwareSpec) => formatValue(item.switch_type)],
+    ["点击系统", (item: HardwareSpec) => formatValue(item.click_system)],
+    ["驱动 / 软件", (item: HardwareSpec) => formatValue(item.software)],
+    ["板载内存", (item: HardwareSpec) => (item.onboard_memory === undefined || item.onboard_memory === null ? "待补齐" : item.onboard_memory ? "支持" : "不支持")],
+  ];
 
   return (
-    <div className={`rounded-lg border px-4 py-3 text-sm font-medium ${classes}`}>
-      {state.notice}
+    <Section
+      subtitle="只展示相对稳定的硬件事实。手感、握法、适合人群和实时价格不在这里伪造结论。"
+      title="硬件规格"
+    >
+      <div className="overflow-hidden rounded-lg border border-slate-800">
+        <table className="w-full min-w-[720px] text-left text-sm">
+          <thead className="bg-slate-900/80 text-xs uppercase tracking-[0.14em] text-slate-500">
+            <tr>
+              <th className="w-44 px-4 py-3">字段</th>
+              {specs.map((spec, index) => (
+                <th className="px-4 py-3" key={`${spec.product_id || spec.model || index}`}>
+                  {spec.brand} {spec.model}
+                </th>
+              ))}
+            </tr>
+          </thead>
+          <tbody className="divide-y divide-slate-800 bg-slate-950/55">
+            {rows.map(([label, getter]) => (
+              <tr key={label as string}>
+                <td className="px-4 py-3 text-slate-500">{label as string}</td>
+                {specs.map((spec, index) => (
+                  <td className="px-4 py-3 font-medium text-slate-200" key={`${label}-${spec.product_id || index}`}>
+                    {(getter as (item: HardwareSpec) => string)(spec)}
+                  </td>
+                ))}
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </Section>
+  );
+}
+
+function FeatureTreeSection({ report }: { report: FinalReport }) {
+  const tree = asRecord(report.feature_tree);
+  const entries = Object.entries(FEATURE_LABELS)
+    .map(([key, label]) => ({ key, label, node: asRecord(tree[key]) as FeatureNode }))
+    .filter((item) => Object.keys(item.node).length);
+  if (!entries.length) return null;
+
+  return (
+    <Section
+      subtitle="专业电竞鼠标 schema 把报告拆成固定能力树，方便评委看到字段完整性和 pending 状态。"
+      title="电竞鼠标能力树"
+    >
+      <div className="grid gap-3 lg:grid-cols-2">
+        {entries.map(({ key, label, node }) => (
+          <article className="rounded-lg border border-slate-800 bg-slate-900/45 p-4" key={key}>
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <h4 className="font-semibold text-white">{node.name || label}</h4>
+              <StatusBadge label={node.status || "pending"} tone={statusTone(node.status)} />
+            </div>
+            <p className="mt-2 text-sm leading-6 text-slate-400">
+              {node.summary || "等待对应 Agent 或 MCP 补齐后形成摘要。"}
+            </p>
+            <div className="mt-3 flex flex-wrap gap-2">
+              {(node.fields || []).map((field) => (
+                <span className="rounded-full border border-slate-700 bg-slate-950 px-2 py-1 text-xs text-slate-300" key={field}>
+                  {field}
+                </span>
+              ))}
+            </div>
+          </article>
+        ))}
+      </div>
+    </Section>
+  );
+}
+
+function ScoreFlowSection({ report }: { report: FinalReport }) {
+  const flow = asRecord(report.score_flow);
+  const baseline = asRecord(flow.baseline_score);
+  const finalScore = asRecord(flow.final_score);
+  const adjustments = asRecords(flow.agent_adjustments);
+  if (!Object.keys(flow).length) return null;
+
+  return (
+    <Section
+      subtitle="这里展示报告是如何从基础硬件事实进入 Agent 质量门控和最终建议的。"
+      title="基础事实 -> Agent 修正 -> 最终评分"
+    >
+      <div className="grid gap-3 md:grid-cols-3">
+        <Metric
+          label={asString(baseline.label, "基础硬件事实")}
+          note={asString(baseline.note, "来自本地 JSON 或官网规格 MCP。")}
+          value={asString(baseline.value ?? baseline.score, "待计算")}
+        />
+        <Metric
+          label="Agent 修正"
+          note="评价、价格、风险和证据缺口会影响最终可信度。"
+          value={`${adjustments.length} 项`}
+        />
+        <Metric
+          label={asString(finalScore.label, "最终综合结果")}
+          note={asString(finalScore.note, "由 ReportAgent 汇总生成。")}
+          value={asString(finalScore.value ?? finalScore.score, "待生成")}
+        />
+      </div>
+      {adjustments.length ? (
+        <div className="mt-4 space-y-2">
+          {adjustments.map((item, index) => (
+            <div className="rounded-md border border-slate-800 bg-slate-900/50 px-3 py-2 text-sm text-slate-300" key={index}>
+              <span className="font-semibold text-slate-100">{asString(item.agent, `Agent ${index + 1}`)}</span>
+              <span className="text-slate-500">：{asString(item.reason || item.summary, "已参与最终修正。")}</span>
+            </div>
+          ))}
+        </div>
+      ) : null}
+    </Section>
+  );
+}
+
+function PendingAndEvidence({ report, quality }: { report: FinalReport; quality: Record<string, unknown> }) {
+  const pending = pendingData(report, quality);
+  const evidenceLinks = asRecord(report.evidence_links);
+  const usedClaimIds = asStringList(report.used_claim_ids).length
+    ? asStringList(report.used_claim_ids)
+    : asStringList(evidenceLinks.used_claim_ids);
+  const usedEvidenceIds = asStringList(report.used_evidence_ids).length
+    ? asStringList(report.used_evidence_ids)
+    : asStringList(evidenceLinks.used_evidence_ids);
+  const unsupported = asStringList(evidenceLinks.unsupported_claim_ids);
+
+  return (
+    <div className="grid gap-5 lg:grid-cols-[minmax(0,1fr)_360px]">
+      <Section
+        subtitle="pending 会降低报告可信度，但不会被当作失败，也不会伪造成已采集。"
+        title="待 MCP 补齐的数据"
+      >
+        {pending.length ? (
+          <ul className="space-y-2 text-sm leading-6 text-slate-300">
+            {pending.map((item, index) => (
+              <li className="flex gap-2" key={`${compactPending(item)}-${index}`}>
+                <span className="mt-2 h-1.5 w-1.5 shrink-0 rounded-full bg-amber-300" />
+                <span>{compactPending(item)}</span>
+              </li>
+            ))}
+          </ul>
+        ) : (
+          <p className="text-sm text-slate-400">暂无 pending 数据。</p>
+        )}
+      </Section>
+
+      <Section title="证据引用">
+        <div className="space-y-4">
+          <div>
+            <p className="mb-2 text-xs font-semibold uppercase tracking-[0.16em] text-slate-500">
+              Used claims
+            </p>
+            <IdTags ids={usedClaimIds} />
+          </div>
+          <div>
+            <p className="mb-2 text-xs font-semibold uppercase tracking-[0.16em] text-slate-500">
+              Used evidence
+            </p>
+            <IdTags ids={usedEvidenceIds} tone="info" />
+          </div>
+          {unsupported.length ? (
+            <div>
+              <p className="mb-2 text-xs font-semibold uppercase tracking-[0.16em] text-slate-500">
+                Unsupported claims
+              </p>
+              <IdTags ids={unsupported} tone="warning" />
+            </div>
+          ) : null}
+        </div>
+      </Section>
     </div>
   );
 }
 
-export function ReportPage({
-  taskId,
-  displayTaskId,
-  onNavigate,
-}: ReportPageProps) {
-  const [reportResponse, setReportResponse] = useState<
-    ReportApiResponse | FinalReport | null
-  >(null);
-  const [riskFlags, setRiskFlags] = useState<RiskFlag[]>([]);
+function PersonaAndPrice({ report }: { report: FinalReport }) {
+  const persona = report.user_persona;
+  const pricing = report.pricing_model;
+  if (!persona && !pricing) return null;
+
+  return (
+    <div className="grid gap-5 lg:grid-cols-2">
+      <Section title="用户体验适配" subtitle="握法、手型、游戏适配必须等待真实评价/测评证据。">
+        <div className="flex flex-wrap items-center gap-2">
+          <StatusBadge label={persona?.status || "pending"} tone={statusTone(persona?.status)} />
+          <StatusBadge label={persona?.evidence_status || "review_intel_pending"} tone="warning" />
+        </div>
+        <p className="mt-3 text-sm leading-6 text-slate-400">
+          {persona?.limitation || "当前不输出握法、手型或适合游戏结论，等待 ReviewIntel MCP 补齐。"}
+        </p>
+      </Section>
+
+      <Section title="价格与性价比" subtitle="价格随时间变化，不使用本地写死价格做最终判断。">
+        <div className="flex flex-wrap items-center gap-2">
+          <StatusBadge label={pricing?.status || "pending"} tone={statusTone(pricing?.status)} />
+          <StatusBadge label={pricing?.realtime_price_status || "mcp_not_connected"} tone="warning" />
+        </div>
+        <p className="mt-3 text-sm leading-6 text-slate-400">
+          {pricing?.note || "实时价格、折扣和区域可买性等待 Price MCP 补齐。"}
+        </p>
+      </Section>
+    </div>
+  );
+}
+
+function AgentContributions({ items = [] }: { items?: AgentContribution[] }) {
+  if (!items.length) return null;
+  return (
+    <Section subtitle="每个 Agent 对最终报告的贡献，来自 final_report.agent_contributions。" title="Agent 贡献">
+      <div className="grid gap-3 lg:grid-cols-2">
+        {items.map((item) => (
+          <article className="rounded-lg border border-slate-800 bg-slate-900/45 p-4" key={item.agent}>
+            <div className="flex flex-wrap items-center gap-2">
+              <h4 className="font-semibold text-white">{item.agent}</h4>
+              <StatusBadge label={item.status || "applied"} tone={statusTone(item.status)} />
+            </div>
+            <p className="mt-2 text-sm font-medium text-slate-300">{item.role}</p>
+            <p className="mt-2 text-sm leading-6 text-slate-400">{item.summary}</p>
+          </article>
+        ))}
+      </div>
+    </Section>
+  );
+}
+
+function RisksSection({ risks }: { risks: Record<string, unknown>[] }) {
+  return (
+    <Section subtitle="风险会直接影响 QualityAgent 的报告可信度。" title="风险披露">
+      {risks.length ? (
+        <div className="grid gap-3 lg:grid-cols-2">
+          {risks.map((risk, index) => {
+            const severity = normalize(risk.severity);
+            const tone: Tone =
+              severity === "high" ? "danger" : severity === "medium" ? "warning" : "success";
+            return (
+              <article className="rounded-lg border border-slate-800 bg-slate-900/45 p-4" key={`${asString(risk.risk_type)}-${index}`}>
+                <div className="flex flex-wrap items-center gap-2">
+                  <StatusBadge label={asString(risk.severity, "unknown")} tone={tone} />
+                  <span className="font-semibold text-white">{riskTypeLabel(risk.risk_type)}</span>
+                </div>
+                <p className="mt-3 text-sm leading-6 text-slate-300">
+                  {asString(risk.description, "暂无风险说明")}
+                </p>
+              </article>
+            );
+          })}
+        </div>
+      ) : (
+        <p className="text-sm text-slate-400">暂无风险标记。</p>
+      )}
+    </Section>
+  );
+}
+
+export function ReportPage({ taskId, displayTaskId, onNavigate }: ReportPageProps) {
+  const [response, setResponse] = useState<ReportResponse | FinalReport | null>(null);
+  const [risks, setRisks] = useState<Record<string, unknown>[]>([]);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    if (!taskId) {
-      setReportResponse(null);
-      setRiskFlags([]);
-      setError(null);
-      return;
-    }
-
-    const activeTaskId = taskId;
+    if (!taskId) return;
+    const activeTaskId: string = taskId;
     let cancelled = false;
-    let timerId: number | undefined;
-    let inFlight = false;
-
-    // 最终报告在 StrategyAgent / 人工复核阶段才生成；任务运行中先轮询，完成后停止。
-    async function refreshReport() {
-      if (inFlight) {
-        return;
-      }
-      inFlight = true;
-
-      const [statusResult, reportResult, risksResult] = await Promise.allSettled([
-        analysisApi.getStatus(activeTaskId),
-        analysisApi.getReport(activeTaskId),
-        analysisApi.getRisks(activeTaskId),
-      ]);
-
-      if (cancelled) {
-        inFlight = false;
-        return;
-      }
-
-      if (reportResult.status === "fulfilled") {
-        setReportResponse(reportResult.value);
+    async function load() {
+      setIsLoading(true);
+      try {
+        const [reportResult, risksResult] = await Promise.all([
+          analysisApi.getReport(activeTaskId),
+          analysisApi.getRisks(activeTaskId).catch(() => ({ risk_flags: [] })),
+        ]);
+        if (cancelled) return;
+        setResponse(reportResult as ReportResponse);
+        setRisks(asRecords(risksResult.risk_flags));
         setError(null);
-      } else {
-        setError(
-          reportResult.reason instanceof Error
-            ? reportResult.reason.message
-            : "报告加载失败。",
-        );
-      }
-
-      if (risksResult.status === "fulfilled") {
-        const risksRecord = asRecord(risksResult.value);
-        const riskSource = risksRecord.risk_flags ?? risksRecord.risks;
-        setRiskFlags(Array.isArray(riskSource) ? (riskSource as RiskFlag[]) : []);
-      }
-
-      setIsLoading(false);
-      inFlight = false;
-
-      const taskStatus =
-        statusResult.status === "fulfilled"
-          ? String(statusResult.value?.status || "").toLowerCase()
-          : "";
-      if ((taskStatus === "completed" || taskStatus === "failed") && timerId) {
-        window.clearInterval(timerId);
-        timerId = undefined;
+      } catch (loadError) {
+        if (!cancelled) {
+          setError(loadError instanceof Error ? loadError.message : "加载报告失败");
+        }
+      } finally {
+        if (!cancelled) setIsLoading(false);
       }
     }
-
-    setIsLoading(true);
-    setError(null);
-    refreshReport();
-    timerId = window.setInterval(refreshReport, 1800);
-
+    load();
     return () => {
       cancelled = true;
-      if (timerId) {
-        window.clearInterval(timerId);
-      }
     };
   }, [taskId]);
 
-  const report = useMemo(() => normalizeReport(reportResponse), [reportResponse]);
-  const executiveSummary = useMemo(() => normalizeExecutiveSummary(report), [report]);
-  const ranking = useMemo(() => normalizeRanking(report), [report]);
-  const rankingBars = useMemo<BarDatum[]>(() => {
-    const palette: BarDatum["tone"][] = [
-      "cyan",
-      "violet",
-      "emerald",
-      "amber",
-      "rose",
-      "slate",
-    ];
-
-    return ranking.map((item, index) => {
-      const evidenceIds = item.supporting_evidence_ids ?? [];
-      const hasScore = typeof item.score === "number";
-
-      return {
-        key: `${item.platform}-${index}`,
-        label: `#${item.rank ?? index + 1} ${item.platform ?? "未知"}`,
-        value: hasScore ? (item.score as number) : 0,
-        display: hasScore ? (item.score as number).toFixed(2) : "未评分",
-        tone: palette[index % palette.length],
-        tooltip: (
-          <span className="space-y-1">
-            <span className="block font-semibold text-slate-800">
-              {item.platform ?? "未知竞品"}
-            </span>
-            <span className="block">
-              总分：{hasScore ? (item.score as number).toFixed(2) : "未评分"}
-            </span>
-            {item.summary ? (
-              <span className="block text-slate-500">{item.summary}</span>
-            ) : null}
-            <span className="block text-slate-400">
-              支撑证据：
-              {evidenceIds.length > 0 ? evidenceIds.join("、") : "暂无"}
-            </span>
-          </span>
-        ),
-      };
-    });
-  }, [ranking]);
-  const swot = useMemo(() => normalizeSwot(report), [report]);
-  const recommendations = useMemo(() => normalizeRecommendations(report), [report]);
-  const risks = useMemo(() => normalizeRisks(report, riskFlags), [report, riskFlags]);
-  const usedClaimIds = asStringList(asRecord(report).used_claim_ids);
-  const usedEvidenceIds = mergeUnique(
-    asStringList(asRecord(report).used_evidence_ids),
-    asStringList(asRecord(report).supporting_evidence_ids),
-  );
-  const qualitySummary = getQualitySummary(
-    reportResponse,
-    report,
-    usedClaimIds,
-    usedEvidenceIds,
-  );
-  const highSeverityRisks = risks.filter((risk) => getRiskSeverity(risk) === "high");
-  const reportGateState = getReportGateState({
-    hasHighRisk: highSeverityRisks.length > 0,
-    qualitySummary,
-  });
+  const report = useMemo(() => extractReport(response), [response]);
+  const quality = qualityFrom(response, report);
+  const qualityStatus =
+    asString(quality.status) ||
+    asString(asRecord(response).quality_status) ||
+    asString(report.quality_status) ||
+    "pending";
+  const qualityScore = asNumber(quality.quality_score) ?? asNumber(quality.score);
+  const pending = pendingData(report, quality);
+  const reportRisks = risks.length ? risks : asRecords(report.risk_flags ?? report.risk_disclosure);
   const hasReport = Object.keys(report).length > 0;
 
   if (!taskId) {
     return (
-      <section className="mx-auto max-w-6xl">
+      <section className="mx-auto max-w-5xl">
         <EmptyState
-          title="暂无任务"
-          description="请先启动 gaming_mouse 分析任务，再打开最终报告。"
           action={
             <button
               className="rounded-md bg-cyan-300 px-4 py-2 text-sm font-semibold text-slate-950 transition hover:bg-cyan-200"
-              onClick={() => onNavigate("new-analysis")}
+              onClick={() => onNavigate("product-compare")}
               type="button"
             >
-              新建分析
+              回到产品输入
             </button>
           }
+          description="最终报告需要先启动一次 Agent 分析任务。"
+          title="暂无最终报告"
         />
       </section>
     );
@@ -726,20 +638,31 @@ export function ReportPage({
 
   return (
     <section className="mx-auto max-w-7xl">
-      <div className="mb-6 flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+      <header className="mb-5 flex flex-col gap-4 rounded-lg border border-slate-800 bg-slate-950/75 p-5 lg:flex-row lg:items-start lg:justify-between">
         <div>
-          <p className="text-sm font-medium text-cyan-300">最终报告</p>
-          <h2 className="mt-2 text-3xl font-semibold text-white">
-            竞品策略报告
+          <p className="text-xs font-semibold uppercase tracking-[0.22em] text-cyan-300">
+            Gaming Mouse Final Report
+          </p>
+          <h2 className="mt-2 text-2xl font-semibold text-white">
+            电竞鼠标专业竞品报告
           </h2>
-          <p className="mt-3 max-w-3xl break-all text-sm leading-6 text-slate-400">
-            <span title={`真实任务 ID：${taskId}`}>
-              当前任务：{displayTaskId || taskId}
-            </span>
+          <p className="mt-2 max-w-3xl break-all text-sm leading-6 text-slate-400">
+            当前任务：{displayTaskId || taskId}
           </p>
         </div>
-        <StatusBadge label={reportGateState.title} tone={reportGateState.tone} />
-      </div>
+        <div className="flex flex-wrap gap-2">
+          <StatusBadge label={report.schema_name || "gaming_mouse_competitive_report"} tone="info" />
+          <StatusBadge label={qualityStatus} tone={qualityTone(qualityStatus)} />
+          <StatusBadge label={`报告可信度 ${qualityScore ?? "待计算"}`} tone="info" />
+          <button
+            className="rounded-md border border-slate-700 bg-slate-900/80 px-3 py-2 text-sm font-medium text-slate-200 transition hover:border-cyan-300/50 hover:text-cyan-100"
+            onClick={() => onNavigate("workflow")}
+            type="button"
+          >
+            返回工作流
+          </button>
+        </div>
+      </header>
 
       {isLoading ? <LoadingState label="正在加载最终报告..." /> : null}
 
@@ -749,324 +672,44 @@ export function ReportPage({
         </div>
       ) : null}
 
-      {!isLoading && !error ? (
+      {!isLoading && !error && !hasReport ? (
+        <EmptyState
+          action={
+            <button
+              className="rounded-md bg-cyan-300 px-4 py-2 text-sm font-semibold text-slate-950 transition hover:bg-cyan-200"
+              onClick={() => onNavigate("workflow")}
+              type="button"
+            >
+              查看 Agent 工作流
+            </button>
+          }
+          description="ReportAgent 生成 final_report 后，这里会展示专业 schema 报告。"
+          title="报告尚未生成"
+        />
+      ) : null}
+
+      {hasReport ? (
         <div className="space-y-5">
-          <ReportGateBanner
-            highRiskCount={highSeverityRisks.length}
-            state={reportGateState}
-          />
-          {highSeverityRisks.length > 0 && reportGateState.kind !== "risk" ? (
-            <section className="rounded-lg border border-rose-400/35 bg-rose-500/10 p-5 text-rose-100">
-              <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
-                <div>
-                  <h3 className="text-lg font-semibold">存在高风险项</h3>
-                  <p className="mt-2 text-sm leading-6">
-                    RiskAgent 识别到 {highSeverityRisks.length} 个高严重风险，请先处理风险后再使用报告结论。
-                  </p>
-                </div>
-                <StatusBadge
-                  label={`高风险 ${highSeverityRisks.length} 项`}
-                  tone="danger"
-                />
-              </div>
-            </section>
-          ) : null}
-
-          <QualitySummaryCard qualitySummary={qualitySummary} />
-
-          {!hasReport ? (
-            <EmptyState
-              title={
-                reportGateState.kind === "human_review"
-                  ? "暂无可展示报告"
-                  : "暂无报告"
-              }
-              description={
-                reportGateState.kind === "human_review"
-                  ? "暂无可展示报告，等待人工审核处理。"
-                  : "请等待 StrategyAgent 完成后再查看。"
-              }
+          <div className="grid gap-3 md:grid-cols-4">
+            <Metric label="报告状态" value={qualityStatus} />
+            <Metric
+              label="报告可信度"
+              note="不是产品综合评分"
+              value={qualityScore === undefined ? "待计算" : qualityScore.toFixed(1)}
             />
-          ) : (
-            <>
-              <DraftNotice state={reportGateState} />
+            <Metric label="pending 数据" value={`${pending.length}`} />
+            <Metric label="风险数量" value={`${reportRisks.length}`} />
+          </div>
 
-              <div
-                className={
-                  reportGateState.kind === "official"
-                    ? "space-y-5"
-                    : "space-y-5 rounded-lg border border-slate-800 bg-slate-950/35 p-4"
-                }
-              >
-                <div className="rounded-lg border border-slate-800 bg-slate-950/70 p-5">
-                  <div className="mb-4 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
-                    <h3 className="text-lg font-semibold text-white">执行摘要</h3>
-                    {reportGateState.kind === "official" ? null : (
-                      <StatusBadge label="草稿" tone="warning" />
-                    )}
-                  </div>
-                  {executiveSummary.length > 0 ? (
-                    <div className="space-y-3">
-                      {executiveSummary.map((item) => (
-                        <p className="leading-7 text-slate-200" key={item}>
-                          {item}
-                        </p>
-                      ))}
-                    </div>
-                  ) : (
-                    <p className="text-sm text-slate-400">暂无执行摘要。</p>
-                  )}
-                </div>
-
-                <div className="grid gap-5 xl:grid-cols-[minmax(0,1fr)_380px]">
-                  <div className="space-y-5">
-                    <section className="rounded-lg border border-slate-800 bg-slate-950/70 p-5">
-                      <h3 className="text-lg font-semibold text-white">
-                        竞品排名
-                      </h3>
-                      {ranking.length > 0 ? (
-                        <div className="mt-4 rounded-lg border border-slate-800 bg-slate-900/40 p-4">
-                          <InteractiveBars data={rankingBars} />
-                          <p className="mt-3 text-xs text-slate-500">
-                            排名依据来自当前结构化 Claim 与 Evidence；悬停查看竞品得分与支撑证据。
-                          </p>
-                        </div>
-                      ) : null}
-                      {ranking.length > 0 ? (
-                        <div className="mt-4 space-y-3">
-                          {ranking.map((item, index) => (
-                            <article
-                              className="rounded-lg border border-slate-800 bg-slate-900/45 p-4"
-                              key={`${item.platform}-${index}`}
-                            >
-                              <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
-                                <div>
-                                  <div className="flex flex-wrap items-center gap-2">
-                                    <StatusBadge
-                                      label={`#${item.rank ?? index + 1}`}
-                                      tone="info"
-                                    />
-                                    <h4 className="text-base font-semibold text-white">
-                                      {item.platform}
-                                    </h4>
-                                  </div>
-                                  <p className="mt-3 text-sm leading-6 text-slate-300">
-                                    {item.summary || "暂无排名摘要。"}
-                                  </p>
-                                </div>
-                                <p className="text-sm text-slate-300">
-                                  分数{" "}
-                                  <span className="font-semibold text-cyan-200">
-                                    {typeof item.score === "number"
-                                      ? item.score.toFixed(2)
-                                      : "N/A"}
-                                  </span>
-                                </p>
-                              </div>
-                              <div className="mt-4">
-                                <p className="mb-2 text-xs uppercase tracking-[0.16em] text-slate-500">
-                                  支撑 Evidence
-                                </p>
-                                <IdTags
-                                  ids={item.supporting_evidence_ids ?? []}
-                                  tone="info"
-                                />
-                              </div>
-                            </article>
-                          ))}
-                        </div>
-                      ) : (
-                        <p className="mt-3 text-sm text-slate-400">
-                          暂无竞品排名。
-                        </p>
-                      )}
-                    </section>
-
-                    <section className="rounded-lg border border-slate-800 bg-slate-950/70 p-5">
-                      <h3 className="text-lg font-semibold text-white">
-                        策略建议
-                      </h3>
-                      {recommendations.length > 0 ? (
-                        <div className="mt-4 space-y-3">
-                          {recommendations.map((item, index) => (
-                            <article
-                              className="rounded-lg border border-cyan-300/25 bg-cyan-300/10 p-4"
-                              key={`${item.recommendation}-${index}`}
-                            >
-                              <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
-                                <p className="leading-7 text-slate-100">
-                                  {item.recommendation}
-                                </p>
-                                <p className="shrink-0 text-sm text-cyan-100">
-                                  置信度{" "}
-                                  {typeof item.confidence_score === "number"
-                                    ? item.confidence_score.toFixed(2)
-                                    : "N/A"}
-                                </p>
-                              </div>
-                              <div className="mt-4 grid gap-4 md:grid-cols-2">
-                                <div>
-                                  <p className="mb-2 text-xs uppercase tracking-[0.16em] text-slate-500">
-                                    支撑 Claim
-                                  </p>
-                                  <IdTags
-                                    ids={item.supporting_claim_ids ?? []}
-                                  />
-                                </div>
-                                <div>
-                                  <p className="mb-2 text-xs uppercase tracking-[0.16em] text-slate-500">
-                                    支撑 Evidence
-                                  </p>
-                                  <IdTags
-                                    ids={item.supporting_evidence_ids ?? []}
-                                    tone="info"
-                                  />
-                                </div>
-                              </div>
-                            </article>
-                          ))}
-                        </div>
-                      ) : (
-                        <p className="mt-3 text-sm text-slate-400">
-                          暂无策略建议。
-                        </p>
-                      )}
-                    </section>
-                  </div>
-
-                  <aside className="space-y-5">
-                    <section className="rounded-lg border border-slate-800 bg-slate-950/80 p-5">
-                      <h3 className="text-lg font-semibold text-white">
-                        SWOT 分析
-                      </h3>
-                      <div className="mt-4 space-y-4">
-                        {swotKeys.map((key) => (
-                          <div key={key}>
-                            <p className="text-xs uppercase tracking-[0.16em] text-slate-500">
-                              {swotLabels[key]}
-                            </p>
-                            {swot[key]?.length > 0 ? (
-                              <div className="mt-2 space-y-2">
-                                {swot[key].map((item) => (
-                                  <p
-                                    className="rounded-md border border-slate-800 bg-slate-900/45 px-3 py-2 text-sm leading-6 text-slate-200"
-                                    key={item}
-                                  >
-                                    {item}
-                                  </p>
-                                ))}
-                              </div>
-                            ) : (
-                              <p className="mt-2 text-sm text-slate-500">无</p>
-                            )}
-                          </div>
-                        ))}
-                      </div>
-                    </section>
-
-                    <section className="rounded-lg border border-slate-800 bg-slate-950/80 p-5">
-                      <h3 className="text-lg font-semibold text-white">
-                        报告引用追踪
-                      </h3>
-                      <p className="mt-2 text-sm leading-6 text-slate-400">
-                        以下 ID 用于追溯报告结论对应的结构化 Claim 与 Evidence。
-                      </p>
-                      <div className="mt-4 grid gap-4">
-                        <div>
-                          <p className="mb-2 text-xs uppercase tracking-[0.16em] text-slate-500">
-                            使用的 Claim（{usedClaimIds.length}）
-                          </p>
-                          <IdTags ids={usedClaimIds} />
-                        </div>
-                        <div>
-                          <p className="mb-2 text-xs uppercase tracking-[0.16em] text-slate-500">
-                            使用的 Evidence / 支撑证据（
-                            {usedEvidenceIds.length})
-                          </p>
-                          <IdTags ids={usedEvidenceIds} tone="info" />
-                        </div>
-                      </div>
-                    </section>
-                  </aside>
-                </div>
-              </div>
-
-              <section
-                className={`rounded-lg border p-5 ${
-                  highSeverityRisks.length > 0
-                    ? "border-rose-400/35 bg-rose-500/10"
-                    : "border-slate-800 bg-slate-950/70"
-                }`}
-              >
-                <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
-                  <div>
-                    <h3 className="text-lg font-semibold text-white">风险提示</h3>
-                    <p className="mt-1 text-sm text-slate-400">
-                      来自 RiskAgent 的风险披露与严重程度标记。
-                    </p>
-                  </div>
-                  <StatusBadge
-                    label={
-                      highSeverityRisks.length > 0
-                        ? `高风险 ${highSeverityRisks.length} 项`
-                        : "暂无高风险"
-                    }
-                    tone={highSeverityRisks.length > 0 ? "danger" : "success"}
-                  />
-                </div>
-
-                {risks.length > 0 ? (
-                  <div className="mt-4 grid gap-3 lg:grid-cols-2">
-                    {risks.map((risk, index) => {
-                      const severity = getRiskSeverity(risk) || "unknown";
-                      const detail =
-                        risk.description ||
-                        risk.message ||
-                        risk.reason ||
-                        risk.content ||
-                        "系统暂未返回风险描述。";
-
-                      return (
-                        <article
-                          className="rounded-lg border border-slate-800 bg-slate-900/45 p-4"
-                          key={`${risk.risk_type}-${index}`}
-                        >
-                          <div className="flex flex-wrap items-center gap-2">
-                            <StatusBadge
-                              label={severity}
-                              tone={riskTone[severity] ?? "neutral"}
-                            />
-                            <span className="text-sm font-semibold text-white">
-                              {risk.risk_type}
-                            </span>
-                          </div>
-                          <p className="mt-3 text-sm leading-6 text-slate-300">
-                            {detail}
-                          </p>
-                          <div className="mt-4 grid gap-3 sm:grid-cols-2">
-                            <div>
-                              <p className="mb-2 text-xs uppercase tracking-[0.16em] text-slate-500">
-                                关联品牌
-                              </p>
-                              <IdTags ids={risk.related_platforms ?? []} />
-                            </div>
-                            <div>
-                              <p className="mb-2 text-xs uppercase tracking-[0.16em] text-slate-500">
-                                关联维度
-                              </p>
-                              <IdTags ids={risk.related_dimensions ?? []} />
-                            </div>
-                          </div>
-                        </article>
-                      );
-                    })}
-                  </div>
-                ) : (
-                  <p className="mt-3 text-sm text-slate-400">暂无风险标记。</p>
-                )}
-              </section>
-            </>
-          )}
+          <Recommendation report={report} />
+          <ProductIdentitySection items={report.product_identification || []} />
+          <HardwareSpecsSection specs={report.hardware_specs || []} />
+          <FeatureTreeSection report={report} />
+          <PersonaAndPrice report={report} />
+          <ScoreFlowSection report={report} />
+          <PendingAndEvidence report={report} quality={quality} />
+          <AgentContributions items={report.agent_contributions} />
+          <RisksSection risks={reportRisks} />
         </div>
       ) : null}
     </section>

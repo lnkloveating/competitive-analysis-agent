@@ -1,13 +1,13 @@
 """Verification Agent - faithfulness check over claims and matrix conclusions.
 
-Runs after ProductAgent/BusinessAgent and before RiskAgent. It does not create or edit
+Runs after AnalysisAgent and before QualityAgent. It does not create or edit
 claims (the ``merge_claims`` reducer keeps the first version of each claim_id, so edits
 would be ignored). Instead it produces a separate ``faithfulness_report`` and a list of
 ``unsupported_claim_ids`` that downstream agents consume:
 
 - QualityAgent gates on ``unsupported_claim_ids`` (routes back to the owning agent),
-- StrategyAgent excludes unsupported claims from the final report,
-- RiskAgent raises a faithfulness risk flag,
+- ReportAgent excludes unsupported claims from the final report,
+- QualityAgent lowers report credibility for unsupported claims,
 - metrics expose ``faithfulness_rate``.
 """
 
@@ -48,7 +48,8 @@ def _matrix_issues(state: dict, report: Dict[str, Any]) -> List[Dict[str, Any]]:
                 cited_text = " ".join(
                     _evidence_text(evidence_by_id[i]) for i in cited_ids if i in evidence_by_id
                 )
-                analysis_numbers = _significant_numbers(_strip_evidence_ids(analysis))
+                cleaned_analysis = _strip_evidence_ids(analysis).replace(str(platform), "")
+                analysis_numbers = _significant_numbers(cleaned_analysis)
                 evidence_numbers = _numbers(_strip_evidence_ids(cited_text))
                 missing = sorted(n for n in analysis_numbers if n not in evidence_numbers)
                 if missing:

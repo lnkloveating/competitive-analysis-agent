@@ -168,27 +168,6 @@ textarea {
   animation: navDotPulse 1.6s ease-in-out infinite;
 }
 
-/* 自动演示进度条流光 */
-@keyframes demoBarFlow {
-  from {
-    background-position: 0% 50%;
-  }
-  to {
-    background-position: 200% 50%;
-  }
-}
-
-.demo-bar-flow {
-  background: linear-gradient(
-    90deg,
-    rgba(6, 182, 212, 0.25),
-    rgba(6, 182, 212, 0.85),
-    rgba(6, 182, 212, 0.25)
-  );
-  background-size: 200% 100%;
-  animation: demoBarFlow 2s linear infinite;
-}
-
 @keyframes missionRingsBreath {
   0%,
   100% {
@@ -610,7 +589,6 @@ textarea {
 @media (prefers-reduced-motion: reduce) {
   .page-enter,
   .nav-dot-pulse,
-  .demo-bar-flow,
   .mission-radar-rings,
   .mission-orbit,
   .mission-scan-line,

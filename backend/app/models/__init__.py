@@ -1,4 +1,5 @@
-# ORM 模型包。导入即把模型注册到 auth.db 的 Base.metadata。
-from app.models.crawl_models import CrawlTask, CrawlRawItem
+"""Application ORM models.
 
-__all__ = ["CrawlTask", "CrawlRawItem"]
+External collection ORM models were removed. The auth module owns the remaining
+user tables through `backend/auth/models.py`.
+"""

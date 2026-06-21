@@ -9,11 +9,10 @@ class QualityResult(BaseModel):
     reject_to: Optional[
         Literal[
             "ResearchAgent",
+            "CollectorAgent",
             "EvidenceAgent",
-            "ProductAgent",
-            "BusinessAgent",
-            "RiskAgent",
-            "StrategyAgent",
+            "AnalysisAgent",
+            "ReportAgent",
         ]
     ] = None
     reject_reason: Optional[str] = None

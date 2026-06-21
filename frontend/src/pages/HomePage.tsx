@@ -20,9 +20,6 @@ type HomePageProps = {
   selectedIndustryKey?: string | null;
   onNavigate: (key: string) => void;
   onSelectionChange: (selection: HomeSelection) => void;
-  demoStatusLabel?: string;
-  currentDemoKey?: string;
-  visitedKeys?: Set<string>;
 };
 
 type SelectOption = {
@@ -34,28 +31,10 @@ type SelectOption = {
 
 const industries: SelectOption[] = [
   {
-    key: "gaming_peripherals",
+    key: "gaming_mouse",
     label: "电竞外设",
-    description: "鼠标、键盘、耳机与桌面输入设备",
+    description: "官方型号、硬件事实、模具/点击系统、评价测评与实时价格分析",
     available: true,
-  },
-  {
-    key: "consumer_electronics",
-    label: "消费电子",
-    description: "手机、平板、智能穿戴与移动生态",
-    available: false,
-  },
-  {
-    key: "audio_devices",
-    label: "音频设备",
-    description: "耳机、音箱与内容创作音频",
-    available: false,
-  },
-  {
-    key: "camera_gear",
-    label: "摄影器材",
-    description: "相机、镜头与影像工作流",
-    available: false,
   },
 ];
 
@@ -90,30 +69,14 @@ const orbitModes: OrbitModeDef[] = [
         available: true,
         glyph: "mouse",
       },
-      {
-        key: "gaming_keyboard",
-        label: "电竞键盘",
-        description: "轴体、配列、热插拔与低延迟输入",
-        available: true,
-        glyph: "keyboard",
-      },
-      {
-        key: "gaming_headset",
-        label: "头戴式耳机",
-        description: "空间音频、麦克风与佩戴舒适度",
-        available: true,
-        glyph: "headset",
-      },
     ],
   },
 ];
 
-const allProducts: OrbitProductDef[] = orbitModes.flatMap((mode) => mode.items);
-const runnableProductKeys = new Set([
-  "gaming_mouse",
-  "gaming_keyboard",
-  "gaming_headset",
-]);
+const allProducts: OrbitProductDef[] = orbitModes
+  .flatMap((mode) => mode.items)
+  .filter((product) => product.key === "gaming_mouse");
+const runnableProductKeys = new Set(["gaming_mouse"]);
 
 function getRunnableIndustryKey(categoryKey: string) {
   return runnableProductKeys.has(categoryKey) ? categoryKey : null;
@@ -177,10 +140,6 @@ function normalizeIndustries(payload: unknown): Industry[] {
     });
 }
 
-function flattenRepresentativeProducts(industry?: Industry) {
-  return Object.values(industry?.representative_products || {}).flat();
-}
-
 type PillTone = "success" | "warning" | "danger" | "info" | "neutral";
 
 const pillToneClasses: Record<PillTone, string> = {
@@ -206,8 +165,8 @@ const capabilityCards = [
   {
     key: "workflow",
     title: "多 Agent 协作",
-    desc: "调研、证据、产品、商业、校验、风险、质检与策略 Agent 联动执行。",
-    detail: "8 个 Agent 按 DAG 顺序协作，可在 Agent 工作流查看执行路径。",
+    desc: "Research、Collector、Evidence、Analysis、Verification、Quality、Report 七个 Agent 联动执行。",
+    detail: "7 个 Agent 按 LangGraph DAG 顺序协作，可在 Agent 工作流查看执行路径与打回关系。",
     tone: "from-[#22d3ee]/20",
     border: "border-[#38bdf8]/30",
   },
@@ -215,7 +174,7 @@ const capabilityCards = [
     key: "evidence",
     title: "证据可追溯",
     desc: "每条结论都绑定 Evidence ID 和 Claim ID，支持来源回溯。",
-    detail: "在证据中心与结论追踪中可双向回溯 Evidence 与 Claim。",
+    detail: "在 Workflow 与最终报告中查看 used_claim_ids、used_evidence_ids 和 pending 数据。",
     tone: "from-[#34d399]/20",
     border: "border-[#34d399]/30",
   },
@@ -223,7 +182,7 @@ const capabilityCards = [
     key: "quality",
     title: "质量门控审查",
     desc: "VerificationAgent 与 QualityAgent 联合检查证据支撑、覆盖率和风险水位。",
-    detail: "未通过自动打回重试，达到上限则转入人工审核并生成 ReviewTicket。",
+    detail: "未通过会自动打回对应 Agent；达到上限后生成 partial_report，不把缺失数据伪造成完整结论。",
     tone: "from-[#818cf8]/20",
     border: "border-[#818cf8]/30",
   },
@@ -231,93 +190,48 @@ const capabilityCards = [
 
 const analysisFlowSteps = [
   {
-    key: "new-analysis",
+    key: "overview",
     code: "01",
-    label: "新建分析",
-    subtitle: "TASK CONFIG",
-    desc: "配置行业、品类、竞品范围与分析维度。",
-    input: "行业 / 品类 / 竞品范围",
-    process: "生成分析任务",
-    output: "TASK-001 或待创建",
+    label: "总览",
+    subtitle: "SYSTEM OVERVIEW",
+    desc: "展示当前系统能力、专业 schema 和多 Agent 分析入口。",
+    input: "系统状态",
+    process: "读取电竞鼠标专业配置",
+    output: "可进入产品输入",
     positionClass: "mission-node-1",
   },
   {
-    key: "workflow",
+    key: "product-compare",
     code: "02",
-    label: "Agent 工作流",
-    subtitle: "AGENT DAG",
-    desc: "展示 Research、Evidence、Product、Business、Verification、Risk、Quality、Strategy 多 Agent 协作过程。",
-    input: "任务配置",
-    process: "8 个 Agent 协同执行",
-    output: "执行记录 Trace",
+    label: "产品输入",
+    subtitle: "PRODUCT ENTRY",
+    desc: "输入两款电竞鼠标或外设名称，创建 Agent 分析任务。",
+    input: "产品 A / 产品 B",
+    process: "创建任务，不提前输出分析结论",
+    output: "TASK ID",
     positionClass: "mission-node-2",
   },
   {
-    key: "evidence",
+    key: "workflow",
     code: "03",
-    label: "证据中心",
-    subtitle: "EVIDENCE LEDGER",
-    desc: "查看 Evidence 列表、来源类型、可信度和证据详情。",
-    input: "公开调研资料",
-    process: "EvidenceAgent 抽取证据",
-    output: "Evidence ID + 可信度 + 来源链接",
+    label: "Agent 工作流",
+    subtitle: "AGENT DAG",
+    desc: "展示七个 Agent 的运行顺序、MCP pending 状态、证据结构化和质量门控。",
+    input: "任务配置",
+    process: "7 个 Agent 协同执行",
+    output: "Trace / Evidence / Quality",
     positionClass: "mission-node-3",
   },
   {
-    key: "claims",
-    code: "04",
-    label: "结论追踪",
-    subtitle: "CLAIM TRACE",
-    desc: "查看 Evidence 如何支撑 Product Claim 和 Business Claim。",
-    input: "Evidence",
-    process: "生成 Product Claim 与 Business Claim",
-    output: "Claim Graph",
-    positionClass: "mission-node-4",
-  },
-  {
-    key: "verification",
-    navigateKey: "quality",
-    code: "05",
-    label: "忠实校验",
-    subtitle: "FAITHFULNESS",
-    desc: "校验每条结论和矩阵数字能否被引用证据支撑，抑制幻觉。",
-    input: "Evidence + Claims + Matrix",
-    process: "VerificationAgent 校验证据支撑关系",
-    output: "Faithfulness Report / Matrix Issues",
-    positionClass: "mission-node-5",
-  },
-  {
-    key: "quality",
-    code: "06",
-    label: "质量审查",
-    subtitle: "QUALITY GATE",
-    desc: "检查证据完整性、维度覆盖率、风险水位和是否需要打回重试或人工审核。",
-    input: "Faithfulness + Evidence + Claims + Risk",
-    process: "QualityAgent 检查覆盖率、证据完整性和风险水位",
-    output: "Approved / Retry / Human Review",
-    positionClass: "mission-node-6",
-  },
-  {
     key: "report",
-    code: "07",
+    code: "04",
     label: "最终报告",
-    subtitle: "STRATEGY REPORT",
-    desc: "展示通过质量门控后的竞品策略报告和引用追踪。",
-    input: "通过质量门控的 Claim",
-    process: "StrategyAgent 生成策略建议",
-    output: "可追溯竞品策略报告",
-    positionClass: "mission-node-7",
-  },
-  {
-    key: "metrics",
-    code: "08",
-    label: "指标看板",
-    subtitle: "METRICS",
-    desc: "展示证据数量、结论数量、质量得分、引用率、上下文裁剪和错误恢复等指标。",
-    input: "全流程结果",
-    process: "统计证据、结论、质量和引用指标",
-    output: "Citation / Coverage / Faithfulness / Recovery",
-    positionClass: "mission-node-8",
+    subtitle: "FINAL REPORT",
+    desc: "展示专业电竞鼠标 schema 报告、证据引用、pending 数据与最终建议。",
+    input: "通过质量门控的结构化结果",
+    process: "ReportAgent 生成专业报告",
+    output: "GamingMouseFinalReport",
+    positionClass: "mission-node-4",
   },
 ];
 
@@ -339,9 +253,6 @@ export function HomePage({
   selectedIndustryKey,
   onNavigate,
   onSelectionChange,
-  demoStatusLabel,
-  currentDemoKey,
-  visitedKeys,
 }: HomePageProps) {
   const [backendIndustries, setBackendIndustries] = useState<Industry[]>([]);
   const [isLoading, setIsLoading] = useState(true);
@@ -389,16 +300,12 @@ export function HomePage({
   }, [capabilitiesExpanded]);
 
   useEffect(() => {
-    if (currentDemoKey) {
-      return;
-    }
-
     const timerId = window.setInterval(() => {
       setPreviewFlowIndex((current) => (current + 1) % analysisFlowSteps.length);
     }, 1800);
 
     return () => window.clearInterval(timerId);
-  }, [currentDemoKey]);
+  }, []);
 
   // 轻量读取当前任务状态，用于驱动协作动画的待命/分析中/完成态（不影响主流程）。
   useEffect(() => {
@@ -447,7 +354,7 @@ export function HomePage({
       ? "completed"
       : "running";
 
-  const industryValue = selectedDomain ?? "gaming_peripherals";
+  const industryValue = selectedDomain ?? "gaming_mouse";
   const categoryValue = selectedCategory ?? "gaming_mouse";
   const selectedIndustry =
     industries.find((industry) => industry.key === industryValue) ?? industries[0];
@@ -461,21 +368,16 @@ export function HomePage({
     return (industry.industry_key || industry.key) === selectedCategoryOption.key;
   });
   const hasSelectedBackendIndustry = Boolean(selectedBackendIndustry);
-  const representativeProducts = flattenRepresentativeProducts(selectedBackendIndustry);
   const connectedRunnableCount = backendIndustries.filter((industry) =>
     getRunnableIndustryKey(industry.industry_key || industry.key || ""),
   ).length;
   const canEnterConfig =
-    selectedIndustry.key === "gaming_peripherals" &&
+    selectedIndustry.key === "gaming_mouse" &&
     selectedCategoryOption.available &&
     Boolean(getRunnableIndustryKey(selectedCategoryOption.key)) &&
     hasSelectedBackendIndustry;
 
-  const demoFlowIndex = analysisFlowSteps.findIndex(
-    (step) => step.key === currentDemoKey,
-  );
-  const activeFlowIndex =
-    demoFlowIndex >= 0 ? demoFlowIndex : previewFlowIndex % analysisFlowSteps.length;
+  const activeFlowIndex = previewFlowIndex % analysisFlowSteps.length;
   const missionCompleted = Boolean(taskId && taskStatus === "completed");
   const missionCoreStatus = !taskId
     ? "READY"
@@ -485,7 +387,7 @@ export function HomePage({
 
   function handleCategoryChange(nextCategory: string) {
     onSelectionChange({
-      selectedDomain: "gaming_peripherals",
+      selectedDomain: "gaming_mouse",
       selectedCategory: nextCategory,
       selectedIndustryKey: getRunnableIndustryKey(nextCategory),
     });
@@ -498,11 +400,11 @@ export function HomePage({
     }
 
     onSelectionChange({
-      selectedDomain: "gaming_peripherals",
+      selectedDomain: "gaming_mouse",
       selectedCategory: nextCategory,
       selectedIndustryKey: nextIndustryKey,
     });
-    onNavigate("new-analysis");
+    onNavigate("product-compare");
   }
 
   return (
@@ -541,7 +443,7 @@ export function HomePage({
                 AI 竞品情报中枢
               </h2>
               <p className="mt-4 max-w-xl text-sm leading-7 text-[#9fb2d4] md:text-base">
-                多 Agent 协同完成公开调研、证据抽取、结论追踪、质量审查与策略报告生成。
+                多 Agent 协同完成数据规划、证据结构化、事实校验、质量审查与专业报告生成。
               </p>
               <p className="mt-2 max-w-xl text-sm leading-6 text-[#7e91b5]">
                 面向产品团队的竞品分析系统，从公开资料中抽取证据，生成可追溯的策略报告。
@@ -564,9 +466,6 @@ export function HomePage({
                   label={displayTaskId ? `当前任务：${displayTaskId}` : "暂无任务"}
                   tone={taskId ? "info" : "neutral"}
                 />
-                {demoStatusLabel ? (
-                  <Pill label={`自动演示：${demoStatusLabel}`} tone="neutral" />
-                ) : null}
               </div>
             </div>
 
@@ -713,15 +612,13 @@ export function HomePage({
 
                   <div className="mission-node-layer">
                     {analysisFlowSteps.map((step, index) => {
-                      const isCurrent = currentDemoKey === step.key;
-                      const isVisited = visitedKeys?.has(step.key) ?? false;
                       const isPreviewActive = index === activeFlowIndex;
-                      const isActive = isCurrent || isPreviewActive;
+                      const isActive = isPreviewActive;
                       const hasPassedInPreview = index < activeFlowIndex;
                       const isComplete =
-                        missionCompleted || isVisited || hasPassedInPreview;
+                        missionCompleted || hasPassedInPreview;
                       const output =
-                        step.key === "new-analysis"
+                        step.key === "product-compare"
                           ? displayTaskId ?? "待创建"
                           : step.output;
 
@@ -735,7 +632,7 @@ export function HomePage({
                                 : "mission-chip-idle"
                           }`}
                           key={step.key}
-                          onClick={() => onNavigate(step.navigateKey ?? step.key)}
+                          onClick={() => onNavigate(step.key)}
                           title={`${step.label}：${step.desc}`}
                           type="button"
                         >
@@ -796,7 +693,7 @@ export function HomePage({
                     电竞品类选择
                   </h3>
                   <p className="mt-2 max-w-3xl text-sm leading-6 text-[#8aa0c6]">
-                    点击环形卡片选择品类。当前正式开放电竞鼠标、电竞键盘与头戴式耳机分析。
+                    当前正式开放电竞鼠标专业分析，使用最新的 GamingMouseFinalReportSchema。
                   </p>
                 </div>
                 <Pill
@@ -814,70 +711,6 @@ export function HomePage({
                   onEnter={handleEnterConfig}
                   onSelect={handleCategoryChange}
                 />
-              </div>
-
-              <div className="mt-6">
-                <div className="min-w-0 rounded-xl border border-[#ffffff14] bg-[#0b1226]/55 p-4">
-                  <div className="flex flex-wrap items-center justify-between gap-3">
-                    <div>
-                      <p className="text-sm font-semibold text-[#f1f6ff]">
-                        {selectedMode.label} / {selectedCategoryOption.label}
-                      </p>
-                      <p className="mt-1 text-sm leading-6 text-[#8aa0c6]">
-                        {selectedCategoryOption.description}
-                      </p>
-                    </div>
-                    <Pill
-                      label={canEnterConfig ? "可分析" : "规划中"}
-                      tone={canEnterConfig ? "success" : "warning"}
-                    />
-                  </div>
-
-                  <div className="mt-4 grid gap-3 md:grid-cols-2">
-                    <div className="rounded-lg border border-[#ffffff14] bg-[#0a1326]/60 p-3">
-                      <p className="text-xs uppercase tracking-[0.16em] text-[#6f84a8]">
-                        竞品范围
-                      </p>
-                      <p className="mt-2 text-sm text-[#cdd9f0]">
-                        {canEnterConfig
-                          ? (selectedBackendIndustry?.competitors || []).join("、")
-                          : "暂未开放"}
-                      </p>
-                    </div>
-                    <div className="rounded-lg border border-[#ffffff14] bg-[#0a1326]/60 p-3">
-                      <p className="text-xs uppercase tracking-[0.16em] text-[#6f84a8]">
-                        分析场景
-                      </p>
-                      <p className="mt-2 text-sm font-medium text-[#7dd3fc]">
-                        {canEnterConfig
-                          ? selectedIndustryKey || selectedCategoryOption.key
-                          : "暂未开放"}
-                      </p>
-                    </div>
-                  </div>
-
-                  <div className="mt-4">
-                    <p className="mb-3 text-sm font-semibold text-[#cdd9f0]">
-                      代表型号
-                    </p>
-                    <div className="flex flex-wrap gap-2">
-                      {canEnterConfig && representativeProducts.length > 0 ? (
-                        representativeProducts.slice(0, 8).map((product) => (
-                          <span
-                            className="rounded-lg border border-[#ffffff1a] bg-[#0a1326]/70 px-3 py-2 text-sm text-[#cdd9f0]"
-                            key={product}
-                          >
-                            {product}
-                          </span>
-                        ))
-                      ) : (
-                        <span className="text-sm text-[#6f84a8]">
-                          {canEnterConfig ? "系统暂未返回代表型号" : "该品类仍在规划中"}
-                        </span>
-                      )}
-                    </div>
-                  </div>
-                </div>
               </div>
 
             </section>
