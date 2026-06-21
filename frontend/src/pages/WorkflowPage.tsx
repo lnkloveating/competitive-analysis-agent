@@ -120,7 +120,7 @@ const MCP_TOOLS = [
   { name: "本地 JSON 事实库", status: "active", detail: "当前已启用，提供稳定硬件参数和型号别名。" },
   { name: "官网规格 MCP", status: "active", detail: "已接入，用于抽取官网规格、固件更新、驱动资料。" },
   { name: "评价/测评 MCP", status: "pending", detail: "后续并行采集用户反馈、博主测评和体验口碑。" },
-  { name: "实时价格 MCP", status: "pending", detail: "后续并行采集价格、折扣和地区可买性。" },
+  { name: "实时价格 MCP", status: "active", detail: "已接入，联网搜索 + 大模型抽取当前售价；官方价被反爬拦截时退用其他来源并标低可信。" },
   { name: "搜索 MCP", status: "active", detail: "已接入，用于识别未知简称、变体和新品的官网候选。" },
 ];
 
@@ -1031,9 +1031,25 @@ function officialSpecConfidence(item: OfficialSpecRecord): string {
   return asString(item.confidence) || asString(record.confidence) || "pending";
 }
 
-function OfficialSpecResultTable({ records }: { records: OfficialSpecRecord[] }) {
-  if (!records.length) return null;
-  const collected = records.filter((item) => normalize(item.status) === "collected").length;
+function officialUrlFromHardwareProduct(product: HardwareProduct): string {
+  const direct = asString(product.specs.official_url);
+  if (direct) return direct;
+  const sources = asRecords(product.specs.sources);
+  const officialSource = sources.find((source) => normalize(source.source_type) === "official" || isExternalUrl(asString(source.url)));
+  return asString(officialSource?.url);
+}
+
+function OfficialSpecResultTable({
+  records,
+  localProducts = [],
+}: {
+  records: OfficialSpecRecord[];
+  localProducts?: HardwareProduct[];
+}) {
+  const localSourceProducts = localProducts.filter((product) => product.source === "local");
+  if (!records.length && !localSourceProducts.length) return null;
+  const collected = records.filter((item) => normalize(item.status) === "collected").length + localSourceProducts.length;
+  const total = records.length + localSourceProducts.length;
 
   return (
     <div className="rounded-lg border border-cyan-300/25 bg-slate-900/45 p-4">
@@ -1045,10 +1061,31 @@ function OfficialSpecResultTable({ records }: { records: OfficialSpecRecord[] })
             先由联网搜索找到官网 / 高可信候选，再由官网规格 MCP + 大模型抽取硬件字段；具体数值见下方对比表。
           </p>
         </div>
-        <StatusBadge label={`已采集 ${collected}/${records.length}`} tone={collected === records.length ? "success" : "warning"} />
+        <StatusBadge label={`已采集 ${collected}/${total}`} tone={collected === total ? "success" : "warning"} />
       </div>
 
       <div className="mt-3 grid gap-2 sm:grid-cols-2">
+        {localSourceProducts.map((product, index) => {
+          const url = officialUrlFromHardwareProduct(product);
+          return (
+            <div className="rounded-md border border-emerald-400/20 bg-emerald-400/10 p-3" key={`local-source-${product.id}-${index}`}>
+              <div className="flex items-center justify-between gap-2">
+                <p className="truncate text-sm font-semibold text-slate-100">{product.label}</p>
+                <StatusBadge label="本地 JSON" tone="success" />
+              </div>
+              <p className="mt-2 text-[11px] leading-4 text-emerald-100/85">
+                本地事实库已收录硬件参数；官网页面作为来源链接保留，后续可由官网规格 MCP 复核。
+              </p>
+              {isExternalUrl(url) ? (
+                <a className="mt-2 block truncate text-xs text-cyan-300 underline-offset-2 hover:underline" href={url} rel="noreferrer" target="_blank">
+                  {url}
+                </a>
+              ) : (
+                <p className="mt-2 text-xs text-slate-500">本地条目未提供官方 URL。</p>
+              )}
+            </div>
+          );
+        })}
         {records.map((item, index) => {
           const record = officialSpecPayload(item);
           const extra = asRecord(item);
@@ -1701,6 +1738,231 @@ function ExternalCandidateTable({ items }: { items: ExternalProductCandidate[] }
   );
 }
 
+const PRICE_STATUS_LABEL: Record<string, string> = {
+  collected: "已采集",
+  partial: "部分采集",
+  available: "已采集",
+  no_price_found: "未找到价格",
+  no_sources: "无可用来源",
+  mcp_not_configured: "MCP 未配置",
+  llm_failed: "抽取失败",
+  pending: "待采集",
+};
+
+const PRICE_SOURCE_LABEL: Record<string, string> = {
+  official_store: "官方店",
+  retailer: "零售商",
+  search_snippet: "搜索摘要",
+};
+
+function currencySymbol(currency: string): string {
+  const c = currency.toUpperCase();
+  if (c === "CNY" || c === "RMB") return "¥";
+  if (c === "EUR") return "€";
+  if (c === "GBP") return "£";
+  return "$";
+}
+
+function priceText(value: unknown, sym: string): string {
+  const n = asNumber(value);
+  return typeof n === "number" ? `${sym}${n}` : "—";
+}
+
+function priceDomainIsWeak(domainOrUrl: string): boolean {
+  const text = domainOrUrl.toLowerCase();
+  return ["youtube.com", "youtu.be", "bilibili.com", "tiktok.com", "reddit.com"].some((domain) => text.includes(domain));
+}
+
+function reliablePriceQuotes(record: Record<string, unknown>): Record<string, unknown>[] {
+  return asRecords(record.quotes).filter((quote) => {
+    const type = normalize(quote.source_type);
+    const url = asString(quote.source_url);
+    const domain = asString(quote.source_domain) || asString(quote.retailer) || url;
+    return Boolean(asNumber(quote.price)) && !priceDomainIsWeak(domain) && ["official_store", "retailer", "search_snippet"].includes(type);
+  });
+}
+
+function priceQuoteIsOfficial(quote?: Record<string, unknown>): boolean {
+  return normalize(quote?.source_type) === "official_store";
+}
+
+function priceQuoteIsLowConfidence(quote?: Record<string, unknown>): boolean {
+  return Boolean(quote) && !priceQuoteIsOfficial(quote);
+}
+
+function priceQuoteDisplayLabel(quote?: Record<string, unknown>): string {
+  if (!quote) return "未采集";
+  return priceQuoteIsOfficial(quote) ? "官方价" : "低可信电商/搜索价";
+}
+
+function priceQuoteTone(quote?: Record<string, unknown>): Tone {
+  if (!quote) return "neutral";
+  return priceQuoteIsOfficial(quote) ? "success" : "warning";
+}
+
+function fallbackPriceLinks(record: Record<string, unknown>): Record<string, unknown>[] {
+  const links = asRecords(record.fallback_links);
+  const weakQuotes = asRecords(record.quotes)
+    .filter((quote) => priceDomainIsWeak(asString(quote.source_url) || asString(quote.source_domain)))
+    .map((quote) => ({
+      title: asString(quote.retailer) || asString(quote.source_domain) || "fallback source",
+      url: asString(quote.source_url),
+      domain: asString(quote.source_domain) || asString(quote.retailer),
+      confidence: "low",
+    }));
+  return [...links, ...weakQuotes].filter((item) => asString(item.url)).slice(0, 3);
+}
+
+function priceRecordLabel(record: Record<string, unknown>, index = 0): string {
+  return [asString(record.brand), asString(record.model)].filter(Boolean).join(" ") || asString(record.input) || `产品 ${index + 1}`;
+}
+
+function PriceMcpSection({
+  records,
+  status,
+}: {
+  records: Record<string, unknown>[];
+  status: Record<string, unknown>;
+}) {
+  if (!records.length) return null;
+  const collected = records.filter((item) => reliablePriceQuotes(item).length > 0).length;
+  const priceConfidence = normalize(status.price_confidence);
+
+  return (
+    <div className="rounded-lg border border-cyan-300/25 bg-slate-900/45 p-4">
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div>
+          <p className="text-xs font-semibold uppercase tracking-[0.16em] text-slate-500">Price MCP</p>
+          <h4 className="mt-2 text-lg font-semibold text-white">实时价格抽取</h4>
+          <p className="mt-1 text-xs leading-5 text-slate-400">
+            联网搜索 + 大模型从商店 / 官网页抽取当前售价；官方价抓不到时退而用其他高可信来源（标低可信，并下调报告可信度）。
+          </p>
+        </div>
+        <StatusBadge label={`已采集 ${collected}/${records.length}`} tone={collected === records.length ? "success" : "warning"} />
+      </div>
+
+      <div className="mt-3 grid gap-3 lg:grid-cols-2">
+        {records.map((record, index) => {
+          const summary = asRecord(record.price_summary);
+          const currency = asString(record.currency) || asString(summary.currency) || "USD";
+          const sym = currencySymbol(currency);
+          const blocked = Boolean(record.official_price_blocked);
+          const confidence = normalize(record.confidence_level);
+          const official = asNumber(summary.official_price);
+          const quotes = reliablePriceQuotes(record).slice(0, 4);
+          const fallbackLinks = fallbackPriceLinks(record);
+          const blockedDomains = asRecords(record.blocked_sources)
+            .map((item) => asString(item.domain))
+            .filter(Boolean);
+          const model = priceRecordLabel(record, index);
+          const showSampleStats = quotes.length > 1;
+          const primaryQuote = quotes[0];
+          const primaryPrice = typeof official === "number" ? official : asNumber(primaryQuote?.price);
+          const primaryLabel = typeof official === "number" ? "官方价" : priceQuoteDisplayLabel(primaryQuote);
+          return (
+            <div className="rounded-md border border-slate-800 bg-slate-950/60 p-3" key={`${asString(record.input) || index}`}>
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <p className="truncate text-sm font-semibold text-slate-100">{model}</p>
+                <div className="flex flex-wrap gap-1.5">
+                  <StatusBadge
+                    label={PRICE_STATUS_LABEL[normalize(record.status)] || asString(record.status, "待采集")}
+                    tone={normalize(record.status) === "collected" ? "success" : "warning"}
+                  />
+                  {normalize(record.status) === "collected" ? (
+                    <StatusBadge
+                      label={confidence === "high" ? "高可信" : "低可信"}
+                      tone={confidence === "high" ? "success" : "warning"}
+                    />
+                  ) : null}
+                </div>
+              </div>
+
+              <div className={`mt-3 grid gap-2 ${showSampleStats ? "grid-cols-3" : "grid-cols-1"}`}>
+                <StatTile
+                  label={primaryLabel}
+                  value={blocked && typeof primaryPrice !== "number" ? "被拦截" : priceText(primaryPrice, sym)}
+                  tone={blocked && typeof primaryPrice !== "number" ? "danger" : typeof primaryPrice === "number" ? (typeof official === "number" ? "success" : priceQuoteTone(primaryQuote)) : "neutral"}
+                />
+                {showSampleStats ? (
+                  <>
+                    <StatTile label="样本中位价" value={priceText(summary.median_price, sym)} tone="info" />
+                    <StatTile label="最低采集价" value={priceText(summary.lowest_price, sym)} tone="neutral" />
+                  </>
+                ) : null}
+              </div>
+
+              {blocked ? (
+                <p className="mt-2 rounded border border-rose-400/30 bg-rose-500/10 px-2 py-1 text-[11px] leading-4 text-rose-200">
+                  ⛔ 官方价被反爬拦截{blockedDomains.length ? `（${blockedDomains.join("、")}）` : ""}；非官方电商/搜索价会标为低可信，视频/测评链接只作为弱支撑。
+                </p>
+              ) : null}
+
+              {quotes.length ? (
+                <div className="mt-2 space-y-1">
+                  {quotes.map((quote, qi) => {
+                    const url = asString(quote.source_url);
+                    const retailer = asString(quote.retailer) || asString(quote.source_domain);
+                    return (
+                      <div className="flex items-center justify-between gap-2 rounded border border-slate-800/80 bg-slate-900/40 px-2 py-1 text-[11px]" key={qi}>
+                        <span className="font-semibold text-slate-200">
+                          {sym}
+                          {asNumber(quote.price) ?? "—"}
+                        </span>
+                        <span className="min-w-0 flex-1 truncate text-slate-400">
+                          {isExternalUrl(url) ? (
+                            <a className="text-cyan-300 underline-offset-2 hover:underline" href={url} rel="noreferrer" target="_blank">
+                              {retailer || "来源"}
+                            </a>
+                          ) : (
+                            retailer || "来源"
+                          )}
+                        </span>
+                        <StatusBadge
+                          label={PRICE_SOURCE_LABEL[normalize(quote.source_type)] || asString(quote.source_type, "—")}
+                          tone={priceQuoteIsLowConfidence(quote) ? "warning" : "neutral"}
+                        />
+                      </div>
+                    );
+                  })}
+                </div>
+              ) : (
+                <p className="mt-2 text-[11px] leading-4 text-slate-500">未抽到该产品的有效报价。</p>
+              )}
+              {fallbackLinks.length ? (
+                <div className="mt-2 space-y-1 rounded border border-amber-400/25 bg-amber-400/10 p-2">
+                  <p className="text-[11px] font-semibold text-amber-100">弱支撑来源（不计入价格）</p>
+                  {fallbackLinks.map((link, li) => {
+                    const url = asString(link.url);
+                    const domain = asString(link.domain) || asString(link.title) || "fallback";
+                    return (
+                      <div className="flex items-center justify-between gap-2 text-[11px]" key={`${url}-${li}`}>
+                        {isExternalUrl(url) ? (
+                          <a className="min-w-0 flex-1 truncate text-cyan-300 underline-offset-2 hover:underline" href={url} rel="noreferrer" target="_blank">
+                            {domain}
+                          </a>
+                        ) : (
+                          <span className="min-w-0 flex-1 truncate text-slate-400">{domain}</span>
+                        )}
+                        <StatusBadge label="弱支撑" tone="warning" />
+                      </div>
+                    );
+                  })}
+                </div>
+              ) : null}
+            </div>
+          );
+        })}
+      </div>
+
+      {priceConfidence === "low" ? (
+        <p className="mt-3 rounded-md border border-amber-400/25 bg-amber-400/10 px-3 py-2 text-[11px] leading-4 text-amber-100">
+          价格仅来自低可信来源 / 官方价被反爬拦截，<strong>报告可信度分已据此下调</strong>。
+        </p>
+      ) : null}
+    </div>
+  );
+}
+
 function CollectorAgentDetail({
   agent,
   status,
@@ -1718,6 +1980,8 @@ function CollectorAgentDetail({
   const localFacts = facts.filter((item) => item.source === "local");
   const officialFacts = facts.filter((item) => item.source === "official");
   const officialSpecRecords = officialSpecRecordsFromReport(report);
+  const priceRecords = asRecords(report.price_records);
+  const priceStatus = asRecord(report.price_status);
   const substeps = asRecords(trace?.substeps);
   const pending = asRecords(report.pending_data);
   const resolvedCount = localFacts.length;
@@ -1940,7 +2204,9 @@ function CollectorAgentDetail({
             </div>
           ) : null}
 
-          <OfficialSpecResultTable records={officialSpecRecords} />
+          <OfficialSpecResultTable records={officialSpecRecords} localProducts={localFacts} />
+
+          <PriceMcpSection records={priceRecords} status={priceStatus} />
 
           <div className="grid gap-4 lg:grid-cols-2">
             <div className="rounded-lg border border-cyan-300/25 bg-cyan-400/10 p-4">
@@ -2172,6 +2438,74 @@ function EvidenceAgentDetail({ agent, status, evidenceList, report }: AgentDetai
   );
 }
 
+function PriceComparisonMiniCard({ records }: { records: Record<string, unknown>[] }) {
+  if (!records.length) return null;
+  const reliableRows = records.map((record, index) => {
+    const summary = asRecord(record.price_summary);
+    const quotes = reliablePriceQuotes(record);
+    const currency = asString(record.currency) || asString(summary.currency) || "USD";
+    const sym = currencySymbol(currency);
+    const official = asNumber(summary.official_price);
+    const primary = typeof official === "number" ? official : asNumber(quotes[0]?.price);
+    const primaryQuote = typeof official === "number" ? quotes.find((quote) => priceQuoteIsOfficial(quote)) || quotes[0] : quotes[0];
+    const weakLinks = fallbackPriceLinks(record);
+    return {
+      model: priceRecordLabel(record, index),
+      price: primary,
+      text: typeof primary === "number" ? priceText(primary, sym) : "未获得可靠价格",
+      source: typeof primary === "number" ? priceQuoteDisplayLabel(primaryQuote) : weakLinks.length ? "弱支撑来源" : "未采集",
+      url: asString(primaryQuote?.source_url) || asString(weakLinks[0]?.url),
+      tone: typeof primary === "number" ? priceQuoteTone(primaryQuote) : weakLinks.length ? "warning" as Tone : "neutral" as Tone,
+      note:
+        typeof primary === "number"
+          ? priceQuoteIsLowConfidence(primaryQuote)
+            ? "来自非官方电商/搜索结果，可参与对比但可信度较低。"
+            : "来自官网价格，可用于后续性价比分析。"
+          : weakLinks.length
+            ? "只有视频/搜索类弱来源，不能计算性价比。"
+            : "未找到可用价格或被反爬拦截。",
+    };
+  });
+  const comparable = reliableRows.filter((row) => typeof row.price === "number");
+  const winner = comparable.length >= 2
+    ? comparable.reduce((best, item) => (Number(item.price) < Number(best.price) ? item : best), comparable[0])
+    : null;
+
+  return (
+    <div className="rounded-lg border border-slate-800 bg-slate-900/45 p-4">
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <div>
+          <p className="text-xs font-semibold uppercase tracking-[0.16em] text-slate-500">Realtime Price</p>
+          <h4 className="mt-2 text-lg font-semibold text-white">实时价格对比</h4>
+        </div>
+        <StatusBadge
+          label={winner ? `当前低价：${winner.model}` : "价格不足，不算赢家"}
+          tone={winner ? "success" : "warning"}
+        />
+      </div>
+      <div className="mt-3 grid gap-2 sm:grid-cols-2">
+        {reliableRows.map((row) => (
+          <div className="rounded-md border border-slate-800 bg-slate-950/60 p-3" key={row.model}>
+            <div className="flex items-start justify-between gap-3">
+              <div className="min-w-0">
+                <p className="truncate text-sm font-semibold text-slate-100">{row.model}</p>
+                <p className="mt-1 text-xs text-slate-500">{row.source}</p>
+              </div>
+              <StatusBadge label={row.text} tone={row.tone} />
+            </div>
+            <p className="mt-2 text-xs leading-5 text-slate-400">{row.note}</p>
+            {isExternalUrl(row.url) ? (
+              <a className="mt-2 block truncate text-xs text-cyan-300 underline-offset-2 hover:underline" href={row.url} rel="noreferrer" target="_blank">
+                {row.url}
+              </a>
+            ) : null}
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 function AnalysisAgentDetail({ agent, status, report, claims }: AgentDetailProps) {
   const dimensionEntries = Object.entries(asRecord(asRecord(report.product_matrix).dimensions)).slice(0, 6);
   const hardware = asRecord(report.hardware_fact_comparison);
@@ -2183,7 +2517,8 @@ function AnalysisAgentDetail({ agent, status, report, claims }: AgentDetailProps
   const scoreProducts = asRecords(scoreFlow.products);
   const risks = asRecords(report.risk_flags);
   const officialSpecRecords = officialSpecRecordsFromReport(report);
-  const hasRun = dimensionEntries.length > 0 || diffSummary.length > 0 || claims.length > 0 || officialSpecRecords.length > 0;
+  const priceRecords = asRecords(report.price_records);
+  const hasRun = dimensionEntries.length > 0 || diffSummary.length > 0 || claims.length > 0 || officialSpecRecords.length > 0 || priceRecords.length > 0;
 
   const verdictLabels: Array<[string, string]> = [
     ["strongest_hardware", "硬件最强"],
@@ -2261,6 +2596,8 @@ function AnalysisAgentDetail({ agent, status, report, claims }: AgentDetailProps
               </p>
             </div>
           ) : null}
+
+          <PriceComparisonMiniCard records={priceRecords} />
 
           {dimensionEntries.length ? (
             <div className="rounded-lg border border-slate-800 bg-slate-900/45 p-4">
@@ -2377,7 +2714,9 @@ function VerificationAgentDetail({ agent, status, report }: AgentDetailProps) {
   const supported = asNumber(faithfulness.supported_claim_count);
   const unsupported = asNumber(faithfulness.unsupported_claim_count);
   const weak = asNumber(faithfulness.weak_claim_count);
-  const hasRun = claimResults.length > 0 || typeof rate === "number";
+  const priceVerification = asRecord(faithfulness.price_verification);
+  const priceRows = asRecords(priceVerification.rows);
+  const hasRun = claimResults.length > 0 || typeof rate === "number" || priceRows.length > 0;
 
   return (
     <AgentDetailFrame
@@ -2448,6 +2787,55 @@ function VerificationAgentDetail({ agent, status, report }: AgentDetailProps) {
             </div>
           ) : null}
 
+          {priceRows.length ? (
+            <div className="rounded-lg border border-slate-800 bg-slate-900/45 p-4">
+              <div className="flex flex-wrap items-center justify-between gap-3">
+                <div>
+                  <p className="text-xs font-semibold uppercase tracking-[0.16em] text-slate-500">Price Verification</p>
+                  <h4 className="mt-2 text-lg font-semibold text-white">实时价格结论校验</h4>
+                </div>
+                <StatusBadge
+                  label={`强支撑 ${formatValue(priceVerification.supported_price_records, "0")} / 弱支撑 ${formatValue(priceVerification.weak_price_records, "0")}`}
+                  tone={asNumber(priceVerification.weak_price_records) ? "warning" : "success"}
+                />
+              </div>
+              <div className="mt-3 grid gap-2 sm:grid-cols-2">
+                {priceRows.map((row, index) => {
+                  const rowStatus = normalize(row.status);
+                  const rowTone: Tone = rowStatus === "supported" ? "success" : rowStatus === "weak_support" ? "warning" : "neutral";
+                  const url = asString(row.source_url);
+                  return (
+                    <div className="rounded-md border border-slate-800 bg-slate-950/60 p-3" key={`${asString(row.product)}-${index}`}>
+                      <div className="flex items-start justify-between gap-3">
+                        <p className="truncate text-sm font-semibold text-slate-100">{asString(row.product) || `产品 ${index + 1}`}</p>
+                        <StatusBadge
+                          label={rowStatus === "supported" ? "有事实支撑" : rowStatus === "weak_support" ? "弱支撑" : "无可靠价格"}
+                          tone={rowTone}
+                        />
+                      </div>
+                      <p className="mt-2 text-xs leading-5 text-slate-400">{asString(row.reason)}</p>
+                      <p className="mt-1 text-xs text-slate-500">
+                        {asString(row.evidence_id) ? `evidence: ${asString(row.evidence_id)} · ` : ""}
+                        {asString(row.source_type) ? `source: ${asString(row.source_type)}` : ""}
+                        {asString(row.confidence) ? ` · confidence: ${asString(row.confidence)}` : ""}
+                      </p>
+                      {typeof asNumber(row.price) === "number" ? (
+                        <p className="mt-1 text-xs text-cyan-200">
+                          {asString(row.currency) || "USD"} {asNumber(row.price)}
+                        </p>
+                      ) : null}
+                      {isExternalUrl(url) ? (
+                        <a className="mt-2 block truncate text-xs text-cyan-300 underline-offset-2 hover:underline" href={url} rel="noreferrer" target="_blank">
+                          {url}
+                        </a>
+                      ) : null}
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          ) : null}
+
           <div className="grid gap-4 lg:grid-cols-2">
             <div className="rounded-lg border border-slate-800 bg-slate-900/45 p-4">
               <p className="text-xs font-semibold uppercase tracking-[0.16em] text-slate-500">Matrix Numbers</p>
@@ -2490,6 +2878,11 @@ function QualityAgentDetail({ agent, status, report, quality }: AgentDetailProps
   const rejectTo = asString(q.reject_to) || asString(q.target_agent);
   const required = asStrings(q.required_actions);
   const limitations = asStrings(q.limitations);
+  const pendingData = asRecords(q.pending_data);
+  const scoreBreakdown = asRecord(q.score_breakdown);
+  const weakPriceCount = asNumber(scoreBreakdown.weak_price_support_count) ?? 0;
+  const pendingPenalty = asNumber(scoreBreakdown.pending_data_deductions) ?? 0;
+  const highRiskPenalty = asNumber(scoreBreakdown.high_risk_deductions) ?? 0;
   const iteration = asNumber(asRecord(report.metrics).iteration_count) ?? 0;
   const approved = qStatus === "approved" || qStatus === "approved_with_limitations";
   const hasRun = checks.length > 0;
@@ -2559,6 +2952,32 @@ function QualityAgentDetail({ agent, status, report, quality }: AgentDetailProps
               </ul>
             ) : null}
             <p className="mt-3 text-[11px] leading-4 text-amber-100/70">连续 3 次自动修复仍不达标时，降级为 partial_report 并披露限制，不阻塞流程。</p>
+          </div>
+
+          <div className="rounded-lg border border-slate-800 bg-slate-900/45 p-4">
+            <div className="flex flex-wrap items-center justify-between gap-3">
+              <div>
+                <p className="text-xs font-semibold uppercase tracking-[0.16em] text-slate-500">Score Reason</p>
+                <h4 className="mt-2 text-lg font-semibold text-white">可信度扣分原因</h4>
+              </div>
+              <StatusBadge label="报告可信度，不是产品分" tone="info" />
+            </div>
+            <div className="mt-3 grid gap-2 sm:grid-cols-3">
+              <StatTile label="待补数据扣分" value={pendingPenalty} tone={pendingPenalty ? "warning" : "neutral"} />
+              <StatTile label="风险披露扣分" value={highRiskPenalty} tone={highRiskPenalty ? "warning" : "neutral"} />
+              <StatTile label="弱价格支撑" value={weakPriceCount} tone={weakPriceCount ? "warning" : "neutral"} />
+            </div>
+            <p className="mt-3 text-xs leading-5 text-slate-400">
+              当前可信度下降通常来自多项原因叠加：用户评价/博主测评等数据仍待采集，实时价格可能只有弱支撑或被反爬拦截，风险项已披露。
+              所以分数不是因为单条弱支撑直接扣到当前值，而是 QualityAgent 对 pending 数据、风险和证据强度的综合门控结果。
+            </p>
+            {pendingData.length ? (
+              <div className="mt-3 flex flex-wrap gap-2">
+                {pendingData.slice(0, 5).map((item, index) => (
+                  <StatusBadge key={index} label={asString(item.agent) || asString(item.status) || `pending ${index + 1}`} tone="warning" />
+                ))}
+              </div>
+            ) : null}
           </div>
 
           {limitations.length ? (
@@ -2978,8 +3397,16 @@ export function WorkflowPage({
 
   const report = useMemo(() => {
     const nextReport = extractReport(reportResponse);
-    const officialSpecs = asRecords(asRecord(reportResponse).official_spec_records) as OfficialSpecRecord[];
-    return officialSpecs.length ? { ...nextReport, official_spec_records: officialSpecs } : nextReport;
+    const resp = asRecord(reportResponse);
+    const officialSpecs = asRecords(resp.official_spec_records) as OfficialSpecRecord[];
+    const priceRecords = asRecords(resp.price_records);
+    const priceStatus = asRecord(resp.price_status);
+    return {
+      ...nextReport,
+      ...(officialSpecs.length ? { official_spec_records: officialSpecs } : {}),
+      ...(priceRecords.length ? { price_records: priceRecords } : {}),
+      ...(Object.keys(priceStatus).length ? { price_status: priceStatus } : {}),
+    };
   }, [reportResponse]);
   const evidenceList = useMemo(
     () => asRecords(asRecord(reportResponse).evidence_list),

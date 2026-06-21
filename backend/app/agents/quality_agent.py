@@ -331,6 +331,15 @@ def quality_agent(state: dict) -> Dict[str, Any]:
     }
     pending_penalty = min(18, len(pending_statuses) * 4 + (4 if pending_data else 0))
     score = max(0, 90 - deductions - pending_penalty)
+    price_status = state.get("price_status", {}) if isinstance(state.get("price_status"), dict) else {}
+    price_verification = (
+        faithfulness_report.get("price_verification", {})
+        if isinstance(faithfulness_report.get("price_verification"), dict)
+        else {}
+    )
+    weak_price_count = int(price_status.get("low_confidence_count") or 0) + int(
+        price_verification.get("weak_price_records") or 0
+    )
     reject_reason = None if approved else "部分质量检查未通过"
 
     quality_result = QualityResult(
@@ -347,7 +356,7 @@ def quality_agent(state: dict) -> Dict[str, Any]:
 
     needs_human_review = False
     degraded_report = False
-    has_limitations = bool(pending_data or missing_dimensions or missing_platforms or high_risk_count)
+    has_limitations = bool(pending_data or missing_dimensions or missing_platforms or high_risk_count or weak_price_count)
     quality_status = (
         "approved_with_limitations"
         if quality_result.approved and has_limitations
@@ -385,6 +394,8 @@ def quality_agent(state: dict) -> Dict[str, Any]:
         quality_result_dict["limitations"].append("missing_platforms_disclosed")
     if high_risk_count:
         quality_result_dict["limitations"].append("high_risks_disclosed")
+    if weak_price_count:
+        quality_result_dict["limitations"].append("weak_price_support")
     if degraded_report:
         quality_result_dict["degradation_reason"] = (
             "Automatic repair attempts were exhausted; unsupported or invalid content "
@@ -399,6 +410,18 @@ def quality_agent(state: dict) -> Dict[str, Any]:
             "is still pending; report can pass with conservative caveats but should not claim "
             "review-backed fit or price-performance conclusions."
         )
+    quality_result_dict["score_breakdown"] = {
+        "base_score": 90,
+        "failed_check_deductions": sum(1 for passed in checked_items.values() if not passed) * 10,
+        "high_risk_deductions": min(20, high_risk_count * 4),
+        "missing_dimension_deductions": min(12, len(missing_dimensions) * 4),
+        "pending_data_deductions": pending_penalty,
+        "weak_price_support_count": weak_price_count,
+        "note": (
+            "Report credibility is reduced by disclosed pending data and risks. Weak price support is "
+            "shown as a limitation; review/user-feedback data still pending is also part of the reason."
+        ),
+    }
 
     next_state = {
         **state,

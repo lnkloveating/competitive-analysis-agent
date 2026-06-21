@@ -81,6 +81,95 @@ def _append_trace(state: dict, report: Dict[str, Any]) -> None:
     )
 
 
+def _as_text(value: Any) -> str:
+    if value is None:
+        return ""
+    if isinstance(value, str):
+        return value.strip()
+    return str(value).strip()
+
+
+def _price_verification(state: dict) -> Dict[str, Any]:
+    records = [item for item in state.get("price_records", []) if isinstance(item, dict)]
+    rows: List[Dict[str, Any]] = []
+    for record in records:
+        quotes = [item for item in record.get("quotes", []) if isinstance(item, dict)]
+        usable_quotes = [
+            quote
+            for quote in quotes
+            if quote.get("price") is not None and _as_text(quote.get("source_url"))
+        ]
+        usable_quotes.sort(
+            key=lambda quote: (
+                3 if _as_text(quote.get("source_type")) == "official_store" else 1,
+                {"high": 3, "medium": 2, "low": 1}.get(_as_text(quote.get("confidence")), 0),
+            ),
+            reverse=True,
+        )
+        fallback_links = [item for item in record.get("fallback_links", []) if isinstance(item, dict)]
+        model = _as_text(record.get("model") or record.get("input")) or "unknown product"
+        evidence_id = _as_text(record.get("evidence_id"))
+        if usable_quotes:
+            best = usable_quotes[0]
+            official = _as_text(best.get("source_type")) == "official_store"
+            rows.append(
+                {
+                    "product": model,
+                    "status": "supported" if official else "weak_support",
+                    "support_level": "strong" if official else "weak",
+                    "reason": (
+                        "Realtime price is backed by an official-store URL."
+                        if official
+                        else "Realtime price comes from a non-official commerce/search source; usable for comparison with low confidence."
+                    ),
+                    "evidence_id": evidence_id,
+                    "source_url": best.get("source_url"),
+                    "price": best.get("price"),
+                    "currency": best.get("currency"),
+                    "source_type": best.get("source_type"),
+                    "confidence": best.get("confidence"),
+                }
+            )
+        elif record.get("official_price_blocked") or fallback_links:
+            link = fallback_links[0] if fallback_links else {}
+            rows.append(
+                {
+                    "product": model,
+                    "status": "weak_support",
+                    "support_level": "weak",
+                    "reason": "Official price was blocked or no reliable quote was extracted; fallback link is traceability only.",
+                    "evidence_id": evidence_id,
+                    "source_url": link.get("url") or "",
+                    "price": None,
+                    "currency": record.get("currency"),
+                    "source_type": link.get("source_kind") or "fallback",
+                    "confidence": "low",
+                }
+            )
+        else:
+            rows.append(
+                {
+                    "product": model,
+                    "status": "not_supported",
+                    "support_level": "none",
+                    "reason": _as_text(record.get("note")) or "No reliable realtime price source was collected.",
+                    "evidence_id": evidence_id,
+                    "source_url": "",
+                    "price": None,
+                    "currency": record.get("currency"),
+                    "source_type": "",
+                    "confidence": "none",
+                }
+            )
+    return {
+        "checked_price_records": len(rows),
+        "supported_price_records": len([item for item in rows if item["status"] == "supported"]),
+        "weak_price_records": len([item for item in rows if item["status"] == "weak_support"]),
+        "unsupported_price_records": len([item for item in rows if item["status"] == "not_supported"]),
+        "rows": rows,
+    }
+
+
 def verification_agent(state: dict) -> Dict[str, Any]:
     """Verify claim/matrix faithfulness and expose a report for downstream agents."""
     claims = [item for item in state.get("claims", []) if isinstance(item, dict)]
@@ -88,6 +177,7 @@ def verification_agent(state: dict) -> Dict[str, Any]:
 
     report = verify_claims(claims, evidence_list)
     report["matrix_issues"] = _matrix_issues(state, report)
+    report["price_verification"] = _price_verification(state)
 
     next_state = {
         **state,

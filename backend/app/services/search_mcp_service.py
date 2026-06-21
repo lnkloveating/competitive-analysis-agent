@@ -131,6 +131,8 @@ def _domain(url: str) -> str:
 def _executed_query(query: str, category: str, intent: str) -> str:
     clean = query.strip()
     if category == "gaming_mouse":
+        if intent == "price_collection":
+            return f'"{clean}" gaming mouse price buy official store'
         if intent == "product_entity_resolution":
             return f'"{clean}" gaming mouse official product'
         return f'"{clean}" gaming mouse review official'
