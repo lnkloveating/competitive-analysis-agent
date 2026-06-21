@@ -910,14 +910,119 @@ def _price_evidence_from_record(record: Dict[str, Any], evidence_id: str) -> Dic
     return evidence
 
 
+def _best_quote_of(record: Dict[str, Any], predicate) -> Dict[str, Any] | None:
+    quotes = [
+        item
+        for item in record.get("quotes", [])
+        if isinstance(item, dict)
+        and isinstance(item.get("price"), (int, float))
+        and _as_text(item.get("source_url"))
+        and predicate(item)
+    ]
+    return sorted(quotes, key=_quote_rank, reverse=True)[0] if quotes else None
+
+
+def _best_official_quote(record: Dict[str, Any]) -> Dict[str, Any] | None:
+    return _best_quote_of(record, lambda q: _as_text(q.get("source_type")).lower() == "official_store")
+
+
+def _best_ecom_quote(record: Dict[str, Any]) -> Dict[str, Any] | None:
+    return _best_quote_of(record, lambda q: _as_text(q.get("source_type")).lower() != "official_store")
+
+
+def _build_price_evidence(record: Dict[str, Any], quote: Dict[str, Any] | None, evidence_id: str, *, kind: str) -> Dict[str, Any]:
+    """构造一条价格证据。kind: official(官方价/高可信) | ecom(电商价/低可信) | pending(未抽到)。"""
+    model = _as_text(record.get("model") or record.get("input")) or "unknown product"
+    currency = _as_text((quote or {}).get("currency")) or _as_text(record.get("currency")) or "USD"
+    price = (quote or {}).get("price")
+    retailer = _as_text((quote or {}).get("retailer") or (quote or {}).get("source_domain"))
+    if kind == "official":
+        credibility, score, data_status = "high", 0.92, "verified"
+        label, price_kind = "官方价", "official_price"
+        claim = f"{model} 官方价 {price} {currency}（{retailer or '官方商店'}）。"
+        summary = f"Official-store price: {price} {currency} ({retailer})."
+        source_url = _as_text(quote.get("source_url"))
+    elif kind == "ecom":
+        credibility, score, data_status = "low", 0.5, "weak_support"
+        label, price_kind = "电商价", "ecommerce_price"
+        claim = f"{model} 电商价 {price} {currency}（{retailer or '零售/电商'}，非官方、低可信）。"
+        summary = f"E-commerce price (low confidence): {price} {currency} ({retailer})."
+        source_url = _as_text(quote.get("source_url"))
+    else:  # pending / 抓不到
+        fallback_links = [item for item in record.get("fallback_links", []) if isinstance(item, dict)]
+        fallback = fallback_links[0] if fallback_links else {}
+        credibility, score, data_status = "low", 0.3, "weak_support"
+        label, price_kind = "实时价格", "price_pending"
+        claim = f"{model} 未抽到可靠实时价格（官方页可能被反爬拦截），仅保留弱支撑来源。"
+        summary = _as_text(record.get("note")) or "Realtime price pending."
+        source_url = _as_text(fallback.get("url"))
+        quote = None
+    raw = {
+        "price_kind": price_kind,
+        "quote": quote,
+        "record_status": record.get("status"),
+        "official_price_blocked": record.get("official_price_blocked"),
+        "blocked_sources": record.get("blocked_sources", []),
+    }
+    return {
+        "evidence_id": evidence_id,
+        "platform": model,
+        "claim": claim,
+        "source_type": "price",
+        "price_kind": price_kind,
+        "source_title": f"{model} {label} - {retailer}" if retailer else f"{model} {label}",
+        "source_url": source_url,
+        "publish_time": "",
+        "collected_time": (quote or {}).get("collected_at") or record.get("collected_at") or _now(),
+        "credibility": credibility,
+        "related_dimension": "实时价格",
+        "raw_content": json.dumps(raw, ensure_ascii=False),
+        "confidence_score": score,
+        "dimension": "实时价格",
+        "content": json.dumps(raw, ensure_ascii=False),
+        "summary": summary,
+        "source": _as_text((quote or {}).get("source_domain")) or "PriceMCP",
+        "used_by_agent": "PriceMCP",
+        "data_status": data_status,
+        "pending_research": kind == "pending",
+        "evidence_gap": kind != "official",
+    }
+
+
+def _price_evidences_from_record(record: Dict[str, Any], seq: int) -> tuple[List[Dict[str, Any]], int]:
+    """每个产品产出官方价 + 电商价两条证据（缺哪条就少哪条；都缺给一条 pending）。"""
+    evidences: List[Dict[str, Any]] = []
+    record.pop("official_evidence_id", None)
+    record.pop("ecom_evidence_id", None)
+    official_quote = _best_official_quote(record)
+    ecom_quote = _best_ecom_quote(record)
+    if official_quote:
+        seq += 1
+        ev = _build_price_evidence(record, official_quote, f"EV{seq:03d}", kind="official")
+        record["official_evidence_id"] = ev["evidence_id"]
+        evidences.append(ev)
+    if ecom_quote:
+        seq += 1
+        ev = _build_price_evidence(record, ecom_quote, f"EV{seq:03d}", kind="ecom")
+        record["ecom_evidence_id"] = ev["evidence_id"]
+        evidences.append(ev)
+    if not evidences:
+        seq += 1
+        ev = _build_price_evidence(record, None, f"EV{seq:03d}", kind="pending")
+        record["evidence_id"] = ev["evidence_id"]
+        evidences.append(ev)
+    return evidences, seq
+
+
 def price_records_to_evidence(records: List[Dict[str, Any]], existing_count: int) -> List[Dict[str, Any]]:
+    """每个产品产出官方价 + 电商价两条价格证据（追加到 evidence_list）。"""
     evidence: List[Dict[str, Any]] = []
     seq = existing_count
     for record in records:
         if not isinstance(record, dict):
             continue
-        seq += 1
-        evidence.append(_price_evidence_from_record(record, f"EV{seq:03d}"))
+        evidences, seq = _price_evidences_from_record(record, seq)
+        evidence.extend(evidences)
     return evidence
 
 

@@ -158,6 +158,25 @@ def check_claim(claim: Dict[str, Any], evidence_by_id: Dict[str, Dict[str, Any]]
         )
         return result
 
+    # 价格类结论（绑定 realtime_price 证据）：弱支撑与否只看证据可信度，不走词面覆盖
+    # （定性中文结论 vs 英文价格 JSON，词面覆盖天然低，会误判）。被反爬拦截 / 仅低可信
+    # 来源的价格证据 -> 弱支撑；官方店高可信 -> 支撑。按事实。
+    cited_evidence = [evidence_by_id[evidence_id] for evidence_id in cited_ids if evidence_id in evidence_by_id]
+    is_price_claim = any(
+        _as_text(ev.get("source_type")).lower().startswith("price")
+        or _as_text(ev.get("related_dimension")).lower() == "realtime_price"
+        for ev in cited_evidence
+    )
+    if is_price_claim:
+        weak_evidence = all(
+            _as_text(ev.get("credibility")).lower() == "low"
+            or _as_text(ev.get("data_status")).lower() == "weak_support"
+            for ev in cited_evidence
+        )
+        result["weak"] = bool(weak_evidence)
+        result["reason"] = "low_credibility_evidence" if weak_evidence else "grounded"
+        return result
+
     if overlap < WEAK_GROUNDING_THRESHOLD:
         result["weak"] = True
         result["reason"] = "weak_lexical_grounding"

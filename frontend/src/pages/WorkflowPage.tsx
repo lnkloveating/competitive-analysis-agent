@@ -2438,74 +2438,6 @@ function EvidenceAgentDetail({ agent, status, evidenceList, report }: AgentDetai
   );
 }
 
-function PriceComparisonMiniCard({ records }: { records: Record<string, unknown>[] }) {
-  if (!records.length) return null;
-  const reliableRows = records.map((record, index) => {
-    const summary = asRecord(record.price_summary);
-    const quotes = reliablePriceQuotes(record);
-    const currency = asString(record.currency) || asString(summary.currency) || "USD";
-    const sym = currencySymbol(currency);
-    const official = asNumber(summary.official_price);
-    const primary = typeof official === "number" ? official : asNumber(quotes[0]?.price);
-    const primaryQuote = typeof official === "number" ? quotes.find((quote) => priceQuoteIsOfficial(quote)) || quotes[0] : quotes[0];
-    const weakLinks = fallbackPriceLinks(record);
-    return {
-      model: priceRecordLabel(record, index),
-      price: primary,
-      text: typeof primary === "number" ? priceText(primary, sym) : "未获得可靠价格",
-      source: typeof primary === "number" ? priceQuoteDisplayLabel(primaryQuote) : weakLinks.length ? "弱支撑来源" : "未采集",
-      url: asString(primaryQuote?.source_url) || asString(weakLinks[0]?.url),
-      tone: typeof primary === "number" ? priceQuoteTone(primaryQuote) : weakLinks.length ? "warning" as Tone : "neutral" as Tone,
-      note:
-        typeof primary === "number"
-          ? priceQuoteIsLowConfidence(primaryQuote)
-            ? "来自非官方电商/搜索结果，可参与对比但可信度较低。"
-            : "来自官网价格，可用于后续性价比分析。"
-          : weakLinks.length
-            ? "只有视频/搜索类弱来源，不能计算性价比。"
-            : "未找到可用价格或被反爬拦截。",
-    };
-  });
-  const comparable = reliableRows.filter((row) => typeof row.price === "number");
-  const winner = comparable.length >= 2
-    ? comparable.reduce((best, item) => (Number(item.price) < Number(best.price) ? item : best), comparable[0])
-    : null;
-
-  return (
-    <div className="rounded-lg border border-slate-800 bg-slate-900/45 p-4">
-      <div className="flex flex-wrap items-center justify-between gap-3">
-        <div>
-          <p className="text-xs font-semibold uppercase tracking-[0.16em] text-slate-500">Realtime Price</p>
-          <h4 className="mt-2 text-lg font-semibold text-white">实时价格对比</h4>
-        </div>
-        <StatusBadge
-          label={winner ? `当前低价：${winner.model}` : "价格不足，不算赢家"}
-          tone={winner ? "success" : "warning"}
-        />
-      </div>
-      <div className="mt-3 grid gap-2 sm:grid-cols-2">
-        {reliableRows.map((row) => (
-          <div className="rounded-md border border-slate-800 bg-slate-950/60 p-3" key={row.model}>
-            <div className="flex items-start justify-between gap-3">
-              <div className="min-w-0">
-                <p className="truncate text-sm font-semibold text-slate-100">{row.model}</p>
-                <p className="mt-1 text-xs text-slate-500">{row.source}</p>
-              </div>
-              <StatusBadge label={row.text} tone={row.tone} />
-            </div>
-            <p className="mt-2 text-xs leading-5 text-slate-400">{row.note}</p>
-            {isExternalUrl(row.url) ? (
-              <a className="mt-2 block truncate text-xs text-cyan-300 underline-offset-2 hover:underline" href={row.url} rel="noreferrer" target="_blank">
-                {row.url}
-              </a>
-            ) : null}
-          </div>
-        ))}
-      </div>
-    </div>
-  );
-}
-
 function AnalysisAgentDetail({ agent, status, report, claims }: AgentDetailProps) {
   const dimensionEntries = Object.entries(asRecord(asRecord(report.product_matrix).dimensions)).slice(0, 6);
   const hardware = asRecord(report.hardware_fact_comparison);
@@ -2596,8 +2528,6 @@ function AnalysisAgentDetail({ agent, status, report, claims }: AgentDetailProps
               </p>
             </div>
           ) : null}
-
-          <PriceComparisonMiniCard records={priceRecords} />
 
           {dimensionEntries.length ? (
             <div className="rounded-lg border border-slate-800 bg-slate-900/45 p-4">
@@ -2714,9 +2644,7 @@ function VerificationAgentDetail({ agent, status, report }: AgentDetailProps) {
   const supported = asNumber(faithfulness.supported_claim_count);
   const unsupported = asNumber(faithfulness.unsupported_claim_count);
   const weak = asNumber(faithfulness.weak_claim_count);
-  const priceVerification = asRecord(faithfulness.price_verification);
-  const priceRows = asRecords(priceVerification.rows);
-  const hasRun = claimResults.length > 0 || typeof rate === "number" || priceRows.length > 0;
+  const hasRun = claimResults.length > 0 || typeof rate === "number";
 
   return (
     <AgentDetailFrame
@@ -2780,55 +2708,6 @@ function VerificationAgentDetail({ agent, status, report }: AgentDetailProps) {
                         label={supportedItem ? (weakItem ? "弱支撑" : "支撑") : "未支撑"}
                         tone={supportedItem ? (weakItem ? "warning" : "success") : "danger"}
                       />
-                    </div>
-                  );
-                })}
-              </div>
-            </div>
-          ) : null}
-
-          {priceRows.length ? (
-            <div className="rounded-lg border border-slate-800 bg-slate-900/45 p-4">
-              <div className="flex flex-wrap items-center justify-between gap-3">
-                <div>
-                  <p className="text-xs font-semibold uppercase tracking-[0.16em] text-slate-500">Price Verification</p>
-                  <h4 className="mt-2 text-lg font-semibold text-white">实时价格结论校验</h4>
-                </div>
-                <StatusBadge
-                  label={`强支撑 ${formatValue(priceVerification.supported_price_records, "0")} / 弱支撑 ${formatValue(priceVerification.weak_price_records, "0")}`}
-                  tone={asNumber(priceVerification.weak_price_records) ? "warning" : "success"}
-                />
-              </div>
-              <div className="mt-3 grid gap-2 sm:grid-cols-2">
-                {priceRows.map((row, index) => {
-                  const rowStatus = normalize(row.status);
-                  const rowTone: Tone = rowStatus === "supported" ? "success" : rowStatus === "weak_support" ? "warning" : "neutral";
-                  const url = asString(row.source_url);
-                  return (
-                    <div className="rounded-md border border-slate-800 bg-slate-950/60 p-3" key={`${asString(row.product)}-${index}`}>
-                      <div className="flex items-start justify-between gap-3">
-                        <p className="truncate text-sm font-semibold text-slate-100">{asString(row.product) || `产品 ${index + 1}`}</p>
-                        <StatusBadge
-                          label={rowStatus === "supported" ? "有事实支撑" : rowStatus === "weak_support" ? "弱支撑" : "无可靠价格"}
-                          tone={rowTone}
-                        />
-                      </div>
-                      <p className="mt-2 text-xs leading-5 text-slate-400">{asString(row.reason)}</p>
-                      <p className="mt-1 text-xs text-slate-500">
-                        {asString(row.evidence_id) ? `evidence: ${asString(row.evidence_id)} · ` : ""}
-                        {asString(row.source_type) ? `source: ${asString(row.source_type)}` : ""}
-                        {asString(row.confidence) ? ` · confidence: ${asString(row.confidence)}` : ""}
-                      </p>
-                      {typeof asNumber(row.price) === "number" ? (
-                        <p className="mt-1 text-xs text-cyan-200">
-                          {asString(row.currency) || "USD"} {asNumber(row.price)}
-                        </p>
-                      ) : null}
-                      {isExternalUrl(url) ? (
-                        <a className="mt-2 block truncate text-xs text-cyan-300 underline-offset-2 hover:underline" href={url} rel="noreferrer" target="_blank">
-                          {url}
-                        </a>
-                      ) : null}
                     </div>
                   );
                 })}
