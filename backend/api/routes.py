@@ -140,6 +140,7 @@ def _build_initial_state(request: AnalysisRequest) -> Dict[str, Any]:
             "data_requirements": [],
             "official_spec_status": [],
             "review_intel_status": {},
+            "price_records": [],
             "price_status": {},
             "hardware_analysis": {},
             "experience_analysis": {},
@@ -351,6 +352,8 @@ async def get_report(task_id: str):
         "search_mcp_results": state.get("search_mcp_results", []),
         "external_product_candidates": state.get("external_product_candidates", []),
         "official_spec_records": state.get("official_spec_records", []),
+        "price_status": state.get("price_status", {}),
+        "price_records": state.get("price_records", []),
         "error": task.get("error", ""),
     }
 

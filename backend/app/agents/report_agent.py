@@ -207,11 +207,13 @@ def _feature_tree(state: dict, hardware_specs: List[Dict[str, Any]]) -> Dict[str
 
 def _pricing_model(state: dict) -> Dict[str, Any]:
     price_status = state.get("price_status", {}) if isinstance(state.get("price_status"), dict) else {}
+    price_records = state.get("price_records", []) if isinstance(state.get("price_records"), list) else []
+    price_available = price_status.get("status") == "available"
     return {
         "schema_name": "gaming_mouse_pricing_model",
-        "status": "pending",
-        "realtime_price_status": price_status.get("status") or "mcp_not_connected",
-        "price_range_reference": [],
+        "status": "available" if price_available else "pending",
+        "realtime_price_status": "available" if price_available else "pending",
+        "price_range_reference": price_records,
         "value_score_status": "pending",
         "note": "价格会随时间变化，最终性价比等待 PriceAgent/MCP 实时采集。",
     }
