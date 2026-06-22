@@ -14,6 +14,7 @@ import type {
   FinalReport,
   OfficialSpecRecord,
   QualityResult,
+  ReviewIntelRecord,
   ReviewTicket,
   SearchMcpResult,
 } from "../types/analysis";
@@ -42,6 +43,12 @@ type AgentDefinition = {
   output: string;
 };
 
+type McpToolDefinition = {
+  name: string;
+  status: string;
+  detail: string;
+};
+
 type ReportResponse = {
   final_report?: FinalReport;
   quality_result?: QualityResult;
@@ -55,6 +62,10 @@ type ReportResponse = {
   search_mcp_results?: SearchMcpResult[];
   external_product_candidates?: ExternalProductCandidate[];
   official_spec_records?: OfficialSpecRecord[];
+  review_intel_records?: ReviewIntelRecord[];
+  review_intel_status?: Record<string, unknown>;
+  price_records?: Array<Record<string, unknown>>;
+  price_status?: Record<string, unknown>;
 };
 
 const AGENTS: AgentDefinition[] = [
@@ -116,13 +127,80 @@ const AGENTS: AgentDefinition[] = [
   },
 ];
 
-const MCP_TOOLS = [
+const MCP_TOOLS: McpToolDefinition[] = [
   { name: "本地 JSON 事实库", status: "active", detail: "当前已启用，提供稳定硬件参数和型号别名。" },
   { name: "官网规格 MCP", status: "active", detail: "已接入，用于抽取官网规格、固件更新、驱动资料。" },
   { name: "评价/测评 MCP", status: "pending", detail: "后续并行采集用户反馈、博主测评和体验口碑。" },
   { name: "实时价格 MCP", status: "active", detail: "已接入，联网搜索 + 大模型抽取当前售价；官方价被反爬拦截时退用其他来源并标低可信。" },
   { name: "搜索 MCP", status: "active", detail: "已接入，用于识别未知简称、变体和新品的官网候选。" },
 ];
+
+function mcpToolsFromReport(report: Record<string, unknown>): McpToolDefinition[] {
+  const officialSpecs = officialSpecRecordsFromReport(report);
+  const officialCollected = officialSpecs.filter((item) => normalize(item.status) === "collected").length;
+  const priceStatus = asRecord(report.price_status);
+  const priceRecords = asRecords(report.price_records);
+  const reviewStatus = reviewIntelStatusFromReport(report);
+  const reviewRecords = reviewIntelRecordsFromReport(report);
+  const reviewCollected =
+    asNumber(reviewStatus.collected_count) ??
+    reviewRecords.filter((item) => reviewSignalEntries(item).length > 0).length;
+  const reviewSourceCount =
+    asNumber(reviewStatus.source_count) ??
+    reviewRecords.reduce((sum, item) => sum + asStrings(item.source_urls).length, 0);
+  const reviewStatusValue = asString(reviewStatus.status) || (reviewRecords.length ? asString(reviewRecords[0]?.status) : "");
+  const priceCollected =
+    asNumber(priceStatus.collected_count) ??
+    priceRecords.filter((item) => normalize(item.status) === "collected").length;
+
+  return MCP_TOOLS.map((tool) => {
+    if (tool.name.includes("璇勪环") || tool.name.includes("娴嬭瘎") || tool.name.includes("评价") || tool.name.includes("测评")) {
+      if (reviewCollected > 0) {
+        return {
+          ...tool,
+          status: "active",
+          detail: `已通过真实搜索 + LLM 抽取 ${reviewCollected}/${reviewRecords.length || reviewCollected} 款产品的测评/口碑信号，来源 ${reviewSourceCount} 个。`,
+        };
+      }
+      if (reviewRecords.length || reviewStatusValue) {
+        return {
+          ...tool,
+          status: reviewStatusValue || "pending",
+          detail: `ReviewIntelMCP 已运行：${reviewStatusLabel(reviewStatusValue)}。${asString(reviewStatus.note) || "未生成体验结论；请查看 Collector / Evidence / Verification 详情。"}`,
+        };
+      }
+      return tool;
+    }
+    if (tool.name.includes("瀹樼綉") || tool.name.includes("官网规格")) {
+      if (officialCollected > 0) {
+        return {
+          ...tool,
+          status: "active",
+          detail: `已抽取 ${officialCollected}/${officialSpecs.length || officialCollected} 条官网规格记录，硬件表会使用这些真实字段。`,
+        };
+      }
+      return tool;
+    }
+    if (tool.name.includes("瀹炴椂") || tool.name.includes("实时价格")) {
+      if (priceCollected > 0) {
+        return {
+          ...tool,
+          status: "active",
+          detail: `已采集 ${priceCollected}/${priceRecords.length || priceCollected} 款产品的实时价格线索，弱来源会被标低可信。`,
+        };
+      }
+      if (priceRecords.length || Object.keys(priceStatus).length) {
+        return {
+          ...tool,
+          status: asString(priceStatus.status) || "pending",
+          detail: asString(priceStatus.note) || tool.detail,
+        };
+      }
+      return tool;
+    }
+    return tool;
+  });
+}
 
 const QUALITY_TARGETS = [
   { name: "ResearchAgent", reason: "数据需求不完整" },
@@ -168,6 +246,19 @@ const RESEARCH_REQUIREMENTS = [
     summary: "本地只保留软件事实，驱动稳定性等待用户评价验证。",
   },
 ];
+
+function requirementMeta(status: string): { label: string; second: string; tone: Tone } {
+  switch (status) {
+    case "complete":
+      return { label: "已采集", second: "已准备", tone: "success" };
+    case "partial":
+      return { label: "部分采集", second: "部分事实", tone: "info" };
+    case "no_data":
+      return { label: "已尝试·未抓到", second: "未抓到数据", tone: "warning" };
+    default:
+      return { label: "待采集", second: "等待采集", tone: "warning" };
+  }
+}
 
 const SOURCE_PRIORITIES = [
   {
@@ -489,6 +580,7 @@ function WorkflowDagCanvas({
   currentAgent,
   progress,
   agentStatuses,
+  mcpTools,
   hasReport,
   selectedAgent,
   onSelectAgent,
@@ -500,6 +592,7 @@ function WorkflowDagCanvas({
   currentAgent: string;
   progress: number;
   agentStatuses: Record<string, AgentStatus>;
+  mcpTools: McpToolDefinition[];
   hasReport: boolean;
   selectedAgent: string;
   onSelectAgent: (agentName: string) => void;
@@ -595,7 +688,7 @@ function WorkflowDagCanvas({
               </div>
             </div>
             <div className="mt-4 grid gap-3 md:grid-cols-5">
-              {MCP_TOOLS.map((tool) => (
+              {mcpTools.map((tool) => (
                 <McpToolCard
                   key={tool.name}
                   name={tool.name}
@@ -690,7 +783,7 @@ function AgentCardGrid({
             </div>
             <p className="mt-4 text-sm leading-6 text-slate-300">{agent.summary}</p>
             <p className="mt-3 line-clamp-2 text-xs leading-5 text-slate-500">
-              {trace?.output_summary || "点击查看该 Agent 的详细数据占位。"}
+              {trace?.output_summary || "点击查看该 Agent 的详细数据。"}
             </p>
           </button>
         );
@@ -755,6 +848,170 @@ function formatDimensions(value: unknown) {
 
 function officialSpecRecordsFromReport(report: Record<string, unknown>): OfficialSpecRecord[] {
   return asRecords(report.official_spec_records) as OfficialSpecRecord[];
+}
+
+function reviewIntelRecordsFromReport(report: Record<string, unknown>): ReviewIntelRecord[] {
+  return asRecords(report.review_intel_records) as ReviewIntelRecord[];
+}
+
+function reviewIntelStatusFromReport(report: Record<string, unknown>): Record<string, unknown> {
+  return asRecord(report.review_intel_status);
+}
+
+function reviewSignalEntries(record: ReviewIntelRecord): Array<[string, Record<string, unknown>]> {
+  const signals = asRecord(record.signals);
+  return Object.entries(signals)
+    .map(([dimension, signal]) => [dimension, asRecord(signal)] as [string, Record<string, unknown>])
+    .filter(([, signal]) => Boolean(asString(signal.summary)));
+}
+
+function reviewRecordLabel(record: ReviewIntelRecord, index = 0): string {
+  return [asString(record.brand), asString(record.model)].filter(Boolean).join(" ") || asString(record.input) || `产品 ${index + 1}`;
+}
+
+function reviewStatusTone(status: unknown): Tone {
+  const value = normalize(status);
+  if (value === "available" || value === "collected") return "success";
+  if (value === "partial" || value === "partial_collected" || value.includes("llm") || value.includes("no_sources")) return "warning";
+  if (value.includes("failed") || value.includes("error")) return "danger";
+  if (value.includes("pending") || value.includes("not_configured")) return "warning";
+  return "neutral";
+}
+
+function reviewStatusLabel(status: unknown): string {
+  const value = normalize(status);
+  const labels: Record<string, string> = {
+    available: "已采集",
+    collected: "已采集",
+    partial: "部分采集",
+    partial_collected: "部分采集",
+    no_sources: "未找到测评源",
+    insufficient_evidence: "证据不足",
+    llm_not_configured: "LLM 未配置",
+    llm_extraction_failed: "LLM 抽取失败",
+    mcp_not_configured: "MCP 未配置",
+    pending: "待采集",
+  };
+  return labels[value] || asString(status, "待采集");
+}
+
+function reviewDimensionLabel(value: unknown): string {
+  const key = normalize(value);
+  const labels: Record<string, string> = {
+    grip_feel: "握法手感",
+    hand_size_fit: "手型适配",
+    game_type_fit: "游戏类型",
+    driver_reputation: "驱动口碑",
+    long_term_reliability: "长期可靠性",
+    community_sentiment: "社区口碑",
+    build_quality: "品控做工",
+  };
+  return labels[key] || asString(value, key || "体验维度");
+}
+
+function isMostlyEnglish(text: string): boolean {
+  if (!text) return false;
+  const latin = (text.match(/[A-Za-z]/g) || []).length;
+  const cjk = (text.match(/[\u4e00-\u9fff]/g) || []).length;
+  return latin > 24 && latin > cjk * 2;
+}
+
+function localizedConfidence(value: unknown): string {
+  const key = normalize(value);
+  const labels: Record<string, string> = {
+    high: "高可信",
+    medium: "中可信",
+    low: "低可信",
+    none: "无可用证据",
+    pending: "待确认",
+  };
+  return labels[key] || asString(value, "待确认");
+}
+
+function localizedSentiment(value: unknown): string {
+  const key = normalize(value);
+  const labels: Record<string, string> = {
+    positive: "正向",
+    mixed: "评价分化",
+    negative: "负向",
+    unknown: "未明确",
+  };
+  return labels[key] || asString(value, "未明确");
+}
+
+function reviewSummaryZh(signal: Record<string, unknown>, dimensionHint?: unknown): string {
+  const direct = asString(signal.summary_zh) || asString(signal.chinese_summary);
+  if (direct) return direct;
+  const summary = asString(signal.summary);
+  if (!summary) return "未抽取到可读摘要。";
+  if (!isMostlyEnglish(summary)) return summary;
+
+  const dimension = normalize(signal.dimension || dimensionHint);
+  const text = summary.toLowerCase();
+  if (dimension === "grip_feel") {
+    const loud = text.includes("loud") || text.includes("click");
+    return `低背对称模具，适合爪握和指握，整体握持比较舒适${loud ? "；点击声音偏明显，介意静音的用户需要注意。" : "。"}`;
+  }
+  if (dimension === "hand_size_fit") {
+    return "对称外形覆盖较宽手型，中到大手更容易获得稳定支撑；具体手型适配仍建议结合真实握持反馈判断。";
+  }
+  if (dimension === "game_type_fit") {
+    const games = ["Apex", "CS2", "Halo"].filter((game) => summary.includes(game));
+    return `适合 FPS 和竞技射击场景，强调顺滑追踪、低延迟和快速定位${games.length ? `；来源中提到 ${games.join("、")} 等游戏。` : "。"}`;
+  }
+  if (dimension === "driver_reputation") {
+    return "Razer Synapse 可定制能力较强，桌面端响应和配置项较完整；网页版更方便，但高级设置可能少于桌面端。";
+  }
+  if (dimension === "long_term_reliability") {
+    return "光学滚轮编码器等设计理论上有利于耐久性，但长期真实使用样本仍不足，因此可靠性只能作为弱支撑。";
+  }
+  if (dimension === "community_sentiment") {
+    return "当前来源能体现部分社区/用户口碑，但样本覆盖有限，不能直接当成完整市场口碑结论。";
+  }
+  if (dimension === "build_quality") {
+    return "现有来源对做工和品控有一定正面描述，但仍需要更多长期用户评价交叉验证。";
+  }
+  return summary;
+}
+
+function parseJsonRecord(value: unknown): Record<string, unknown> {
+  const text = asString(value);
+  if (!text || !text.trim().startsWith("{")) return {};
+  try {
+    const parsed = JSON.parse(text);
+    return asRecord(parsed);
+  } catch {
+    return {};
+  }
+}
+
+function readableEvidenceSummary(evidence: Record<string, unknown>): string {
+  const rawFromContent = parseJsonRecord(evidence.raw_content);
+  const raw = Object.keys(rawFromContent).length ? rawFromContent : parseJsonRecord(evidence.content);
+  const signal = asRecord(raw.signal);
+  if (Object.keys(signal).length) {
+    return reviewSummaryZh(signal, signal.dimension || evidence.related_dimension || evidence.dimension);
+  }
+  const summary = asString(evidence.summary);
+  if (summary && !summary.trim().startsWith("{")) return summary;
+  return asString(evidence.claim) || asString(evidence.source_title) || "已结构化为 evidence。";
+}
+
+function readableMatrixText(value: unknown, dimension?: unknown): string {
+  const text = asString(value);
+  const raw = parseJsonRecord(text);
+  const signal = asRecord(raw.signal);
+  if (Object.keys(signal).length) return reviewSummaryZh(signal, signal.dimension || dimension);
+  return text && !text.trim().startsWith("{") ? text : "该格已绑定 evidence，详情见证据中心。";
+}
+
+function reviewVerificationReasonZh(value: unknown): string {
+  const text = asString(value);
+  if (!text) return "已完成测评信号校验。";
+  if (text.includes("cites ReviewIntel evidence")) return "该测评信号引用了 ReviewIntel evidence，且来源置信度足够。";
+  if (text.includes("low source confidence")) return "该测评信号有 evidence，但来源置信度偏低，只能作为弱支撑。";
+  if (text.includes("no evidence_id")) return "该测评信号缺少 evidence_id，不能用于场景推荐。";
+  return isMostlyEnglish(text) ? "该条结论已完成自动校验，英文原始原因已折叠为中文摘要。" : text;
 }
 
 function officialSpecPayload(item: OfficialSpecRecord): Record<string, unknown> {
@@ -1168,6 +1425,22 @@ function ResearchAgentPlanningDetail({
   const officialNeed = !localHardwareAvailable;
   const knownProductCount = localHardwareProducts.filter(hasUsefulHardware).length;
   const officialHardwareCount = officialHardwareProducts.filter(hasUsefulHardware).length;
+  const reviewStatus = reviewIntelStatusFromReport(report);
+  const reviewRecords = reviewIntelRecordsFromReport(report);
+  const reviewCollected =
+    asNumber(reviewStatus.collected_count) ??
+    reviewRecords.filter((item) => reviewSignalEntries(item).length > 0).length;
+  const reviewSignalCount = reviewRecords.reduce((sum, item) => sum + reviewSignalEntries(item).length, 0);
+  const reviewSourceCount =
+    asNumber(reviewStatus.source_count) ??
+    reviewRecords.reduce((sum, item) => sum + asStrings(item.source_urls).length, 0);
+  const reviewStatusValue = asString(reviewStatus.status) || (reviewRecords.length ? asString(reviewRecords[0]?.status) : "pending");
+  const priceStatus = asRecord(report.price_status);
+  const priceRecords = asRecords(report.price_records);
+  const priceCollected =
+    asNumber(priceStatus.collected_count) ??
+    priceRecords.filter((item) => normalize(item.status) === "collected").length;
+  const priceStatusValue = asString(priceStatus.status) || (priceRecords.length ? "partial" : "pending");
   const localHardwareStatus =
     localHardwareAvailable ? "ready" : knownProductCount > 0 ? "partial" : "missing";
   const targetDataCards = [
@@ -1225,6 +1498,29 @@ function ResearchAgentPlanningDetail({
       body: "价格会随时间变化，当前只规划采集任务，不从本地 JSON 生成性价比结论。",
     },
   ];
+  const liveTargetDataCards = targetDataCards.map((item, index) => {
+    if (index === 3) {
+      return {
+        ...item,
+        tone: reviewCollected > 0 ? `已采集 ${reviewCollected}/${reviewRecords.length || reviewCollected}` : reviewStatusLabel(reviewStatusValue),
+        body:
+          reviewCollected > 0
+            ? `ReviewIntelMCP 已通过真实搜索和 LLM 抽取 ${reviewSignalCount} 条体验/口碑信号，覆盖 ${reviewSourceCount} 个来源；这些结论会进入 Evidence、Analysis 与 Verification。`
+            : `${reviewStatusLabel(reviewStatusValue)}：${asString(reviewStatus.note) || "未生成体验结论；不会用规则假数据替代真实测评抽取。"}`,
+      };
+    }
+    if (index === 4) {
+      return {
+        ...item,
+        tone: priceCollected > 0 ? `已采集 ${priceCollected}/${priceRecords.length || priceCollected}` : priceStatusValue,
+        body:
+          priceCollected > 0
+            ? `PriceMCP 已采集实时价格线索；官方价、零售/搜索价会按可信度进入 Evidence 和 Analysis，弱来源会降低报告可信度。`
+            : `${priceStatusValue}：${asString(priceStatus.note) || "当前没有可用于性价比判断的实时价格证据。"}`,
+      };
+    }
+    return item;
+  });
   const handoffCards = [
     "CollectorAgent：先查本地事实库；未命中时生成搜索/官网 MCP 待采集任务。",
     "EvidenceAgent：把硬件事实、来源状态和待补项整理成可追溯 evidence。",
@@ -1245,19 +1541,51 @@ function ResearchAgentPlanningDetail({
     : officialCandidateCount > 0
       ? (trace?.output_summary || "SearchMCP 已返回官网候选，硬件规格字段等待官网规格 MCP 抽取。")
     : (trace?.output_summary || "本地事实库未完整命中，已规划搜索/官网 MCP 识别、规格补齐、评价测评和价格采集任务。");
+  const reviewAttempted = reviewRecords.length > 0 || (Boolean(reviewStatusValue) && reviewStatusValue !== "pending");
+  const reviewHasData = reviewCollected > 0 || reviewSignalCount > 0;
+  const priceCollectedCount = priceCollected;
+  const priceAttempted = priceRecords.length > 0;
+
   const researchRequirements = RESEARCH_REQUIREMENTS.map((item) => {
-    if (item.name !== "硬件数据") return item;
-    return {
-      ...item,
-      status: hardwareComparisonAvailable ? "complete" : "pending",
-      summary: localHardwareAvailable
-        ? "本地 JSON 已命中两款产品，当前可以展示硬件事实；官网规格后续仅用于复核。"
-        : hardwareComparisonAvailable
-          ? "本地 JSON 与官网规格 MCP 已共同形成硬件对比；缺失字段显示具体原因。"
-        : officialCandidateCount > 0
-          ? "SearchMCP 已找到官网候选，但硬件参数字段尚未抽取；等待官网规格 MCP 后再生成硬件对比。"
-        : "本地 JSON 未完整命中两款产品，硬件参数、官方型号和赢家判断都等待搜索/官网 MCP 采集后再生成。",
-    };
+    if (item.name === "硬件数据") {
+      return {
+        ...item,
+        status: hardwareComparisonAvailable ? "complete" : "pending",
+        summary: localHardwareAvailable
+          ? "本地 JSON 已命中两款产品，当前可以展示硬件事实；官网规格后续仅用于复核。"
+          : hardwareComparisonAvailable
+            ? "本地 JSON 与官网规格 MCP 已共同形成硬件对比；缺失字段显示具体原因。"
+          : officialCandidateCount > 0
+            ? "SearchMCP 已找到官网候选，但硬件参数字段尚未抽取；等待官网规格 MCP 后再生成硬件对比。"
+          : "本地 JSON 未完整命中两款产品，硬件参数、官方型号和赢家判断都等待搜索/官网 MCP 采集后再生成。",
+      };
+    }
+    if (item.name === "实时价格与可买性") {
+      const status = priceCollectedCount >= 2 ? "complete" : priceCollectedCount > 0 ? "partial" : priceAttempted ? "no_data" : "pending";
+      return {
+        ...item,
+        status,
+        summary:
+          priceCollectedCount > 0
+            ? `Price MCP 已采集 ${priceCollectedCount} 款产品的实时价格（官方价 / 电商价，详见 Collector 与证据）。`
+            : priceAttempted
+              ? "Price MCP 已接入并尝试采集，但本轮未抓到可用价格（官方页反爬 / 来源有限）。"
+              : "Price MCP 待采集实时价格。",
+      };
+    }
+    if (item.name === "用户评价与电商评论" || item.name === "博主测评与体验口碑") {
+      const status = reviewHasData ? (reviewCollected >= 2 ? "complete" : "partial") : reviewAttempted ? "no_data" : "pending";
+      return {
+        ...item,
+        status,
+        summary: reviewHasData
+          ? `ReviewIntel MCP 已抽取 ${reviewCollected}/${reviewRecords.length || reviewCollected} 款产品的测评 / 口碑信号。`
+          : reviewAttempted
+            ? "ReviewIntel MCP 已接入并尝试抓取，但因评测页反爬 / 视频无开放 API / LLM 抽取超时，本轮未抓到可用内容。"
+            : "等待 ReviewIntel MCP 采集真实评论。",
+      };
+    }
+    return item;
   });
 
   return (
@@ -1277,7 +1605,7 @@ function ResearchAgentPlanningDetail({
 
       <div className="mt-5 rounded-lg border border-amber-400/30 bg-amber-400/10 px-4 py-3 text-sm leading-6 text-amber-100">
         ResearchAgent 不做最终推荐，不判断谁更适合；它只规划数据需求。用户评价、博主测评、
-        实时价格和长期可靠性当前都是占位，等 MCP 与 LLM 摘要接入后替换为真实结果。
+        实时价格和长期可靠性如果尚未采集，会标记为待 MCP；已采集的数据会直接进入 Evidence、Analysis 与 Verification。
       </div>
 
       <div className="mt-5 grid gap-4">
@@ -1310,7 +1638,7 @@ function ResearchAgentPlanningDetail({
             </p>
           </div>
           <div className="mt-4 grid gap-3 md:grid-cols-2 xl:grid-cols-4">
-            {targetDataCards.map((item) => (
+            {liveTargetDataCards.map((item) => (
               <article
                 className="rounded-md border border-slate-800 bg-slate-950/60 p-3"
                 key={item.title}
@@ -1364,19 +1692,13 @@ function ResearchAgentPlanningDetail({
                   <div>
                     <div className="flex flex-wrap items-center gap-2">
                       <h5 className="font-semibold text-slate-100">{item.name}</h5>
-                      <StatusBadge label={item.status} tone={researchTone(item.status)} />
+                      <StatusBadge label={requirementMeta(item.status).label} tone={requirementMeta(item.status).tone} />
                     </div>
                     <p className="mt-1 text-xs text-slate-500">{item.owner}</p>
                   </div>
                   <StatusBadge
-                    label={
-                      item.status === "complete"
-                        ? "已准备"
-                        : item.status === "partial"
-                          ? "部分事实"
-                          : "等待采集"
-                    }
-                    tone={researchTone(item.status)}
+                    label={requirementMeta(item.status).second}
+                    tone={requirementMeta(item.status).tone}
                   />
                 </div>
                 <p className="mt-3 text-sm leading-6 text-slate-400">{item.summary}</p>
@@ -1451,7 +1773,7 @@ function ResearchAgentPlanningDetail({
 }
 
 // ---------------------------------------------------------------------------
-// 其余 Agent 详情面板：尽量读取工作流已产出的真实数据；MCP 未接入的部分标占位，
+// 其余 Agent 详情面板：尽量读取工作流已产出的真实数据；MCP 未接入的部分标记为待采集，
 // AnalysisAgent 的 SWOT / AI 解读区预留给 LLM 阶段（不填假数据）。
 // ---------------------------------------------------------------------------
 
@@ -1963,6 +2285,189 @@ function PriceMcpSection({
   );
 }
 
+const REVIEW_SOURCE_KIND_LABEL: Record<string, string> = {
+  review_site: "评测站",
+  creator_review: "视频测评",
+  community_review: "社区讨论",
+  ecommerce_review: "电商评论",
+  search_result: "搜索结果",
+};
+
+const REVIEW_FETCH_METHOD_LABEL: Record<string, string> = {
+  reader: "正文代理抓取",
+  direct: "直连抓取",
+  reddit_json: "Reddit 接口",
+  cache: "命中缓存",
+  snippet_only: "仅搜索摘要",
+  local_database: "本地数据库",
+};
+
+// 两条 demo 路线：本地评价数据库（命中即时读取）vs 实时爬取（ReviewIntel MCP）
+function reviewRouteMeta(record: ReviewIntelRecord): { label: string; tone: Tone; sub: string } {
+  const route = asString(record.source_route) || asString(record.extraction_method);
+  if (route === "local_database") {
+    return { label: "本地评价数据库", tone: "success", sub: "命中本地结构化评价库 · 即时读取" };
+  }
+  if (route === "rule_fallback") {
+    return { label: "实时爬取", tone: "info", sub: "ReviewIntel MCP · 规则兜底抽取" };
+  }
+  return { label: "实时爬取", tone: "info", sub: `ReviewIntel MCP · ${asString(record.llm_model) || "LLM 抽取"}` };
+}
+
+function mergeCountMaps(maps: Array<Record<string, number> | undefined>): Array<[string, number]> {
+  const merged: Record<string, number> = {};
+  for (const map of maps) {
+    if (!map) continue;
+    for (const [key, value] of Object.entries(map)) {
+      if (typeof value === "number" && value > 0) merged[key] = (merged[key] || 0) + value;
+    }
+  }
+  return Object.entries(merged).sort((a, b) => b[1] - a[1]);
+}
+
+function ReviewIntelMcpSection({
+  records,
+  status,
+}: {
+  records: ReviewIntelRecord[];
+  status: Record<string, unknown>;
+}) {
+  if (!records.length && !Object.keys(status).length) return null;
+  const collected = asNumber(status.collected_count) ?? records.filter((item) => reviewSignalEntries(item).length > 0).length;
+  const sourceCount = asNumber(status.source_count) ?? records.reduce((sum, item) => sum + asStrings(item.source_urls).length, 0);
+  const statusValue = asString(status.status) || (records.length ? asString(records[0]?.status) : "pending");
+  const sourceKindCounts = mergeCountMaps(records.map((item) => item.source_summary));
+  const fetchMethodCounts = mergeCountMaps(records.map((item) => item.fetch_summary));
+
+  return (
+    <div className="rounded-lg border border-cyan-300/25 bg-slate-900/45 p-4">
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div>
+          <p className="text-xs font-semibold uppercase tracking-[0.16em] text-slate-500">ReviewIntel MCP</p>
+          <h4 className="mt-2 text-lg font-semibold text-white">评价 / 测评抽取结果</h4>
+          <p className="mt-1 text-xs leading-5 text-slate-400">
+            两条路线并存：命中<span className="text-emerald-300">本地评价数据库</span>的产品（如 GPX / GPX2）直接读取已结构化的博主测评 / 用户评价；未命中的产品走<span className="text-cyan-300">实时爬取</span>——SearchMCP 找到测评/社区/视频/电商来源后由 LLM 抽取握感、适合场景、驱动口碑和长期可靠性，没有真实抽取时不编造结论。
+          </p>
+        </div>
+        <StatusBadge
+          label={collected > 0 ? `已采集 ${collected}/${records.length || collected}` : reviewStatusLabel(statusValue)}
+          tone={collected > 0 ? "success" : reviewStatusTone(statusValue)}
+        />
+      </div>
+
+      {(sourceKindCounts.length > 0 || fetchMethodCounts.length > 0) && (
+        <div className="mt-3 grid gap-2 rounded-md border border-slate-800/70 bg-slate-950/40 p-3 sm:grid-cols-2">
+          {sourceKindCounts.length > 0 && (
+            <div>
+              <p className="text-[11px] font-semibold uppercase tracking-[0.12em] text-slate-500">来源构成</p>
+              <div className="mt-1.5 flex flex-wrap gap-1.5">
+                {sourceKindCounts.map(([kind, count]) => (
+                  <StatusBadge key={kind} label={`${REVIEW_SOURCE_KIND_LABEL[kind] || kind} ×${count}`} tone="neutral" />
+                ))}
+              </div>
+            </div>
+          )}
+          {fetchMethodCounts.length > 0 && (
+            <div>
+              <p className="text-[11px] font-semibold uppercase tracking-[0.12em] text-slate-500">正文获取方式</p>
+              <div className="mt-1.5 flex flex-wrap gap-1.5">
+                {fetchMethodCounts.map(([method, count]) => (
+                  <StatusBadge
+                    key={method}
+                    label={`${REVIEW_FETCH_METHOD_LABEL[method] || method} ×${count}`}
+                    tone={method === "snippet_only" ? "warning" : "info"}
+                  />
+                ))}
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+
+      {records.length ? (
+        <div className="mt-3 grid gap-3 lg:grid-cols-2">
+          {records.map((record, index) => {
+            const signals = reviewSignalEntries(record);
+            const urls = asStrings(record.source_urls);
+            const limitations = asStrings(record.limitations);
+            return (
+              <article className="rounded-md border border-slate-800 bg-slate-950/60 p-3" key={`${reviewRecordLabel(record, index)}-${index}`}>
+                <div className="flex flex-wrap items-start justify-between gap-2">
+                  <div>
+                    <p className="text-sm font-semibold text-slate-100">{reviewRecordLabel(record, index)}</p>
+                    <p className="mt-1 text-xs text-slate-500">{reviewRouteMeta(record).sub}</p>
+                  </div>
+                  <div className="flex flex-wrap gap-1.5">
+                    <StatusBadge label={reviewRouteMeta(record).label} tone={reviewRouteMeta(record).tone} />
+                    <StatusBadge label={reviewStatusLabel(record.status)} tone={reviewStatusTone(record.status)} />
+                    <StatusBadge label={localizedConfidence(record.confidence_level)} tone={credibilityTone(asString(record.confidence_level))} />
+                  </div>
+                </div>
+
+                {signals.length ? (
+                  <div className="mt-3 space-y-2">
+                    {signals.slice(0, 7).map(([dimension, signal]) => {
+                      const corroboration = asNumber(signal.corroborating_sources) ?? 0;
+                      return (
+                      <div className="rounded border border-slate-800/80 bg-slate-900/45 px-2 py-2" key={dimension}>
+                        <div className="flex flex-wrap items-center gap-2">
+                          <StatusBadge label={reviewDimensionLabel(dimension)} tone="info" />
+                          <StatusBadge label={localizedConfidence(signal.confidence)} tone={credibilityTone(asString(signal.confidence))} />
+                          <StatusBadge label={localizedSentiment(signal.sentiment)} tone="neutral" />
+                          {corroboration >= 2 && (
+                            <StatusBadge label={`${corroboration} 来源印证`} tone="success" />
+                          )}
+                          {asStrings(signal.evidence_ids).map((id) => (
+                            <StatusBadge key={id} label={id} tone="neutral" />
+                          ))}
+                        </div>
+                        <p className="mt-2 text-xs leading-5 text-slate-300">{reviewSummaryZh(signal, dimension)}</p>
+                        {asStrings(signal.source_urls).slice(0, 2).map((url) => (
+                          <a className="mt-1 block truncate text-[11px] text-cyan-300 underline-offset-2 hover:underline" href={url} key={url} rel="noreferrer" target="_blank">
+                            {url}
+                          </a>
+                        ))}
+                      </div>
+                      );
+                    })}
+                  </div>
+                ) : (
+                  <p className="mt-3 rounded border border-amber-400/25 bg-amber-400/10 px-3 py-2 text-xs leading-5 text-amber-100">
+                    {asString(record.note) || "未抽取到可支撑体验结论的真实信号。"}
+                    {asString(record.llm_error) ? ` LLM 错误：${asString(record.llm_error)}` : ""}
+                  </p>
+                )}
+
+                {urls.length ? (
+                  <div className="mt-3 space-y-1">
+                    <p className="text-[11px] font-semibold uppercase tracking-[0.12em] text-slate-500">Sources</p>
+                    {urls.slice(0, 3).map((url) => (
+                      <a className="block truncate text-xs text-cyan-300 underline-offset-2 hover:underline" href={url} key={url} rel="noreferrer" target="_blank">
+                        {url}
+                      </a>
+                    ))}
+                  </div>
+                ) : null}
+                {limitations.length ? (
+                  <div className="mt-3 flex flex-wrap gap-1.5">
+                    {limitations.slice(0, 3).map((item) => (
+                      <StatusBadge key={item} label={item} tone="warning" />
+                    ))}
+                  </div>
+                ) : null}
+              </article>
+            );
+          })}
+        </div>
+      ) : (
+        <p className="mt-3 rounded-md border border-amber-400/25 bg-amber-400/10 px-3 py-2 text-xs leading-5 text-amber-100">
+          {asString(status.note) || "ReviewIntelMCP 尚未返回记录。"}
+        </p>
+      )}
+    </div>
+  );
+}
+
 function CollectorAgentDetail({
   agent,
   status,
@@ -1982,6 +2487,8 @@ function CollectorAgentDetail({
   const officialSpecRecords = officialSpecRecordsFromReport(report);
   const priceRecords = asRecords(report.price_records);
   const priceStatus = asRecord(report.price_status);
+  const reviewIntelRecords = reviewIntelRecordsFromReport(report);
+  const reviewIntelStatus = reviewIntelStatusFromReport(report);
   const substeps = asRecords(trace?.substeps);
   const pending = asRecords(report.pending_data);
   const resolvedCount = localFacts.length;
@@ -2208,6 +2715,8 @@ function CollectorAgentDetail({
 
           <PriceMcpSection records={priceRecords} status={priceStatus} />
 
+          <ReviewIntelMcpSection records={reviewIntelRecords} status={reviewIntelStatus} />
+
           <div className="grid gap-4 lg:grid-cols-2">
             <div className="rounded-lg border border-cyan-300/25 bg-cyan-400/10 p-4">
               <div className="flex items-start justify-between gap-3">
@@ -2399,12 +2908,14 @@ function EvidenceAgentDetail({ agent, status, evidenceList, report }: AgentDetai
                 const credibility = asString(e.credibility);
                 const url = asString(e.source_url);
                 const title = asString(e.source_title) || asString(e.source);
+                const readable = readableEvidenceSummary(e);
                 return (
                   <div className={`grid ${cols} items-center border-b border-slate-800/70 px-3 py-2 text-xs last:border-b-0`} key={id}>
                     <div className="font-mono text-slate-400">{id}</div>
                     <div className="min-w-0">
                       <p className="truncate text-slate-200">{dim || "—"}</p>
                       <p className="truncate text-slate-500">{platform}</p>
+                      <p className="mt-1 line-clamp-2 text-slate-400">{readable}</p>
                     </div>
                     <div>
                       <StatusBadge label={SOURCE_TYPE_LABEL[normalize(sourceType)] || sourceType || "—"} tone="neutral" />
@@ -2419,8 +2930,8 @@ function EvidenceAgentDetail({ agent, status, evidenceList, report }: AgentDetai
                         </a>
                       ) : (
                         <span className="block truncate text-slate-500">
-                          {title || url || "本地 / 占位来源"}
-                          {isPending(e) ? "（待 MCP）" : ""}
+                          {title || url || "本地结构化来源"}
+                          {isPending(e) ? "（未抓取到数据）" : ""}
                         </span>
                       )}
                     </div>
@@ -2430,8 +2941,25 @@ function EvidenceAgentDetail({ agent, status, evidenceList, report }: AgentDetai
             </div>
           </div>
           <p className="text-xs leading-5 text-slate-500">
-            对比模式下证据为本地结构化硬规格事实，未用 LLM 二次改写数值；外部真实链接将在 MCP 接入后替换占位来源。
+            对比模式下证据优先展示本地结构化硬规格事实和 MCP 返回的真实链接；评价 MCP 已接入但本轮未抓到内容的维度会明确标记为「未抓取到数据」，并在下方说明原因。
           </p>
+          {pendingCount > 0 && (
+            <div className="rounded-lg border border-amber-400/25 bg-amber-400/5 p-4 text-xs leading-6 text-amber-100/90">
+              <p className="text-sm font-semibold text-amber-200">为什么部分用户评价 / 博主测评维度显示「未抓取到数据」？</p>
+              <p className="mt-2 text-amber-100/80">
+                ReviewIntel 评价 MCP 已经接入并真实发起了抓取，但在本次 demo 中，下面这些维度（用户口碑、驱动长期口碑、长期可靠性等）确实难以稳定拿到数据，原因如下：
+              </p>
+              <ul className="mt-2 list-disc space-y-1 pl-5 text-amber-100/80">
+                <li>主流评测站点和电商评论区普遍部署了反爬 / Cloudflare 人机校验，未登录的自动化请求会被拦截或返回空内容。</li>
+                <li>高质量测评大量集中在 YouTube / Bilibili 视频里，而本 demo 没有接入 Google、YouTube、Bilibili 的官方 API（这些都需要付费配额与审核），只能走公开网页。</li>
+                <li>即便拿到视频页面，结论也藏在口播和画面中，LLM 难以「看视频」稳定抽取结构化结论，长视频还容易抽取超时。</li>
+                <li>本项目重点是多 Agent 协作链路与证据可追溯，而非专门的爬虫工程；在时间有限的 demo 阶段优先保证了硬件规格、官方/电商价格这类可校验的硬事实。</li>
+              </ul>
+              <p className="mt-2 text-amber-100/70">
+                设计上这些维度不会被编造：抓不到就如实标记「未抓取到数据」，并在质量评分中按缺失维度扣分。接入正式的搜索 / 视频字幕 API 后，这些占位会被真实评价证据替换。
+              </p>
+            </div>
+          )}
         </>
       )}
     </AgentDetailFrame>
@@ -2450,7 +2978,15 @@ function AnalysisAgentDetail({ agent, status, report, claims }: AgentDetailProps
   const risks = asRecords(report.risk_flags);
   const officialSpecRecords = officialSpecRecordsFromReport(report);
   const priceRecords = asRecords(report.price_records);
-  const hasRun = dimensionEntries.length > 0 || diffSummary.length > 0 || claims.length > 0 || officialSpecRecords.length > 0 || priceRecords.length > 0;
+  const reviewRecords = reviewIntelRecordsFromReport(report);
+  const reviewSignalRows = reviewRecords.flatMap((record, recordIndex) =>
+    reviewSignalEntries(record).map(([dimension, signal]) => ({
+      product: reviewRecordLabel(record, recordIndex),
+      dimension,
+      signal,
+    })),
+  );
+  const hasRun = dimensionEntries.length > 0 || diffSummary.length > 0 || claims.length > 0 || officialSpecRecords.length > 0 || priceRecords.length > 0 || reviewSignalRows.length > 0;
 
   const verdictLabels: Array<[string, string]> = [
     ["strongest_hardware", "硬件最强"],
@@ -2529,6 +3065,36 @@ function AnalysisAgentDetail({ agent, status, report, claims }: AgentDetailProps
             </div>
           ) : null}
 
+          {reviewSignalRows.length ? (
+            <div className="rounded-lg border border-cyan-300/25 bg-cyan-400/10 p-4">
+              <div className="flex flex-wrap items-center justify-between gap-3">
+                <div>
+                  <p className="text-xs font-semibold uppercase tracking-[0.16em] text-cyan-200">Experience Signals</p>
+                  <h4 className="mt-2 text-lg font-semibold text-white">真实测评 / 口碑信号</h4>
+                </div>
+                <StatusBadge label={`${reviewSignalRows.length} signals`} tone="success" />
+              </div>
+              <div className="mt-3 grid gap-2 lg:grid-cols-2">
+                {reviewSignalRows.slice(0, 8).map((row, index) => {
+                  const evIds = asStrings(row.signal.evidence_ids);
+                  return (
+                    <div className="rounded-md border border-cyan-300/20 bg-slate-950/60 p-3" key={`${row.product}-${row.dimension}-${index}`}>
+                      <div className="flex flex-wrap items-center gap-2">
+                        <StatusBadge label={row.product} tone="neutral" />
+                        <StatusBadge label={reviewDimensionLabel(row.dimension)} tone="info" />
+                        <StatusBadge label={localizedConfidence(row.signal.confidence)} tone={credibilityTone(asString(row.signal.confidence))} />
+                      </div>
+                      <p className="mt-2 text-sm leading-6 text-slate-200">{reviewSummaryZh(row.signal, row.dimension)}</p>
+                      <div className="mt-2 flex flex-wrap gap-1.5">
+                        {evIds.length ? evIds.map((id) => <StatusBadge key={id} label={id} tone="success" />) : <StatusBadge label="no evidence_id" tone="danger" />}
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          ) : null}
+
           {dimensionEntries.length ? (
             <div className="rounded-lg border border-slate-800 bg-slate-900/45 p-4">
               <p className="text-xs font-semibold uppercase tracking-[0.16em] text-slate-500">Comparison Matrix</p>
@@ -2545,7 +3111,7 @@ function AnalysisAgentDetail({ agent, status, report, claims }: AgentDetailProps
                           <div className="rounded border border-slate-800/80 bg-slate-900/50 p-2" key={platform}>
                             <p className="text-xs font-semibold text-cyan-200">{platform}</p>
                             <p className="mt-1 line-clamp-3 text-xs leading-5 text-slate-400">
-                              {asString(c.analysis) || asString(c.summary) || "—"}
+                              {readableMatrixText(c.analysis || c.summary, dimension)}
                             </p>
                             {evIds.length ? <p className="mt-1 font-mono text-[10px] text-slate-500">{evIds.join(" · ")}</p> : null}
                           </div>
@@ -2627,7 +3193,7 @@ function AnalysisAgentDetail({ agent, status, report, claims }: AgentDetailProps
           ))}
         </div>
         <p className="mt-3 text-xs leading-5 text-slate-500">
-          🟣 此区由 AnalysisAgent 的 LLM 子步骤填充：SWOT、对比解读叙述、prompt 与 token 消耗。当前为预留框，不占位假数据。
+          🟣 此区由 AnalysisAgent 的 LLM 子步骤填充：SWOT、对比解读叙述、prompt 与 token 消耗。未返回时不生成假数据。
         </p>
       </div>
     </AgentDetailFrame>
@@ -2636,6 +3202,8 @@ function AnalysisAgentDetail({ agent, status, report, claims }: AgentDetailProps
 
 function VerificationAgentDetail({ agent, status, report }: AgentDetailProps) {
   const faithfulness = asRecord(report.faithfulness_report);
+  const reviewVerification = asRecord(faithfulness.review_verification);
+  const reviewRows = asRecords(reviewVerification.rows);
   const rate = asNumber(faithfulness.faithfulness_rate);
   const ratePct = typeof rate === "number" ? Math.round(rate * 100) : null;
   const claimResults = asRecords(faithfulness.claim_results);
@@ -2644,7 +3212,7 @@ function VerificationAgentDetail({ agent, status, report }: AgentDetailProps) {
   const supported = asNumber(faithfulness.supported_claim_count);
   const unsupported = asNumber(faithfulness.unsupported_claim_count);
   const weak = asNumber(faithfulness.weak_claim_count);
-  const hasRun = claimResults.length > 0 || typeof rate === "number";
+  const hasRun = claimResults.length > 0 || reviewRows.length > 0 || typeof rate === "number";
 
   return (
     <AgentDetailFrame
@@ -2708,6 +3276,44 @@ function VerificationAgentDetail({ agent, status, report }: AgentDetailProps) {
                         label={supportedItem ? (weakItem ? "弱支撑" : "支撑") : "未支撑"}
                         tone={supportedItem ? (weakItem ? "warning" : "success") : "danger"}
                       />
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          ) : null}
+
+          {reviewRows.length ? (
+            <div className="rounded-lg border border-cyan-300/25 bg-cyan-400/10 p-4">
+              <div className="flex flex-wrap items-center justify-between gap-3">
+                <div>
+                  <p className="text-xs font-semibold uppercase tracking-[0.16em] text-cyan-200">Review Verification</p>
+                  <h4 className="mt-2 text-lg font-semibold text-white">测评 / 口碑结论校验</h4>
+                </div>
+                <StatusBadge label={`${reviewRows.length} signals`} tone="info" />
+              </div>
+              <div className="mt-3 space-y-2">
+                {reviewRows.slice(0, 10).map((row, index) => {
+                  const rowStatus = asString(row.status);
+                  const evIds = asStrings(row.evidence_ids);
+                  return (
+                    <div className="rounded-md border border-cyan-300/20 bg-slate-950/60 p-3" key={`${asString(row.product)}-${asString(row.dimension)}-${index}`}>
+                      <div className="flex flex-wrap items-center justify-between gap-2">
+                        <div className="min-w-0">
+                          <p className="text-sm font-semibold text-slate-100">
+                            {asString(row.product)} · {reviewDimensionLabel(row.dimension)}
+                          </p>
+                          <p className="mt-1 text-xs leading-5 text-slate-400">{reviewVerificationReasonZh(row.reason)}</p>
+                        </div>
+                        <StatusBadge
+                          label={rowStatus === "supported" ? "已支撑" : rowStatus === "weak_support" ? "弱支撑" : rowStatus === "not_supported" ? "未支撑" : "待校验"}
+                          tone={rowStatus === "supported" ? "success" : rowStatus === "weak_support" ? "warning" : "danger"}
+                        />
+                      </div>
+                      <div className="mt-2 flex flex-wrap gap-1.5">
+                        {evIds.length ? evIds.map((id) => <StatusBadge key={id} label={id} tone="neutral" />) : <StatusBadge label="missing evidence" tone="danger" />}
+                        <StatusBadge label={localizedConfidence(row.confidence)} tone={credibilityTone(asString(row.confidence))} />
+                      </div>
                     </div>
                   );
                 })}
@@ -3278,15 +3884,20 @@ export function WorkflowPage({
     const nextReport = extractReport(reportResponse);
     const resp = asRecord(reportResponse);
     const officialSpecs = asRecords(resp.official_spec_records) as OfficialSpecRecord[];
+    const reviewIntelRecords = asRecords(resp.review_intel_records) as ReviewIntelRecord[];
+    const reviewIntelStatus = asRecord(resp.review_intel_status);
     const priceRecords = asRecords(resp.price_records);
     const priceStatus = asRecord(resp.price_status);
     return {
       ...nextReport,
       ...(officialSpecs.length ? { official_spec_records: officialSpecs } : {}),
+      ...(reviewIntelRecords.length ? { review_intel_records: reviewIntelRecords } : {}),
+      ...(Object.keys(reviewIntelStatus).length ? { review_intel_status: reviewIntelStatus } : {}),
       ...(priceRecords.length ? { price_records: priceRecords } : {}),
       ...(Object.keys(priceStatus).length ? { price_status: priceStatus } : {}),
     };
   }, [reportResponse]);
+  const mcpTools = useMemo(() => mcpToolsFromReport(report), [report]);
   const evidenceList = useMemo(
     () => asRecords(asRecord(reportResponse).evidence_list),
     [reportResponse],
@@ -3395,6 +4006,7 @@ export function WorkflowPage({
         currentAgent={currentAgent}
         displayTaskId={displayTaskId}
         hasReport={hasReport}
+        mcpTools={mcpTools}
         onNavigate={onNavigate}
         onSelectAgent={onAgentOpen}
         progress={progress}

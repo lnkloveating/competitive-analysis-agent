@@ -337,9 +337,15 @@ def quality_agent(state: dict) -> Dict[str, Any]:
         if isinstance(faithfulness_report.get("price_verification"), dict)
         else {}
     )
+    review_verification = (
+        faithfulness_report.get("review_verification", {})
+        if isinstance(faithfulness_report.get("review_verification"), dict)
+        else {}
+    )
     weak_price_count = int(price_status.get("low_confidence_count") or 0) + int(
         price_verification.get("weak_price_records") or 0
     )
+    weak_review_count = int(review_verification.get("weak_review_signals") or 0)
     reject_reason = None if approved else "部分质量检查未通过"
 
     quality_result = QualityResult(
@@ -356,7 +362,14 @@ def quality_agent(state: dict) -> Dict[str, Any]:
 
     needs_human_review = False
     degraded_report = False
-    has_limitations = bool(pending_data or missing_dimensions or missing_platforms or high_risk_count or weak_price_count)
+    has_limitations = bool(
+        pending_data
+        or missing_dimensions
+        or missing_platforms
+        or high_risk_count
+        or weak_price_count
+        or weak_review_count
+    )
     quality_status = (
         "approved_with_limitations"
         if quality_result.approved and has_limitations
@@ -396,6 +409,8 @@ def quality_agent(state: dict) -> Dict[str, Any]:
         quality_result_dict["limitations"].append("high_risks_disclosed")
     if weak_price_count:
         quality_result_dict["limitations"].append("weak_price_support")
+    if weak_review_count:
+        quality_result_dict["limitations"].append("weak_review_support")
     if degraded_report:
         quality_result_dict["degradation_reason"] = (
             "Automatic repair attempts were exhausted; unsupported or invalid content "
@@ -417,9 +432,10 @@ def quality_agent(state: dict) -> Dict[str, Any]:
         "missing_dimension_deductions": min(12, len(missing_dimensions) * 4),
         "pending_data_deductions": pending_penalty,
         "weak_price_support_count": weak_price_count,
+        "weak_review_support_count": weak_review_count,
         "note": (
             "Report credibility is reduced by disclosed pending data and risks. Weak price support is "
-            "shown as a limitation; review/user-feedback data still pending is also part of the reason."
+            "shown as a limitation; weak or pending review/user-feedback data is also part of the reason."
         ),
     }
 

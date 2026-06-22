@@ -170,6 +170,53 @@ def _price_verification(state: dict) -> Dict[str, Any]:
     }
 
 
+def _review_verification(state: dict) -> Dict[str, Any]:
+    records = [item for item in state.get("review_intel_records", []) if isinstance(item, dict)]
+    rows: List[Dict[str, Any]] = []
+    for record in records:
+        model = _as_text(record.get("model") or record.get("input")) or "unknown product"
+        signals = record.get("signals") if isinstance(record.get("signals"), dict) else {}
+        for dimension, signal in signals.items():
+            if not isinstance(signal, dict):
+                continue
+            evidence_ids = [
+                _as_text(item)
+                for item in signal.get("evidence_ids", [])
+                if _as_text(item)
+            ] if isinstance(signal.get("evidence_ids"), list) else []
+            confidence = _as_text(signal.get("confidence")).lower()
+            if evidence_ids and confidence in {"high", "medium"}:
+                status = "supported"
+                support_level = "strong" if confidence == "high" else "medium"
+                reason = "Review signal cites ReviewIntel evidence and has sufficient source confidence."
+            elif evidence_ids:
+                status = "weak_support"
+                support_level = "weak"
+                reason = "Review signal has traceable evidence but only low-confidence/community/search support."
+            else:
+                status = "not_supported"
+                support_level = "none"
+                reason = "Review signal has no evidence_id and must not be used for scenario recommendations."
+            rows.append(
+                {
+                    "product": model,
+                    "dimension": dimension,
+                    "status": status,
+                    "support_level": support_level,
+                    "reason": reason,
+                    "evidence_ids": evidence_ids,
+                    "confidence": confidence or "none",
+                }
+            )
+    return {
+        "checked_review_signals": len(rows),
+        "supported_review_signals": len([item for item in rows if item["status"] == "supported"]),
+        "weak_review_signals": len([item for item in rows if item["status"] == "weak_support"]),
+        "unsupported_review_signals": len([item for item in rows if item["status"] == "not_supported"]),
+        "rows": rows,
+    }
+
+
 def verification_agent(state: dict) -> Dict[str, Any]:
     """Verify claim/matrix faithfulness and expose a report for downstream agents."""
     claims = [item for item in state.get("claims", []) if isinstance(item, dict)]
@@ -178,6 +225,7 @@ def verification_agent(state: dict) -> Dict[str, Any]:
     report = verify_claims(claims, evidence_list)
     report["matrix_issues"] = _matrix_issues(state, report)
     report["price_verification"] = _price_verification(state)
+    report["review_verification"] = _review_verification(state)
 
     next_state = {
         **state,

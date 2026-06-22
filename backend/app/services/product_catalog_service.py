@@ -225,10 +225,16 @@ def _ensure_loaded() -> None:
                     data = json.load(f)
             except (OSError, json.JSONDecodeError):
                 continue  # 单个坏文件不阻断其它品类
+            products = data.get("products")
+            if not isinstance(products, list):
+                # data/products/ also contains auxiliary stores such as
+                # gaming_mice_reviews.json. They may share category=gaming_mouse,
+                # but they are not hardware product catalogs.
+                continue
             canonical = str(data.get("category") or path.stem).strip()
             if not canonical:
                 continue
-            for product in data.get("products", []):
+            for product in products:
                 if isinstance(product, dict):
                     _ensure_image_fields(product)
                     _ensure_identity_fields(product)

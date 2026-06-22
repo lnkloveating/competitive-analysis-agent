@@ -31,6 +31,11 @@ from app.services.price_mcp_service import (
     summarize_price_status,
 )
 from app.services.product_compare_service import build_compare_payload
+from app.services.review_intel_mcp_service import (
+    collect_review_intel,
+    merge_review_records_into_evidence,
+    summarize_review_intel_status,
+)
 from app.services.search_mcp_service import search_candidates
 
 
@@ -269,7 +274,9 @@ def _unresolved_official_status(unresolved: List[str]) -> List[Dict[str, Any]]:
     ]
 
 
-def _review_intel_status() -> Dict[str, Any]:
+def _review_intel_status(review_records: List[Dict[str, Any]] | None = None) -> Dict[str, Any]:
+    if review_records:
+        return summarize_review_intel_status(review_records)
     return {
         "status": "mcp_not_connected",
         "mcp_required": True,
@@ -522,6 +529,62 @@ def _price_targets(products: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
             }
         )
     return targets
+
+
+def _review_targets(products: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    targets: List[Dict[str, Any]] = []
+    seen: set[str] = set()
+    for product in products:
+        if not isinstance(product, dict):
+            continue
+        product_id = _as_text(product.get("id"))
+        model = _as_text(product.get("model"))
+        key = product_id or model
+        if not key or key in seen:
+            continue
+        seen.add(key)
+        targets.append(
+            {
+                "input": model or product_id,
+                "product_id": product_id,
+                "brand": product.get("brand"),
+                "model": model,
+                "official_url": product.get("official_url"),
+            }
+        )
+    return targets
+
+
+def _append_review_pending(
+    state: dict,
+    review_status: Dict[str, Any],
+    collected_count: int,
+    target_count: int,
+) -> List[Dict[str, Any]]:
+    fully_collected = bool(target_count) and collected_count >= target_count
+    pending_dimensions = [
+        _as_text(item)
+        for item in review_status.get("review_dimensions_pending", [])
+        if _as_text(item)
+    ] if isinstance(review_status.get("review_dimensions_pending"), list) else []
+    low_conf = int(review_status.get("low_confidence_count") or 0) > 0
+    if fully_collected and not pending_dimensions and not low_conf:
+        return [item for item in state.get("pending_data", []) if isinstance(item, dict)]
+    status_label = "partial" if collected_count else (_as_text(review_status.get("status")) or "pending")
+    if low_conf:
+        status_label = "low_confidence"
+    note = _as_text(review_status.get("note")) or "Review/user feedback data is not complete yet."
+    if pending_dimensions:
+        note = f"{note} Pending dimensions: {', '.join(pending_dimensions)}."
+    return _append_pending(
+        state,
+        _pending_entry(
+            "CollectorAgent.review_intel",
+            status_label,
+            pending_dimensions or list(EXPERIENCE_PENDING_DIMENSIONS),
+            note,
+        ),
+    )
 
 
 def _official_products_from_records(
@@ -805,8 +868,17 @@ def collector_agent(state: dict) -> Dict[str, Any]:
             matched_payload["evidence_list"].extend(
                 price_records_to_evidence(price_records, len(matched_payload["evidence_list"]))
             )
+        review_records = collect_review_intel(_review_targets(combined_products), category=category)
+        review_status = _review_intel_status(review_records)
+        if matched_payload:
+            matched_payload["evidence_list"] = merge_review_records_into_evidence(
+                matched_payload["evidence_list"],
+                review_records,
+            )
         price_collected_count = int(price_status.get("collected_count") or 0)
         price_target_count = int(price_status.get("target_count") or len(price_records) or 0)
+        review_collected_count = int(review_status.get("collected_count") or 0)
+        review_target_count = int(review_status.get("target_count") or len(review_records) or 0)
         pending_data = [
             item
             for item in pending_data
@@ -817,6 +889,17 @@ def collector_agent(state: dict) -> Dict[str, Any]:
         ]
         pending_data = _append_price_pending(
             {**state, "pending_data": pending_data}, price_status, price_collected_count, price_target_count
+        )
+        pending_data = [
+            item
+            for item in pending_data
+            if not (
+                isinstance(item, dict)
+                and item.get("agent") == "CollectorAgent.review_intel"
+            )
+        ]
+        pending_data = _append_review_pending(
+            {**state, "pending_data": pending_data}, review_status, review_collected_count, review_target_count
         )
 
         if matched_payload:
@@ -874,16 +957,21 @@ def collector_agent(state: dict) -> Dict[str, Any]:
             "product_facts": matched_payload["product_facts"] if matched_payload else [],
             "official_spec_records": merged_records,
             "price_records": price_records,
+            "review_intel_records": review_records,
             "raw_research": matched_payload["raw_research"] if matched_payload else [],
             "evidence_list": matched_payload["evidence_list"] if matched_payload else [],
             "focus_dimensions": matched_payload["focus_dimensions"] if matched_payload else state.get("focus_dimensions", []),
             "official_spec_status": official_status,
-            "review_intel_status": _review_intel_status(),
+            "review_intel_status": review_status,
             "price_status": price_status,
             "pending_data": pending_data,
             "pending_dimensions": [
                 *(["official_model", "hardware_specs"] if effective_unresolved else []),
-                *EXPERIENCE_PENDING_DIMENSIONS,
+                *(
+                    review_status.get("review_dimensions_pending", [])
+                    if isinstance(review_status.get("review_dimensions_pending"), list)
+                    else EXPERIENCE_PENDING_DIMENSIONS
+                ),
                 *(["realtime_price"] if price_collected_count < max(1, price_target_count) else []),
             ],
             "knowledge_schema": _product_schema(category),
@@ -908,7 +996,11 @@ def collector_agent(state: dict) -> Dict[str, Any]:
             pending_fields=[
                 *effective_unresolved,
                 *(["official_model", "hardware_specs"] if effective_unresolved else []),
-                *EXPERIENCE_PENDING_DIMENSIONS,
+                *(
+                    review_status.get("review_dimensions_pending", [])
+                    if isinstance(review_status.get("review_dimensions_pending"), list)
+                    else EXPERIENCE_PENDING_DIMENSIONS
+                ),
                 *(["realtime_price"] if price_collected_count < max(1, price_target_count) else []),
             ],
             substeps=[
@@ -943,7 +1035,12 @@ def collector_agent(state: dict) -> Dict[str, Any]:
                     "count": official_usable_count,
                     "pending_fields": [] if official_collected_count else list(OFFICIAL_SPEC_FIELDS),
                 },
-                {"name": "ReviewIntel", "status": "mcp_not_connected"},
+                {
+                    "name": "ReviewIntel",
+                    "status": review_status.get("status") or "pending",
+                    "count": review_collected_count,
+                    "source_count": review_status.get("source_count", 0),
+                },
                 {
                     "name": "Price",
                     "status": price_status.get("status") or "pending",
@@ -968,8 +1065,16 @@ def collector_agent(state: dict) -> Dict[str, Any]:
     payload["evidence_list"].extend(
         price_records_to_evidence(price_records, len(payload["evidence_list"]))
     )
+    review_records = collect_review_intel(_review_targets(payload["products"]), category=category)
+    review_status = _review_intel_status(review_records)
+    payload["evidence_list"] = merge_review_records_into_evidence(
+        payload["evidence_list"],
+        review_records,
+    )
     price_collected_count = int(price_status.get("collected_count") or 0)
     price_target_count = int(price_status.get("target_count") or len(price_records) or 0)
+    review_collected_count = int(review_status.get("collected_count") or 0)
+    review_target_count = int(review_status.get("target_count") or len(review_records) or 0)
     official_status, official_missing = _official_spec_status(payload["product_facts"])
     official_status = _official_status_from_records(official_status, official_records)
     official_collected_count = sum(
@@ -994,14 +1099,8 @@ def collector_agent(state: dict) -> Dict[str, Any]:
                 "Some official hardware fields still need official-site extraction or confirmation.",
             ),
         )
-    pending_data = _append_pending(
-        {**state, "pending_data": pending_data},
-        _pending_entry(
-            "CollectorAgent.review_intel",
-            "mcp_not_connected",
-            list(EXPERIENCE_PENDING_DIMENSIONS),
-            "User reviews and creator reviews are not collected yet.",
-        ),
+    pending_data = _append_review_pending(
+        {**state, "pending_data": pending_data}, review_status, review_collected_count, review_target_count
     )
     pending_data = _append_price_pending(
         {**state, "pending_data": pending_data}, price_status, price_collected_count, price_target_count
@@ -1020,15 +1119,21 @@ def collector_agent(state: dict) -> Dict[str, Any]:
         "product_facts": payload["product_facts"],
         "official_spec_records": official_records,
         "price_records": price_records,
+        "review_intel_records": review_records,
         "raw_research": payload["raw_research"],
         "evidence_list": payload["evidence_list"],
         "focus_dimensions": payload["focus_dimensions"],
         "pending_dimensions": [
             *payload.get("pending_dimensions", []),
+            *(
+                review_status.get("review_dimensions_pending", [])
+                if isinstance(review_status.get("review_dimensions_pending"), list)
+                else EXPERIENCE_PENDING_DIMENSIONS
+            ),
             *(["realtime_price"] if price_collected_count < max(1, price_target_count) else []),
         ],
         "official_spec_status": official_status,
-        "review_intel_status": _review_intel_status(),
+        "review_intel_status": review_status,
         "price_status": price_status,
         "pending_data": pending_data,
         "knowledge_schema": _product_schema(category),
@@ -1052,7 +1157,11 @@ def collector_agent(state: dict) -> Dict[str, Any]:
         pending_fields=[
             *unresolved,
             *official_missing,
-            *EXPERIENCE_PENDING_DIMENSIONS,
+            *(
+                review_status.get("review_dimensions_pending", [])
+                if isinstance(review_status.get("review_dimensions_pending"), list)
+                else EXPERIENCE_PENDING_DIMENSIONS
+            ),
             *(["realtime_price"] if price_collected_count < max(1, price_target_count) else []),
         ],
         substeps=[
@@ -1064,7 +1173,12 @@ def collector_agent(state: dict) -> Dict[str, Any]:
                 "count": official_usable_count,
                 "pending_fields": official_missing if not official_collected_count else [],
             },
-            {"name": "ReviewIntel", "status": "mcp_not_connected"},
+            {
+                "name": "ReviewIntel",
+                "status": review_status.get("status") or "pending",
+                "count": review_collected_count,
+                "source_count": review_status.get("source_count", 0),
+            },
             {
                 "name": "Price",
                 "status": price_status.get("status") or "pending",

@@ -14,6 +14,7 @@ class StateSnapshot(BaseModel):
     industry_name: str = ""
     raw_research: List[Dict[str, Any]] = Field(default_factory=list)
     evidence_list: List[Dict[str, Any]] = Field(default_factory=list)
+    review_intel_records: List[Dict[str, Any]] = Field(default_factory=list)
     claims: List[Dict[str, Any]] = Field(default_factory=list)
     product_matrix: Dict[str, Any] = Field(default_factory=dict)
     business_matrix: Dict[str, Any] = Field(default_factory=dict)

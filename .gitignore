@@ -45,3 +45,6 @@ logs/
 
 # LangSmith
 .langsmith/
+
+# 抓取缓存（ReviewIntel reader/正文缓存，运行时生成）
+.cache/

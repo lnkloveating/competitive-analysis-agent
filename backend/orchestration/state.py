@@ -79,6 +79,7 @@ class CompetitiveAnalysisState(TypedDict):
     product_facts: List[Dict]
     official_spec_records: List[Dict]
     official_spec_status: List[Dict]
+    review_intel_records: List[Dict]
     review_intel_status: Dict
     price_records: List[Dict]
     price_status: Dict

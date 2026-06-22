@@ -190,7 +190,7 @@ class PricingModelSchema(DomainSchemaModel):
 
 class UserPersonaSchema(DomainSchemaModel):
     schema_name: Literal["gaming_mouse_user_persona"] = "gaming_mouse_user_persona"
-    status: Literal["pending", "insufficient_evidence", "available"] = "insufficient_evidence"
+    status: Literal["pending", "insufficient_evidence", "partial", "available"] = "insufficient_evidence"
     grip_style_fit: Dict[str, str] = Field(default_factory=dict)
     hand_size_fit: Dict[str, str] = Field(default_factory=dict)
     game_type_fit: Dict[str, str] = Field(default_factory=dict)
@@ -232,6 +232,8 @@ class GamingMouseFinalReportSchema(DomainSchemaModel):
     product_identification: List[ProductIdentitySchema] = Field(default_factory=list)
     hardware_specs: List[HardwareSpecSchema] = Field(default_factory=list)
     official_spec_records: List[Dict[str, Any]] = Field(default_factory=list)
+    review_intel_records: List[Dict[str, Any]] = Field(default_factory=list)
+    review_intel_status: Dict[str, Any] = Field(default_factory=dict)
     hardware_fact_comparison: Dict[str, Any] = Field(default_factory=dict)
     product_matrix: CompetitiveMatrixSchema = Field(default_factory=CompetitiveMatrixSchema)
     business_matrix: CompetitiveMatrixSchema = Field(default_factory=CompetitiveMatrixSchema)

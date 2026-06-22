@@ -255,11 +255,13 @@ def build_compare_payload(
                 )
             )
 
-        # 软性维度：暂无实时 MCP，标记 pending_research / evidence_gap
+        # 软性维度：ReviewIntel MCP 已接入但本轮未抓到该维度内容（反爬 / 视频无开放 API / demo 限制）
         for dimension in PENDING_DIMENSIONS:
             content = (
                 f"{model} 的{dimension}（用户评价 / 博主测评 / 驱动口碑）"
-                "暂无实时 MCP 数据，待补充实时评价数据。"
+                "未抓取到数据：ReviewIntel 评价 MCP 已接入并尝试抓取，"
+                "但评测站点反爬、视频平台无开放 API、LLM 难以从视频中稳定抽取，"
+                "本轮 demo 未抓到该维度的可用内容。"
             )
             fact_evidence_ids.append(
                 _add(
@@ -268,7 +270,7 @@ def build_compare_payload(
                     source_type="review",
                     credibility="low",
                     confidence=0.35,
-                    source_title=f"{model} {dimension}实时评价（待采集）",
+                    source_title=f"{model} {dimension}实时评价（未抓取到数据）",
                     source_url="pending://realtime-review",
                     pending=True,
                 )
