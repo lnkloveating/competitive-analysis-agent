@@ -13,6 +13,7 @@ import type {
   QualityResult,
   Metrics,
   OfficialSpecRecord,
+  ReviewIntelRecord,
   RiskFlag,
   ArtifactsSummary,
   FaithfulnessReport,
@@ -50,6 +51,10 @@ export const analysisApi = {
           search_mcp_results?: SearchMcpResult[];
           external_product_candidates?: ExternalProductCandidate[];
           official_spec_records?: OfficialSpecRecord[];
+          review_intel_records?: ReviewIntelRecord[];
+          review_intel_status?: Record<string, unknown>;
+          price_records?: Array<Record<string, unknown>>;
+          price_status?: Record<string, unknown>;
           error?: string;
         }
       | FinalReport

@@ -221,6 +221,38 @@ def _pricing_model(state: dict) -> Dict[str, Any]:
 
 def _user_persona(state: dict) -> Dict[str, Any]:
     review_status = state.get("review_intel_status", {}) if isinstance(state.get("review_intel_status"), dict) else {}
+    records = [item for item in state.get("review_intel_records", []) if isinstance(item, dict)]
+    grip: Dict[str, str] = {}
+    hand_size: Dict[str, str] = {}
+    game_type: Dict[str, str] = {}
+    personas: List[str] = []
+    limitations: List[str] = []
+    for record in records:
+        model = _as_text(record.get("model") or record.get("input")) or "unknown product"
+        signals = record.get("signals") if isinstance(record.get("signals"), dict) else {}
+        if isinstance(signals.get("grip_feel"), dict):
+            grip[model] = _as_text(signals["grip_feel"].get("summary"))
+        if isinstance(signals.get("hand_size_fit"), dict):
+            hand_size[model] = _as_text(signals["hand_size_fit"].get("summary"))
+        if isinstance(signals.get("game_type_fit"), dict):
+            game_type[model] = _as_text(signals["game_type_fit"].get("summary"))
+        for item in record.get("fit_recommendations", []) if isinstance(record.get("fit_recommendations"), list) else []:
+            if isinstance(item, dict) and _as_text(item.get("summary")):
+                personas.append(f"{model}: {_as_text(item.get('summary'))}")
+        for item in record.get("limitations", []) if isinstance(record.get("limitations"), list) else []:
+            if _as_text(item):
+                limitations.append(f"{model}: {_as_text(item)}")
+    if grip or hand_size or game_type or personas:
+        return {
+            "schema_name": "gaming_mouse_user_persona",
+            "status": "available" if review_status.get("status") == "available" else "partial",
+            "grip_style_fit": grip,
+            "hand_size_fit": hand_size,
+            "game_type_fit": game_type,
+            "target_persona": personas,
+            "evidence_status": review_status.get("status") or "partial",
+            "limitation": "; ".join(limitations) if limitations else "Review-backed persona signals are available with per-signal confidence labels.",
+        }
     return {
         "schema_name": "gaming_mouse_user_persona",
         "status": "insufficient_evidence",
@@ -456,9 +488,74 @@ def _scenario_recommendations(state: dict) -> List[Dict[str, Any]]:
     else:
         add("预算敏感 · 电商价", "budget_ecom", "data_missing", None, "一方缺少电商价，数据缺失无法给出建议", "电商价只能与电商价对比。", "pending")
 
-    # 7-9) 需要真实测评数据的场景：占位，等 ReviewIntelMCP
-    for scenario, key in (("追求极限 FPS", "fps"), ("重视手感 / 握法", "grip_feel"), ("长期可靠性", "long_term")):
-        add(scenario, key, "pending_review", None, "等待博主测评 / 用户评价（ReviewIntelMCP）", "需要真实测评 / 评价数据，暂为占位。", "pending")
+    review_records = [item for item in state.get("review_intel_records", []) if isinstance(item, dict)]
+
+    def review_signal(product_name: str, dimension: str) -> Dict[str, Any] | None:
+        for record in review_records:
+            name = _as_text(record.get("model") or record.get("input"))
+            if norm(name) != norm(product_name):
+                continue
+            signals = record.get("signals") if isinstance(record.get("signals"), dict) else {}
+            signal = signals.get(dimension)
+            if isinstance(signal, dict) and signal.get("evidence_ids"):
+                return signal
+        return None
+
+    def add_review_scenario(scenario: str, key: str, dimension: str) -> None:
+        a_signal = review_signal(a_name, dimension)
+        b_signal = review_signal(b_name, dimension)
+        rank = {"high": 3, "medium": 2, "low": 1}
+        a_rank = rank.get(_as_text((a_signal or {}).get("confidence")).lower(), 0)
+        b_rank = rank.get(_as_text((b_signal or {}).get("confidence")).lower(), 0)
+        if a_signal and b_signal:
+            if a_rank == b_rank:
+                add(
+                    scenario,
+                    key,
+                    "tie",
+                    None,
+                    f"{a_name} 与 {b_name} 都有 {dimension} 的测评/评价证据。",
+                    f"A: {_as_text(a_signal.get('summary'))}; B: {_as_text(b_signal.get('summary'))}",
+                    _as_text(a_signal.get("confidence")) or "low",
+                )
+            else:
+                winner = a_name if a_rank > b_rank else b_name
+                signal = a_signal if a_rank > b_rank else b_signal
+                add(
+                    scenario,
+                    key,
+                    "recommended",
+                    winner,
+                    f"{winner} 在 {dimension} 上有更强的测评/评价支撑。",
+                    _as_text(signal.get("summary")),
+                    _as_text(signal.get("confidence")) or "low",
+                )
+        elif a_signal or b_signal:
+            signal = a_signal or b_signal
+            winner = a_name if a_signal else b_name
+            add(
+                scenario,
+                key,
+                "recommended",
+                winner,
+                f"{winner} 有 {dimension} 的测评/评价支撑；另一款缺少同类证据。",
+                _as_text(signal.get("summary")),
+                _as_text(signal.get("confidence")) or "low",
+            )
+        else:
+            add(
+                scenario,
+                key,
+                "pending_review",
+                None,
+                "等待博主测评 / 用户评价（ReviewIntelMCP）",
+                "需要真实测评 / 评价数据，暂为占位。",
+                "pending",
+            )
+
+    add_review_scenario("追求极限 FPS", "fps", "game_type_fit")
+    add_review_scenario("重视手感 / 握法", "grip_feel", "grip_feel")
+    add_review_scenario("长期可靠性", "long_term", "long_term_reliability")
 
     return scenarios
 
@@ -558,6 +655,8 @@ def report_agent(state: dict) -> Dict[str, Any]:
         "product_identification": _identification(state),
         "hardware_specs": hardware_specs,
         "official_spec_records": state.get("official_spec_records", []),
+        "review_intel_records": state.get("review_intel_records", []),
+        "review_intel_status": state.get("review_intel_status", {}),
         "hardware_fact_comparison": state.get("hardware_analysis", {}),
         "product_matrix": state.get("product_matrix", {}),
         "business_matrix": state.get("business_matrix", {}),

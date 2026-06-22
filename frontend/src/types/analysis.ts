@@ -434,6 +434,49 @@ export type OfficialSpecRecord = {
   collected_at?: string;
 };
 
+export type ReviewIntelSignal = {
+  dimension?: string;
+  summary?: string;
+  sentiment?: string;
+  confidence?: string;
+  support_level?: string;
+  source_ids?: string[];
+  source_urls?: string[];
+  source_kinds?: string[];
+  corroborating_sources?: number;
+  evidence_ids?: string[];
+  evidence_snippets?: string[];
+  [key: string]: unknown;
+};
+
+export type ReviewIntelRecord = {
+  input?: string;
+  product_id?: string;
+  brand?: string;
+  model?: string;
+  status?: string;
+  signals?: Record<string, ReviewIntelSignal>;
+  fit_recommendations?: Array<Record<string, unknown>>;
+  common_complaints?: string[];
+  limitations?: string[];
+  sources?: Array<Record<string, unknown>>;
+  source_summary?: Record<string, number>;
+  fetch_summary?: Record<string, number>;
+  source_urls?: string[];
+  blocked_sources?: Array<Record<string, unknown>>;
+  search_result?: SearchMcpResult | Record<string, unknown>;
+  confidence_level?: string;
+  review_dimensions_pending?: string[];
+  note?: string;
+  extraction_method?: string;
+  source_route?: string;
+  llm_model?: string;
+  llm_error?: string;
+  collected_at?: string;
+  evidence_ids?: string[];
+  [key: string]: unknown;
+};
+
 export type FinalReport = {
   schema_name?: "gaming_mouse_competitive_report" | string;
   schema_version?: string;
@@ -445,6 +488,8 @@ export type FinalReport = {
   product_identification?: ProductIdentity[];
   hardware_specs?: HardwareSpec[];
   official_spec_records?: OfficialSpecRecord[];
+  review_intel_records?: ReviewIntelRecord[];
+  review_intel_status?: Record<string, unknown>;
   hardware_fact_comparison?: Record<string, unknown>;
   product_matrix?: CompetitiveMatrix;
   business_matrix?: CompetitiveMatrix;

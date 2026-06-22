@@ -104,6 +104,31 @@ def _business_matrix_from_facts(product_facts: List[Dict[str, Any]]) -> Dict[str
 
 def _experience_analysis(state: dict) -> Dict[str, Any]:
     review_status = state.get("review_intel_status", {})
+    records = [item for item in state.get("review_intel_records", []) if isinstance(item, dict)]
+    products: Dict[str, Dict[str, Any]] = {}
+    for record in records:
+        model = _as_text(record.get("model") or record.get("input")) or "unknown"
+        signals = record.get("signals") if isinstance(record.get("signals"), dict) else {}
+        if not signals:
+            continue
+        products[model] = {
+            "status": record.get("status"),
+            "confidence_level": record.get("confidence_level"),
+            "signals": signals,
+            "fit_recommendations": record.get("fit_recommendations", []),
+            "common_complaints": record.get("common_complaints", []),
+            "limitations": record.get("limitations", []),
+        }
+    if products:
+        pending_review_dimensions = []
+        if isinstance(review_status, dict):
+            pending_review_dimensions = list(review_status.get("review_dimensions_pending", []) or [])
+        return {
+            "status": "available" if not pending_review_dimensions else "partial",
+            "products": products,
+            "pending_dimensions": pending_review_dimensions,
+            "reason": "ReviewIntelMCP provided evidence-backed experience signals; scenario recommendations may use these signals with confidence labels.",
+        }
     pending = []
     if isinstance(review_status, dict):
         pending = list(review_status.get("review_dimensions_pending", []) or [])
@@ -129,6 +154,44 @@ def _experience_analysis(state: dict) -> Dict[str, Any]:
         ],
         "reason": "Review-intelligence MCP has not provided real user/creator review evidence.",
     }
+
+
+def _review_claims(state: dict, start_index: int) -> List[Dict[str, Any]]:
+    records = [item for item in state.get("review_intel_records", []) if isinstance(item, dict)]
+    claims: List[Dict[str, Any]] = []
+    index = start_index
+    confidence_score = {"high": 0.86, "medium": 0.7, "low": 0.48}
+    for record in records:
+        model = _as_text(record.get("model") or record.get("input")) or "unknown product"
+        signals = record.get("signals") if isinstance(record.get("signals"), dict) else {}
+        for dimension, signal in signals.items():
+            if not isinstance(signal, dict):
+                continue
+            evidence_ids = [
+                _as_text(item)
+                for item in signal.get("evidence_ids", [])
+                if _as_text(item)
+            ] if isinstance(signal.get("evidence_ids"), list) else []
+            if not evidence_ids:
+                continue
+            summary = _as_text(signal.get("summary"))
+            if not summary:
+                continue
+            confidence = _as_text(signal.get("confidence")).lower() or "low"
+            index += 1
+            claims.append(
+                {
+                    "claim_id": f"RCL{index:03d}",
+                    "content": f"{model} review-backed {dimension}: {summary}",
+                    "dimension": dimension,
+                    "related_platforms": [model],
+                    "evidence_ids": evidence_ids,
+                    "confidence_score": confidence_score.get(confidence, 0.48),
+                    "generated_by": "AnalysisAgent",
+                    "support_level": signal.get("support_level"),
+                }
+            )
+    return claims
 
 
 def _business_analysis() -> Dict[str, Any]:
@@ -289,6 +352,8 @@ def _product_compare_analysis(state: dict, started: float) -> Dict[str, Any]:
             claim["generated_by"] = "AnalysisAgent"
 
     price_claims = _price_claims(state, len(existing_claims) + len(comp_claims))
+    review_claims = _review_claims(state, len(existing_claims) + len(comp_claims) + len(price_claims))
+    experience_analysis = _experience_analysis(state)
 
     product_scores = build_scoreboard(selected)
     hardware_analysis = {
@@ -306,7 +371,7 @@ def _product_compare_analysis(state: dict, started: float) -> Dict[str, Any]:
         },
         "hardware_advantages": product_scores.get("verdicts", {}),
         "hardware_tradeoffs": [
-            "Experience fit, user sentiment, creator reviews and realtime price are excluded until MCP data is connected."
+            "Experience fit uses ReviewIntelMCP only when review-backed evidence IDs exist; otherwise it remains pending."
         ],
         "evidence_ids_used": sorted(
             {
@@ -329,10 +394,10 @@ def _product_compare_analysis(state: dict, started: float) -> Dict[str, Any]:
         "current_agent": "AnalysisAgent",
         "product_matrix": product_matrix,
         "business_matrix": business_matrix,
-        "claims": [*existing_claims, *comp_claims, *price_claims],
+        "claims": [*existing_claims, *comp_claims, *price_claims, *review_claims],
         "product_scores": product_scores,
         "hardware_analysis": hardware_analysis,
-        "experience_analysis": _experience_analysis(state),
+        "experience_analysis": experience_analysis,
         "business_analysis": _business_analysis(),
         "score_flow": _score_flow(product_scores),
         "risk_flags": risk_flags,
@@ -342,9 +407,9 @@ def _product_compare_analysis(state: dict, started: float) -> Dict[str, Any]:
     context_summary["AnalysisAgent"] = {
         "mode": "gaming_mouse_product_compare",
         "selected_product_count": len(selected),
-        "claim_count": len(comp_claims),
+        "claim_count": len(comp_claims) + len(price_claims) + len(review_claims),
         "risk_count": len(risk_flags),
-        "experience_status": "insufficient_evidence",
+        "experience_status": experience_analysis.get("status"),
         "business_status": "limited_official_fact",
     }
 
@@ -355,8 +420,8 @@ def _product_compare_analysis(state: dict, started: float) -> Dict[str, Any]:
         "agent_contributions": [
             {
                 "agent": "AnalysisAgent",
-                "contribution": "Compared local hardware facts and withheld experience/price claims until MCP data exists.",
-                "status": "applied_with_pending_external_data",
+                "contribution": "Compared hardware facts and added review/price claims only when MCP evidence IDs exist.",
+                "status": "applied",
             }
         ],
     }
@@ -366,14 +431,15 @@ def _product_compare_analysis(state: dict, started: float) -> Dict[str, Any]:
         input_summary=f"analyzed {len(selected)} resolved products and {len(evidence_list)} evidence items",
         output_summary=(
             f"generated hardware comparison, {len(comp_claims)} evidence-bound claims, "
-            f"{len(risk_flags)} risk flags, and pending experience/price disclosures"
+            f"{len(review_claims)} review-backed claims, {len(price_claims)} price claims, "
+            f"and {len(risk_flags)} risk flags"
         ),
-        claims_added=len(comp_claims),
+        claims_added=len(comp_claims) + len(price_claims) + len(review_claims),
         risk_count=len(risk_flags),
         started_at=started,
         substeps=[
             {"name": "HardwareFacts", "status": "complete"},
-            {"name": "ExperienceFit", "status": "insufficient_evidence"},
+            {"name": "ExperienceFit", "status": experience_analysis.get("status"), "count": len(review_claims)},
             {"name": "DriverAndBusiness", "status": "limited_official_fact"},
             {"name": "RiskDetection", "status": "complete", "count": len(risk_flags)},
         ],

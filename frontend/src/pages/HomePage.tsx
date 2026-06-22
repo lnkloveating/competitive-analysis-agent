@@ -465,10 +465,10 @@ export function HomePage({
       const isWindowTarget = scrollTarget === window;
       const viewportHeight = isWindowTarget
         ? window.innerHeight || 1
-        : scrollTarget.clientHeight || 1;
+        : (scrollTarget as HTMLElement).clientHeight || 1;
       const targetTop = isWindowTarget
         ? 0
-        : scrollTarget.getBoundingClientRect().top;
+        : (scrollTarget as HTMLElement).getBoundingClientRect().top;
       const relativeTop = rect.top - targetTop;
       const travel = Math.max(rect.height - viewportHeight * 0.52, 1);
       const rawProgress = (viewportHeight * 0.16 - relativeTop) / travel;
