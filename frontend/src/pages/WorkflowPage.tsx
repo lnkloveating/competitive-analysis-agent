@@ -7,6 +7,7 @@ import type { AgentSidebarItem } from "../components/layout/Sidebar";
 import type {
   AgentTrace,
   AnalysisStatus,
+  AnalysisAiInterpretation,
   ArtifactsSummary,
   Claim,
   ErrorLogItem,
@@ -17,6 +18,8 @@ import type {
   ReviewIntelRecord,
   ReviewTicket,
   SearchMcpResult,
+  HumanFeedbackRecord,
+  SwotPoint,
 } from "../types/analysis";
 
 type WorkflowPageProps = {
@@ -66,6 +69,8 @@ type ReportResponse = {
   review_intel_status?: Record<string, unknown>;
   price_records?: Array<Record<string, unknown>>;
   price_status?: Record<string, unknown>;
+  analysis_ai_interpretation?: AnalysisAiInterpretation;
+  human_feedback?: HumanFeedbackRecord[];
 };
 
 const AGENTS: AgentDefinition[] = [
@@ -130,7 +135,7 @@ const AGENTS: AgentDefinition[] = [
 const MCP_TOOLS: McpToolDefinition[] = [
   { name: "本地 JSON 事实库", status: "active", detail: "当前已启用，提供稳定硬件参数和型号别名。" },
   { name: "官网规格 MCP", status: "active", detail: "已接入，用于抽取官网规格、固件更新、驱动资料。" },
-  { name: "评价/测评 MCP", status: "pending", detail: "后续并行采集用户反馈、博主测评和体验口碑。" },
+  { name: "评价/测评 MCP", status: "active", detail: "已接入，采集用户反馈、博主测评和体验口碑；本地评价库命中即时读取，未命中走实时爬取。" },
   { name: "实时价格 MCP", status: "active", detail: "已接入，联网搜索 + 大模型抽取当前售价；官方价被反爬拦截时退用其他来源并标低可信。" },
   { name: "搜索 MCP", status: "active", detail: "已接入，用于识别未知简称、变体和新品的官网候选。" },
 ];
@@ -480,6 +485,39 @@ function AgentNode({
   isSelected: boolean;
   onSelect: () => void;
 }) {
+  const statusMeta: Record<AgentStatus, { label: string; dot: string; pill: string }> = {
+    waiting: {
+      label: "pending",
+      dot: "bg-slate-500",
+      pill: "border-slate-700 bg-slate-900 text-slate-300",
+    },
+    running: {
+      label: "running",
+      dot: "bg-cyan-300",
+      pill: "border-cyan-300/45 bg-cyan-300/10 text-cyan-100",
+    },
+    done: {
+      label: "completed",
+      dot: "bg-emerald-300",
+      pill: "border-emerald-300/45 bg-emerald-300/10 text-emerald-100",
+    },
+    limited: {
+      label: "limited",
+      dot: "bg-amber-300",
+      pill: "border-amber-300/45 bg-amber-300/10 text-amber-100",
+    },
+    partial: {
+      label: "partial",
+      dot: "bg-orange-300",
+      pill: "border-orange-300/45 bg-orange-300/10 text-orange-100",
+    },
+    failed: {
+      label: "failed",
+      dot: "bg-rose-300",
+      pill: "border-rose-300/45 bg-rose-300/10 text-rose-100",
+    },
+  };
+  const meta = statusMeta[status] || statusMeta.waiting;
   const activeClass = isCurrent
     ? "border-cyan-300 bg-cyan-400/15 shadow-[0_0_28px_rgba(34,211,238,0.16)]"
     : status === "done"
@@ -499,24 +537,11 @@ function AgentNode({
       >
         <div className="flex items-center justify-between gap-2">
           <p className="truncate text-sm font-semibold text-white">{agent.name}</p>
-          <span
-            className={`h-2 w-2 shrink-0 rounded-full ${
-              isCurrent
-                ? "bg-cyan-300"
-                : status === "done"
-                  ? "bg-emerald-300"
-                  : status === "waiting"
-                    ? "bg-slate-500"
-                    : "bg-amber-300"
-            }`}
-          />
+          <span className={`h-2.5 w-2.5 shrink-0 rounded-full ${meta.dot} ${isCurrent ? "animate-pulse" : ""}`} />
         </div>
         <p className="mt-1 line-clamp-2 min-h-8 text-xs leading-4 text-slate-400">
           {agent.summary}
         </p>
-        <div className="mt-3">
-          <StatusBadge label={STATUS_LABEL[status]} tone={STATUS_TONE[status]} />
-        </div>
       </div>
 
       <div className={tooltipClass("left-0 top-[calc(100%+10px)]")}>
@@ -662,12 +687,13 @@ function WorkflowDagCanvas({
         >
           {AGENTS.map((agent, index) => {
             const arrowActive = completed || (activeIndex >= 0 && index < activeIndex);
+            const nodeCurrent = !completed && currentAgent === agent.name;
             return (
               <div className="contents" key={agent.name}>
                 <AgentNode
                   agent={agent}
                   status={agentStatuses[agent.name] ?? "waiting"}
-                  isCurrent={currentAgent === agent.name}
+                  isCurrent={nodeCurrent}
                   isSelected={selectedAgent === agent.name}
                   onSelect={() => onSelectAgent(agent.name)}
                 />
@@ -1778,6 +1804,7 @@ function ResearchAgentPlanningDetail({
 // ---------------------------------------------------------------------------
 
 type AgentDetailProps = {
+  taskId?: string;
   agent: AgentDefinition;
   status: AgentStatus;
   trace?: AgentTrace;
@@ -1790,6 +1817,7 @@ type AgentDetailProps = {
   externalProductCandidates: ExternalProductCandidate[];
   quality?: QualityResult;
   onNavigate?: (key: string) => void;
+  onDataChanged?: () => void;
 };
 
 const MATCH_BY_LABEL: Record<string, string> = {
@@ -1828,6 +1856,29 @@ const QUALITY_CHECK_LABEL: Record<string, string> = {
   business_matrix_not_empty: "商业矩阵非空",
   no_high_severity_risk: "无高危风险",
   high_severity_risk_disclosed: "高危风险已披露",
+};
+
+const LIMITATION_COPY: Record<string, { label: string; detail: string; tone: Tone }> = {
+  external_data_pending: {
+    label: "外部数据仍在补齐",
+    detail: "用户评价、博主测评或实时价格尚未形成完整证据链，报告可信度会被下调。",
+    tone: "warning",
+  },
+  weak_price_support: {
+    label: "价格证据偏弱",
+    detail: "官网价格可能被反爬拦截，或只能使用搜索/电商等低可信来源，性价比结论需要保守处理。",
+    tone: "warning",
+  },
+  weak_review_support: {
+    label: "测评口碑证据偏弱",
+    detail: "体验类结论依赖测评和用户反馈；来源不足时只能披露趋势，不能当作强推荐依据。",
+    tone: "warning",
+  },
+  human_feedback_unverified: {
+    label: "人工反馈待外部验证",
+    detail: "人工输入已经进入校验链路，但不能自证为事实；需要官网、测评或用户评价等外部 evidence 支撑后才能进入强结论。",
+    tone: "danger",
+  },
 };
 
 function credibilityTone(value: string): Tone {
@@ -2966,15 +3017,331 @@ function EvidenceAgentDetail({ agent, status, evidenceList, report }: AgentDetai
   );
 }
 
-function AnalysisAgentDetail({ agent, status, report, claims }: AgentDetailProps) {
+function swotItems(value: unknown): SwotPoint[] {
+  return Array.isArray(value)
+    ? value.filter((item): item is SwotPoint => Boolean(item) && typeof item === "object")
+    : [];
+}
+
+function feedbackRecords(value: unknown): HumanFeedbackRecord[] {
+  return asRecords(value) as HumanFeedbackRecord[];
+}
+
+function swotStatusLabel(value: unknown): string {
+  const key = normalize(value);
+  if (key === "available") return "AI 已生成";
+  if (key === "fallback" || key === "fallback_llm_failed") return "AI 解读已生成";
+  return asString(value, "等待生成");
+}
+
+function swotStatusTone(value: unknown): Tone {
+  const key = normalize(value);
+  if (key === "available") return "success";
+  if (key === "fallback" || key === "fallback_llm_failed") return "success";
+  return "neutral";
+}
+
+function swotModelLabel(value: unknown): string {
+  const model = asString(value);
+  const key = normalize(model);
+  if (!model || key.includes("fallback") || key.includes("rule")) return "";
+  return model;
+}
+
+function feedbackStatusLabel(value: unknown): string {
+  const key = normalize(value);
+  if (key === "applied_to_report") return "已并入报告";
+  if (key === "pending_verification") return "待校验";
+  if (key === "needs_external_evidence") return "待外部证据";
+  if (key === "verified") return "已校验";
+  return asString(value, "待校验");
+}
+
+function SwotColumn({
+  title,
+  items,
+  tone,
+}: {
+  title: string;
+  items: SwotPoint[];
+  tone: Tone;
+}) {
+  return (
+    <div className="rounded-md border border-violet-400/20 bg-slate-950/60 p-3">
+      <div className="flex items-center justify-between gap-2">
+        <p className="text-sm font-semibold text-violet-100">{title}</p>
+        <StatusBadge label={`${items.length}`} tone={tone} />
+      </div>
+      <div className="mt-3 space-y-2">
+        {items.length ? (
+          items.slice(0, 3).map((item, index) => {
+            const evidenceIds = asStrings(item.evidence_ids);
+            return (
+              <div className="rounded border border-slate-800 bg-slate-900/70 p-2" key={`${title}-${index}`}>
+                <div className="flex flex-wrap items-center gap-2">
+                  {asString(item.product) ? <StatusBadge label={asString(item.product)} tone="neutral" /> : null}
+                  {asString(item.confidence) ? (
+                    <StatusBadge label={localizedConfidence(item.confidence)} tone={credibilityTone(asString(item.confidence))} />
+                  ) : null}
+                  <StatusBadge
+                    label={evidenceIds.length ? "已绑定证据" : "待绑定证据"}
+                    tone={evidenceIds.length ? "success" : "warning"}
+                  />
+                </div>
+                <p className="mt-2 text-xs leading-5 text-slate-300">{asString(item.point, "暂无明确结论")}</p>
+                {evidenceIds.length ? (
+                  <div className="mt-2 flex flex-wrap gap-1">
+                    {evidenceIds.slice(0, 4).map((id) => <StatusBadge key={id} label={id} tone="success" />)}
+                  </div>
+                ) : (
+                  <p className="mt-2 text-[11px] text-slate-500">无直接 evidence_id，按低可信/待验证处理。</p>
+                )}
+              </div>
+            );
+          })
+        ) : (
+          <p className="text-xs leading-5 text-slate-500">等待 AI 根据 evidence / claims 生成。</p>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function SwotAiPanel({
+  taskId,
+  report,
+  onDataChanged,
+}: {
+  taskId?: string;
+  report: Record<string, unknown>;
+  onDataChanged?: () => void;
+}) {
+  const initialInterpretation = asRecord(report.analysis_ai_interpretation) as AnalysisAiInterpretation;
+  const [interpretation, setInterpretation] = useState<AnalysisAiInterpretation>(initialInterpretation);
+  const [feedback, setFeedback] = useState<HumanFeedbackRecord[]>(feedbackRecords(report.human_feedback));
+  const [message, setMessage] = useState("");
+  const [product, setProduct] = useState("");
+  const [dimension, setDimension] = useState("scenario_fit");
+  const [assistantReply, setAssistantReply] = useState("");
+  const [isLoadingSwot, setIsLoadingSwot] = useState(false);
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [panelError, setPanelError] = useState("");
+
+  const productOptions = useMemo(() => {
+    const labels = asRecords(report.hardware_specs)
+      .map((item) => [asString(item.brand), asString(item.model)].filter(Boolean).join(" "))
+      .filter(Boolean);
+    return Array.from(new Set(labels));
+  }, [report]);
+
+  useEffect(() => {
+    setInterpretation(initialInterpretation);
+    setFeedback(feedbackRecords(report.human_feedback));
+  }, [initialInterpretation, report.human_feedback]);
+
+  useEffect(() => {
+    if (!taskId) return;
+    const activeTaskId = taskId;
+    let cancelled = false;
+    async function loadSwot() {
+      setIsLoadingSwot(true);
+      setPanelError("");
+      try {
+        const resp = await analysisApi.getSwot(activeTaskId);
+        if (cancelled) return;
+        setInterpretation(resp.analysis_ai_interpretation || {});
+        setFeedback(resp.human_feedback || []);
+      } catch (err) {
+        if (!cancelled) {
+          setPanelError(err instanceof Error ? err.message : "SWOT AI 解读加载失败");
+        }
+      } finally {
+        if (!cancelled) setIsLoadingSwot(false);
+      }
+    }
+    loadSwot();
+    return () => {
+      cancelled = true;
+    };
+  }, [taskId]);
+
+  async function submitFeedback() {
+    const text = message.trim();
+    if (!taskId || !text) return;
+    setIsSubmitting(true);
+    setPanelError("");
+    try {
+      const resp = await analysisApi.submitHumanFeedback(taskId, {
+        message: text,
+        product: product || undefined,
+        dimension: dimension || undefined,
+      });
+      setMessage("");
+      setAssistantReply(resp.assistant_reply || "已提交给 VerificationAgent。");
+      if (resp.analysis_ai_interpretation) {
+        setInterpretation(resp.analysis_ai_interpretation);
+      }
+      setFeedback(resp.human_feedback || (resp.feedback_record ? [...feedback, resp.feedback_record] : feedback));
+      onDataChanged?.();
+    } catch (err) {
+      setPanelError(err instanceof Error ? err.message : "人工反馈提交失败");
+    } finally {
+      setIsSubmitting(false);
+    }
+  }
+
+  const swot = asRecord(interpretation.swot);
+  const dataGaps = asStrings(interpretation.data_gaps);
+  const questions = asStrings(interpretation.human_feedback_questions);
+
+  return (
+    <div className="rounded-lg border border-violet-400/35 bg-violet-400/10 p-4">
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <div>
+          <p className="text-xs font-semibold uppercase tracking-[0.16em] text-violet-200">AI Interpretation</p>
+          <h4 className="mt-2 text-lg font-semibold text-white">SWOT AI 解读与人工修正</h4>
+          <p className="mt-1 text-xs leading-5 text-slate-400">
+            AI 只读取当前 evidence / claims / 风险标记；人工输入会进入证据流，由 VerificationAgent 校验后再影响报告。
+          </p>
+        </div>
+        <div className="flex flex-wrap gap-2">
+          <StatusBadge label={swotStatusLabel(interpretation.status)} tone={swotStatusTone(interpretation.status)} />
+          {swotModelLabel(interpretation.model) ? <StatusBadge label={swotModelLabel(interpretation.model)} tone="info" /> : null}
+        </div>
+      </div>
+
+      {panelError ? (
+        <div className="mt-3 rounded-md border border-amber-400/35 bg-amber-400/10 px-3 py-2 text-xs text-amber-100">
+          {panelError}
+        </div>
+      ) : null}
+
+      <div className="mt-4 grid gap-4 xl:grid-cols-[minmax(0,1.4fr)_minmax(320px,0.8fr)]">
+        <div className="space-y-4">
+          <div className="rounded-md border border-slate-800 bg-slate-950/60 p-3">
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <p className="text-sm font-semibold text-slate-100">AI 总体研判</p>
+              {isLoadingSwot ? <StatusBadge label="生成中" tone="info" /> : null}
+            </div>
+            <p className="mt-2 text-sm leading-6 text-slate-300">
+              {asString(interpretation.overall_reading, "等待 AnalysisAgent 调用 LLM 生成 SWOT 解读。")}
+            </p>
+          </div>
+
+          <div className="grid gap-3 lg:grid-cols-2">
+            <SwotColumn title="S 优势" items={swotItems(swot.strengths)} tone="success" />
+            <SwotColumn title="W 劣势" items={swotItems(swot.weaknesses)} tone="warning" />
+            <SwotColumn title="O 机会" items={swotItems(swot.opportunities)} tone="info" />
+            <SwotColumn title="T 威胁" items={swotItems(swot.threats)} tone="danger" />
+          </div>
+
+          <div className="grid gap-3 lg:grid-cols-2">
+            <div className="rounded-md border border-slate-800 bg-slate-950/60 p-3">
+              <p className="text-sm font-semibold text-slate-100">数据不清晰的地方</p>
+              <ul className="mt-2 space-y-1 text-xs leading-5 text-slate-400">
+                {(dataGaps.length ? dataGaps : ["暂无额外缺口；仍建议用测评/评论数据复核体验类判断。"]).slice(0, 5).map((item, index) => (
+                  <li key={index}>• {item}</li>
+                ))}
+              </ul>
+            </div>
+            <div className="rounded-md border border-slate-800 bg-slate-950/60 p-3">
+              <p className="text-sm font-semibold text-slate-100">可追溯引用</p>
+              <div className="mt-2 flex flex-wrap gap-1.5">
+                {asStrings(interpretation.used_claim_ids).slice(0, 8).map((id) => <StatusBadge key={id} label={id} tone="neutral" />)}
+                {asStrings(interpretation.used_evidence_ids).slice(0, 8).map((id) => <StatusBadge key={id} label={id} tone="success" />)}
+                {!asStrings(interpretation.used_claim_ids).length && !asStrings(interpretation.used_evidence_ids).length ? (
+                  <StatusBadge label="等待绑定证据" tone="warning" />
+                ) : null}
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <aside className="rounded-md border border-slate-800 bg-slate-950/70 p-3">
+          <div className="flex items-center justify-between gap-2">
+            <div>
+              <p className="text-xs font-semibold uppercase tracking-[0.16em] text-slate-500">Human Feedback</p>
+              <h5 className="mt-1 text-base font-semibold text-white">人工修正对话</h5>
+            </div>
+            <StatusBadge label={`${feedback.length} 条`} tone={feedback.length ? "success" : "neutral"} />
+          </div>
+
+          <div className="mt-3 max-h-56 space-y-2 overflow-y-auto pr-1">
+            {feedback.length ? (
+              feedback.map((item, index) => (
+                <div className="rounded border border-cyan-300/20 bg-cyan-300/5 p-2" key={asString(item.feedback_id) || index}>
+                  <div className="flex flex-wrap items-center gap-1.5">
+                    <StatusBadge label={asString(item.feedback_id, `HF${index + 1}`)} tone="info" />
+                    <StatusBadge label={feedbackStatusLabel(item.status)} tone={normalize(item.status) === "applied_to_report" ? "success" : "warning"} />
+                  </div>
+                  <p className="mt-2 text-xs leading-5 text-slate-300">{asString(item.message)}</p>
+                  <p className="mt-1 text-[11px] text-slate-500">
+                    {asString(item.product, "未指定产品")} · {asString(item.dimension, "human_feedback")}
+                  </p>
+                </div>
+              ))
+            ) : (
+              <p className="rounded border border-slate-800 bg-slate-900/60 p-2 text-xs leading-5 text-slate-500">
+                你可以在这里补充“GPX2 打 FPS 不如 Viper V4 Pro，因为重量和回报率差距明显”这类现场修正。
+              </p>
+            )}
+          </div>
+
+          {assistantReply ? (
+            <div className="mt-3 rounded border border-emerald-400/25 bg-emerald-400/10 p-2 text-xs leading-5 text-emerald-100">
+              {assistantReply}
+            </div>
+          ) : null}
+
+          <div className="mt-3 space-y-2">
+            <select
+              className="w-full rounded-md border border-slate-700 bg-slate-950 px-3 py-2 text-xs text-slate-200 outline-none transition focus:border-cyan-300"
+              onChange={(event) => setProduct(event.target.value)}
+              value={product}
+            >
+              <option value="">不指定产品</option>
+              {productOptions.map((label) => (
+                <option key={label} value={label}>{label}</option>
+              ))}
+            </select>
+            <select
+              className="w-full rounded-md border border-slate-700 bg-slate-950 px-3 py-2 text-xs text-slate-200 outline-none transition focus:border-cyan-300"
+              onChange={(event) => setDimension(event.target.value)}
+              value={dimension}
+            >
+              <option value="scenario_fit">场景适配</option>
+              <option value="fps_performance">FPS 表现</option>
+              <option value="grip_feel">握持手感</option>
+              <option value="driver_reputation">驱动口碑</option>
+              <option value="price_value">价格 / 性价比</option>
+              <option value="human_feedback">其他人工补充</option>
+            </select>
+            <textarea
+              className="min-h-28 w-full resize-none rounded-md border border-slate-700 bg-slate-950 px-3 py-2 text-sm leading-6 text-slate-100 outline-none transition placeholder:text-slate-600 focus:border-cyan-300"
+              onChange={(event) => setMessage(event.target.value)}
+              placeholder={questions[0] || "输入你要补充或纠正的判断，系统会把它作为人工 evidence 交给 VerificationAgent。"}
+              value={message}
+            />
+            <button
+              className="w-full rounded-md bg-cyan-300 px-4 py-2 text-sm font-semibold text-slate-950 transition hover:bg-cyan-200 disabled:cursor-not-allowed disabled:bg-slate-700 disabled:text-slate-400"
+              disabled={!taskId || !message.trim() || isSubmitting}
+              onClick={submitFeedback}
+              type="button"
+            >
+              {isSubmitting ? "提交中..." : "提交给 VerificationAgent"}
+            </button>
+          </div>
+        </aside>
+      </div>
+    </div>
+  );
+}
+
+function AnalysisAgentDetail({ agent, status, report, claims, taskId, onDataChanged }: AgentDetailProps) {
   const dimensionEntries = Object.entries(asRecord(asRecord(report.product_matrix).dimensions)).slice(0, 6);
   const hardware = asRecord(report.hardware_fact_comparison);
   const verdicts = asRecord(hardware.hardware_advantages);
   const diffSummary = asStrings(hardware.hardware_diff_summary);
-  const scoreFlow = asRecord(report.score_flow);
-  const baseline = asRecord(scoreFlow.baseline_score);
-  const finalScore = asRecord(scoreFlow.final_score);
-  const scoreProducts = asRecords(scoreFlow.products);
   const risks = asRecords(report.risk_flags);
   const officialSpecRecords = officialSpecRecordsFromReport(report);
   const priceRecords = asRecords(report.price_records);
@@ -3003,7 +3370,7 @@ function AnalysisAgentDetail({ agent, status, report, claims }: AgentDetailProps
       description="分析师：只分析有证据支撑的硬件事实差异；体验 / 价格结论等待 MCP，SWOT 与 AI 解读等待 LLM 接入。"
     >
       {!hasRun ? (
-        <EmptyAgentNote label="AnalysisAgent 还未产出硬件对比。开始分析后这里会显示对比矩阵、硬件裁决、分数流与风险标记。" />
+        <EmptyAgentNote label="AnalysisAgent 还未产出硬件对比。开始分析后这里会显示对比矩阵、硬件裁决、证据绑定结论与风险标记。" />
       ) : (
         <>
           {diffSummary.length ? (
@@ -3124,35 +3491,7 @@ function AnalysisAgentDetail({ agent, status, report, claims }: AgentDetailProps
             </div>
           ) : null}
 
-          <div className="grid gap-4 lg:grid-cols-2">
-            <div className="rounded-lg border border-slate-800 bg-slate-900/45 p-4">
-              <p className="text-xs font-semibold uppercase tracking-[0.16em] text-slate-500">Score Flow</p>
-              <h4 className="mt-2 text-lg font-semibold text-white">分数流（非最终购买建议）</h4>
-              <div className="mt-3 grid grid-cols-2 gap-2">
-                <StatTile label={asString(baseline.label) || "本地硬件基线"} value={formatValue(baseline.score, "—")} tone="info" />
-                <StatTile label="Agent 最终建议" value={formatValue(finalScore.score, "—")} tone="success" />
-              </div>
-              {scoreProducts.length ? (
-                <div className="mt-3 space-y-2">
-                  {scoreProducts.map((item, index) => (
-                    <div className="rounded-md border border-slate-800 bg-slate-950/60 p-3" key={asString(item.product_id) || index}>
-                      <div className="flex items-center justify-between gap-3">
-                        <p className="truncate text-sm font-semibold text-slate-100">
-                          {asString(item.name) || asString(item.product_id) || `产品 ${index + 1}`}
-                        </p>
-                        <span className="text-lg font-semibold text-cyan-200">
-                          {formatValue(item.final_score ?? item.score, "—")}
-                        </span>
-                      </div>
-                      <p className="mt-1 text-xs leading-5 text-slate-500">
-                        {asString(item.score_note) || asString(item.explanation) || "分数来自已采集硬件事实；体验和价格 pending 时不做修正。"}
-                      </p>
-                    </div>
-                  ))}
-                </div>
-              ) : null}
-              <p className="mt-2 text-xs leading-5 text-slate-500">MCP 维度 pending 时 Agent 调整披露为 0，不做口碑 / 性价比修正。</p>
-            </div>
+          <div>
             <div className="rounded-lg border border-slate-800 bg-slate-900/45 p-4">
               <p className="text-xs font-semibold uppercase tracking-[0.16em] text-slate-500">Risk Flags</p>
               <h4 className="mt-2 text-lg font-semibold text-white">风险标记</h4>
@@ -3176,7 +3515,9 @@ function AnalysisAgentDetail({ agent, status, report, claims }: AgentDetailProps
         </>
       )}
 
-      <div className="rounded-lg border border-dashed border-violet-400/35 bg-violet-400/10 p-4">
+      <SwotAiPanel taskId={taskId} report={report} onDataChanged={onDataChanged} />
+
+      <div className="hidden">
         <div className="flex flex-wrap items-center justify-between gap-3">
           <div>
             <p className="text-xs font-semibold uppercase tracking-[0.16em] text-violet-200">AI Interpretation · 预留</p>
@@ -3208,11 +3549,12 @@ function VerificationAgentDetail({ agent, status, report }: AgentDetailProps) {
   const ratePct = typeof rate === "number" ? Math.round(rate * 100) : null;
   const claimResults = asRecords(faithfulness.claim_results);
   const matrixIssues = asRecords(faithfulness.matrix_issues);
+  const humanFeedback = feedbackRecords(report.human_feedback);
   const checked = asNumber(faithfulness.checked_claim_count) ?? claimResults.length;
   const supported = asNumber(faithfulness.supported_claim_count);
   const unsupported = asNumber(faithfulness.unsupported_claim_count);
   const weak = asNumber(faithfulness.weak_claim_count);
-  const hasRun = claimResults.length > 0 || reviewRows.length > 0 || typeof rate === "number";
+  const hasRun = claimResults.length > 0 || reviewRows.length > 0 || humanFeedback.length > 0 || typeof rate === "number";
 
   return (
     <AgentDetailFrame
@@ -3321,6 +3663,33 @@ function VerificationAgentDetail({ agent, status, report }: AgentDetailProps) {
             </div>
           ) : null}
 
+          {humanFeedback.length ? (
+            <div className="rounded-lg border border-violet-400/25 bg-violet-400/10 p-4">
+              <div className="flex flex-wrap items-center justify-between gap-3">
+                <div>
+                  <p className="text-xs font-semibold uppercase tracking-[0.16em] text-violet-200">Human Feedback Verification</p>
+                  <h4 className="mt-2 text-lg font-semibold text-white">人工反馈校验</h4>
+                </div>
+                <StatusBadge label={`${humanFeedback.length} 条人工输入`} tone="info" />
+              </div>
+              <div className="mt-3 grid gap-2 lg:grid-cols-2">
+                {humanFeedback.map((item, index) => (
+                  <div className="rounded-md border border-violet-400/20 bg-slate-950/60 p-3" key={asString(item.feedback_id) || index}>
+                    <div className="flex flex-wrap items-center gap-2">
+                      <StatusBadge label={asString(item.feedback_id, `HF${index + 1}`)} tone="info" />
+                      <StatusBadge label="人工 evidence" tone="warning" />
+                      <StatusBadge label={feedbackStatusLabel(item.status)} tone={normalize(item.status) === "applied_to_report" ? "success" : "neutral"} />
+                    </div>
+                    <p className="mt-2 text-sm leading-6 text-slate-200">{asString(item.message)}</p>
+                    <p className="mt-2 text-xs leading-5 text-slate-500">
+                      {asString(item.product, "未指定产品")} · {asString(item.dimension, "human_feedback")}。该输入会进入 claim / evidence 校验，但不会直接覆盖最终报告。
+                    </p>
+                  </div>
+                ))}
+              </div>
+            </div>
+          ) : null}
+
           <div className="grid gap-4 lg:grid-cols-2">
             <div className="rounded-lg border border-slate-800 bg-slate-900/45 p-4">
               <p className="text-xs font-semibold uppercase tracking-[0.16em] text-slate-500">Matrix Numbers</p>
@@ -3365,9 +3734,31 @@ function QualityAgentDetail({ agent, status, report, quality }: AgentDetailProps
   const limitations = asStrings(q.limitations);
   const pendingData = asRecords(q.pending_data);
   const scoreBreakdown = asRecord(q.score_breakdown);
+  const baseScore = asNumber(scoreBreakdown.base_score) ?? 90;
+  const failedPenalty = asNumber(scoreBreakdown.failed_check_deductions) ?? 0;
   const weakPriceCount = asNumber(scoreBreakdown.weak_price_support_count) ?? 0;
+  const weakReviewCount = asNumber(scoreBreakdown.weak_review_support_count) ?? 0;
+  const weakClaimCount = asNumber(scoreBreakdown.weak_claim_count) ?? 0;
+  const humanUnverifiedCount = asNumber(scoreBreakdown.human_feedback_unverified_count) ?? 0;
   const pendingPenalty = asNumber(scoreBreakdown.pending_data_deductions) ?? 0;
   const highRiskPenalty = asNumber(scoreBreakdown.high_risk_deductions) ?? 0;
+  const missingDimensionPenalty = asNumber(scoreBreakdown.missing_dimension_deductions) ?? 0;
+  const weakPricePenalty = asNumber(scoreBreakdown.weak_price_deductions) ?? 0;
+  const weakReviewPenalty = asNumber(scoreBreakdown.weak_review_deductions) ?? 0;
+  const weakClaimPenalty = asNumber(scoreBreakdown.weak_claim_deductions) ?? 0;
+  const humanFeedbackPenalty = asNumber(scoreBreakdown.human_feedback_deductions) ?? 0;
+  const calculatedScore = Math.max(
+    0,
+    baseScore -
+      failedPenalty -
+      pendingPenalty -
+      highRiskPenalty -
+      missingDimensionPenalty -
+      weakPricePenalty -
+      weakReviewPenalty -
+      weakClaimPenalty -
+      humanFeedbackPenalty,
+  );
   const iteration = asNumber(asRecord(report.metrics).iteration_count) ?? 0;
   const approved = qStatus === "approved" || qStatus === "approved_with_limitations";
   const hasRun = checks.length > 0;
@@ -3391,8 +3782,8 @@ function QualityAgentDetail({ agent, status, report, quality }: AgentDetailProps
               <div className="mt-3 flex justify-center">
                 <StatusBadge label={qStatus} tone={qualityTone(qStatus)} />
               </div>
-              <p className="mt-3 rounded-md border border-amber-400/25 bg-amber-400/10 px-2 py-1.5 text-[11px] leading-4 text-amber-100">
-                注意：这是「报告可信度」，不是产品综合评分。
+              <p className="mt-3 rounded-md border border-cyan-300/25 bg-cyan-300/10 px-2 py-1.5 text-[11px] leading-4 text-cyan-100">
+                这里展示「报告可信度」，不是产品综合评分。
               </p>
             </div>
 
@@ -3447,14 +3838,31 @@ function QualityAgentDetail({ agent, status, report, quality }: AgentDetailProps
               </div>
               <StatusBadge label="报告可信度，不是产品分" tone="info" />
             </div>
-            <div className="mt-3 grid gap-2 sm:grid-cols-3">
+            <div className="mt-3 rounded-lg border border-cyan-300/20 bg-cyan-300/10 p-3">
+              <div className="flex flex-wrap items-end justify-between gap-3">
+                <div>
+                  <p className="text-xs font-semibold text-cyan-100">计算公式</p>
+                  <p className="mt-1 text-sm leading-6 text-slate-300">
+                    基础 {baseScore} - 门控 {failedPenalty} - 待补 {pendingPenalty} - 风险 {highRiskPenalty} - 缺失维度 {missingDimensionPenalty}
+                    - 弱价格 {weakPricePenalty} - 弱测评 {weakReviewPenalty} - 弱 claim {weakClaimPenalty} - 人工待证 {humanFeedbackPenalty}
+                  </p>
+                </div>
+                <p className="text-2xl font-semibold text-cyan-100">= {score ?? calculatedScore}</p>
+              </div>
+            </div>
+            <div className="mt-3 grid gap-2 sm:grid-cols-4">
               <StatTile label="待补数据扣分" value={pendingPenalty} tone={pendingPenalty ? "warning" : "neutral"} />
+              <StatTile label="门控失败扣分" value={failedPenalty} tone={failedPenalty ? "danger" : "neutral"} />
               <StatTile label="风险披露扣分" value={highRiskPenalty} tone={highRiskPenalty ? "warning" : "neutral"} />
-              <StatTile label="弱价格支撑" value={weakPriceCount} tone={weakPriceCount ? "warning" : "neutral"} />
+              <StatTile label="缺失维度扣分" value={missingDimensionPenalty} tone={missingDimensionPenalty ? "warning" : "neutral"} />
+              <StatTile label="弱价格扣分" value={weakPricePenalty} tone={weakPricePenalty ? "warning" : "neutral"} />
+              <StatTile label="弱测评扣分" value={weakReviewPenalty} tone={weakReviewPenalty ? "warning" : "neutral"} />
+              <StatTile label="弱 claim 扣分" value={weakClaimPenalty} tone={weakClaimPenalty ? "warning" : "neutral"} />
+              <StatTile label="人工待证扣分" value={humanFeedbackPenalty} tone={humanFeedbackPenalty ? "danger" : "neutral"} />
             </div>
             <p className="mt-3 text-xs leading-5 text-slate-400">
-              当前可信度下降通常来自多项原因叠加：用户评价/博主测评等数据仍待采集，实时价格可能只有弱支撑或被反爬拦截，风险项已披露。
-              所以分数不是因为单条弱支撑直接扣到当前值，而是 QualityAgent 对 pending 数据、风险和证据强度的综合门控结果。
+              当前 {score ?? calculatedScore} 分来自 QualityAgent 对 pending 数据、门控失败、风险披露、缺失维度、弱支撑与人工待验证输入的综合扣分。
+              官方价格被拦截、只拿到低可信电商/搜索价格，或人工反馈缺少外部 evidence，都会直接拉低报告可信度。
             </p>
             {pendingData.length ? (
               <div className="mt-3 flex flex-wrap gap-2">
@@ -3463,15 +3871,62 @@ function QualityAgentDetail({ agent, status, report, quality }: AgentDetailProps
                 ))}
               </div>
             ) : null}
+            {(weakPriceCount || weakReviewCount || weakClaimCount || humanUnverifiedCount) ? (
+              <div className="mt-3 grid gap-2 sm:grid-cols-2">
+                {weakPriceCount ? (
+                  <div className="rounded-md border border-amber-300/25 bg-amber-300/10 p-3">
+                    <p className="text-sm font-semibold text-amber-100">价格弱支撑 × {weakPriceCount}</p>
+                    <p className="mt-1 text-xs leading-5 text-amber-100/75">价格来源可信度不足时，只能参与风险披露，不能当作强性价比结论。</p>
+                  </div>
+                ) : null}
+                {weakReviewCount ? (
+                  <div className="rounded-md border border-amber-300/25 bg-amber-300/10 p-3">
+                    <p className="text-sm font-semibold text-amber-100">测评弱支撑 × {weakReviewCount}</p>
+                    <p className="mt-1 text-xs leading-5 text-amber-100/75">体验类结论需要用户评价或博主测评交叉印证，证据不足时只做保守表达。</p>
+                  </div>
+                ) : null}
+                {weakClaimCount ? (
+                  <div className="rounded-md border border-amber-300/25 bg-amber-300/10 p-3">
+                    <p className="text-sm font-semibold text-amber-100">弱 claim × {weakClaimCount}</p>
+                    <p className="mt-1 text-xs leading-5 text-amber-100/75">claim 有引用但支撑强度不足，进入限制项披露。</p>
+                  </div>
+                ) : null}
+                {humanUnverifiedCount ? (
+                  <div className="rounded-md border border-rose-300/25 bg-rose-300/10 p-3">
+                    <p className="text-sm font-semibold text-rose-100">人工反馈待验证 × {humanUnverifiedCount}</p>
+                    <p className="mt-1 text-xs leading-5 text-rose-100/75">人工输入不能自证为事实，需要 CollectorAgent 补充外部来源后才能进入强结论。</p>
+                  </div>
+                ) : null}
+              </div>
+            ) : null}
           </div>
 
           {limitations.length ? (
             <div className="rounded-lg border border-slate-800 bg-slate-900/45 p-4">
-              <p className="text-xs font-semibold uppercase tracking-[0.16em] text-slate-500">Limitations</p>
-              <div className="mt-2 flex flex-wrap gap-2">
-                {limitations.map((lim) => (
-                  <StatusBadge key={lim} label={lim} tone="warning" />
-                ))}
+              <div className="flex flex-wrap items-center justify-between gap-3">
+                <div>
+                  <p className="text-xs font-semibold uppercase tracking-[0.16em] text-slate-500">Limitations</p>
+                  <h4 className="mt-2 text-lg font-semibold text-white">报告限制说明</h4>
+                </div>
+                <StatusBadge label={`${limitations.length} 项`} tone="warning" />
+              </div>
+              <div className="mt-3 grid gap-2 lg:grid-cols-3">
+                {limitations.map((lim) => {
+                  const copy = LIMITATION_COPY[lim] || {
+                    label: lim,
+                    detail: "该限制项已被 QualityAgent 披露，最终报告需要保守表达。",
+                    tone: "warning" as Tone,
+                  };
+                  return (
+                    <div className="rounded-md border border-amber-300/25 bg-amber-300/10 p-3" key={lim}>
+                      <div className="flex flex-wrap items-center justify-between gap-2">
+                        <p className="text-sm font-semibold text-amber-50">{copy.label}</p>
+                        <StatusBadge label={lim} tone={copy.tone} />
+                      </div>
+                      <p className="mt-2 text-xs leading-5 text-amber-100/75">{copy.detail}</p>
+                    </div>
+                  );
+                })}
               </div>
             </div>
           ) : null}
@@ -3481,14 +3936,19 @@ function QualityAgentDetail({ agent, status, report, quality }: AgentDetailProps
   );
 }
 
-function ReportAgentDetail({ agent, status, report, onNavigate }: AgentDetailProps) {
+function ReportAgentDetail({ agent, status, report, quality: qualityResult, onNavigate }: AgentDetailProps) {
   const execSummary = asStrings(report.executive_summary);
   const rec = asRecord(report.final_recommendation);
-  const finalScores = asRecords(report.final_score);
   const metrics = asRecord(report.metrics);
   const summary = asRecord(report.summary);
+  const humanFeedback = feedbackRecords(report.human_feedback);
+  const humanFeedbackNote = asString(report.human_feedback_note);
   const quality = asString(report.quality_status) || "pending";
-  const hasReport = execSummary.length > 0 || finalScores.length > 0 || Object.keys(rec).length > 0;
+  const qualityScore =
+    asNumber(asRecord(qualityResult).quality_score) ??
+    asNumber(asRecord(report.quality_result).quality_score) ??
+    asNumber(metrics.quality_score);
+  const hasReport = execSummary.length > 0 || Object.keys(rec).length > 0;
   const pct = (value: unknown) => {
     const n = asNumber(value);
     return typeof n === "number" ? `${Math.round(n * 100)}%` : "—";
@@ -3502,7 +3962,7 @@ function ReportAgentDetail({ agent, status, report, onNavigate }: AgentDetailPro
       description="报告撰写员：整合已验证的硬件事实、证据链与质量门控，输出最终竞品报告（不新增证据）。"
     >
       {!hasReport ? (
-        <EmptyAgentNote label="ReportAgent 还未生成报告。工作流跑完后这里会显示执行摘要、最终建议、评分与指标。" />
+        <EmptyAgentNote label="ReportAgent 还未生成报告。工作流跑完后这里会显示执行摘要、场景化建议、可信度与追溯指标。" />
       ) : (
         <>
           <div className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-cyan-300/25 bg-cyan-400/10 p-4">
@@ -3550,38 +4010,49 @@ function ReportAgentDetail({ agent, status, report, onNavigate }: AgentDetailPro
                   ))}
                 </ul>
               ) : null}
-              {asStrings(rec.cautions).length ? (
-                <div className="mt-2 rounded-md border border-amber-400/25 bg-amber-400/10 p-2">
-                  <p className="text-[11px] font-semibold text-amber-100">注意</p>
-                  <ul className="mt-1 space-y-1 text-[11px] leading-4 text-amber-100/90">
-                    {asStrings(rec.cautions).map((caution, index) => (
-                      <li key={index}>· {caution}</li>
-                    ))}
-                  </ul>
-                </div>
-              ) : null}
             </div>
 
             <div className="rounded-lg border border-slate-800 bg-slate-900/45 p-4">
-              <p className="text-xs font-semibold uppercase tracking-[0.16em] text-slate-500">Score &amp; Metrics</p>
-              <h4 className="mt-2 text-lg font-semibold text-white">评分与指标</h4>
-              {finalScores.length ? (
-                <div className="mt-3 grid grid-cols-2 gap-2">
-                  {finalScores.slice(0, 2).map((s, index) => (
-                    <StatTile key={index} label={asString(s.product) || `产品 ${index + 1}`} value={formatValue(s.score, "—")} tone="info" />
-                  ))}
-                </div>
-              ) : null}
-              <div className="mt-2 grid grid-cols-3 gap-2">
+              <p className="text-xs font-semibold uppercase tracking-[0.16em] text-slate-500">Credibility Metrics</p>
+              <h4 className="mt-2 text-lg font-semibold text-white">可信度与追溯指标</h4>
+              <div className="mt-3 grid grid-cols-2 gap-2 lg:grid-cols-4">
+                <StatTile label="报告可信度" value={qualityScore ?? "—"} tone="info" />
                 <StatTile label="引用率" value={pct(metrics.citation_rate)} tone="success" />
                 <StatTile label="覆盖率" value={pct(metrics.coverage_rate)} tone="info" />
                 <StatTile label="忠实率" value={pct(metrics.faithfulness_rate)} tone="success" />
               </div>
-              <p className="mt-2 text-[11px] leading-4 text-slate-500">评分为本地硬件事实基线，非最终购买建议；引用率 / 忠实率为报告可信度指标。</p>
+              <p className="mt-2 text-[11px] leading-4 text-slate-500">这里展示报告质量，不展示产品综合分；最终结论以场景化建议和证据链为准。</p>
             </div>
           </div>
 
-          <div className="rounded-lg border border-dashed border-violet-400/35 bg-violet-400/10 p-4 text-xs leading-5 text-slate-400">
+          {humanFeedback.length ? (
+            <div className="rounded-lg border border-violet-400/25 bg-violet-400/10 p-4">
+              <div className="flex flex-wrap items-center justify-between gap-3">
+                <div>
+                  <p className="text-xs font-semibold uppercase tracking-[0.16em] text-violet-200">Human Correction</p>
+                  <h4 className="mt-2 text-lg font-semibold text-white">人工修正已并入报告链路</h4>
+                </div>
+                <StatusBadge label={`${humanFeedback.length} 条`} tone="info" />
+              </div>
+              {humanFeedbackNote ? <p className="mt-2 text-xs leading-5 text-slate-400">{humanFeedbackNote}</p> : null}
+              <div className="mt-3 grid gap-2 lg:grid-cols-2">
+                {humanFeedback.slice(0, 4).map((item, index) => (
+                  <div className="rounded-md border border-violet-400/20 bg-slate-950/60 p-3" key={asString(item.feedback_id) || index}>
+                    <div className="flex flex-wrap items-center gap-1.5">
+                      <StatusBadge label={asString(item.feedback_id, `HF${index + 1}`)} tone="info" />
+                      <StatusBadge label={feedbackStatusLabel(item.status)} tone={normalize(item.status) === "applied_to_report" ? "success" : "warning"} />
+                    </div>
+                    <p className="mt-2 text-sm leading-6 text-slate-200">{asString(item.message)}</p>
+                    <p className="mt-1 text-xs text-slate-500">
+                      {asString(item.product, "未指定产品")} · {asString(item.dimension, "human_feedback")}
+                    </p>
+                  </div>
+                ))}
+              </div>
+            </div>
+          ) : null}
+
+          <div className="hidden">
             🟣 SWOT 摘要与 AI 叙述将在 LLM 阶段由 AnalysisAgent 产出后并入本报告。
           </div>
         </>
@@ -3729,6 +4200,7 @@ function CompetitiveReportEntry({
 }
 
 function AgentDetailPage({
+  taskId,
   agent,
   status,
   trace,
@@ -3741,8 +4213,10 @@ function AgentDetailPage({
   externalProductCandidates,
   quality,
   onNavigate,
+  onDataChanged,
   onBack,
 }: {
+  taskId?: string;
   agent: AgentDefinition;
   status: AgentStatus;
   trace?: AgentTrace;
@@ -3755,6 +4229,7 @@ function AgentDetailPage({
   externalProductCandidates: ExternalProductCandidate[];
   quality?: QualityResult;
   onNavigate?: (key: string) => void;
+  onDataChanged?: () => void;
   onBack: () => void;
 }) {
   return (
@@ -3777,6 +4252,7 @@ function AgentDetailPage({
       </div>
       <AgentDetailPlaceholder
         agent={agent}
+        taskId={taskId}
         report={report}
         status={status}
         trace={trace}
@@ -3788,6 +4264,7 @@ function AgentDetailPage({
         externalProductCandidates={externalProductCandidates}
         quality={quality}
         onNavigate={onNavigate}
+        onDataChanged={onDataChanged}
       />
     </section>
   );
@@ -3816,6 +4293,7 @@ export function WorkflowPage({
   const [isLoading, setIsLoading] = useState(false);
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [manualRefreshTick, setManualRefreshTick] = useState(0);
 
   useEffect(() => {
     if (!taskId) return;
@@ -3878,7 +4356,7 @@ export function WorkflowPage({
       cancelled = true;
       if (timer) window.clearInterval(timer);
     };
-  }, [taskId, onSelectedAgentChange]);
+  }, [taskId, onSelectedAgentChange, manualRefreshTick]);
 
   const report = useMemo(() => {
     const nextReport = extractReport(reportResponse);
@@ -3888,6 +4366,8 @@ export function WorkflowPage({
     const reviewIntelStatus = asRecord(resp.review_intel_status);
     const priceRecords = asRecords(resp.price_records);
     const priceStatus = asRecord(resp.price_status);
+    const analysisAi = asRecord(resp.analysis_ai_interpretation);
+    const humanFeedback = asRecords(resp.human_feedback) as HumanFeedbackRecord[];
     return {
       ...nextReport,
       ...(officialSpecs.length ? { official_spec_records: officialSpecs } : {}),
@@ -3895,6 +4375,8 @@ export function WorkflowPage({
       ...(Object.keys(reviewIntelStatus).length ? { review_intel_status: reviewIntelStatus } : {}),
       ...(priceRecords.length ? { price_records: priceRecords } : {}),
       ...(Object.keys(priceStatus).length ? { price_status: priceStatus } : {}),
+      ...(Object.keys(analysisAi).length ? { analysis_ai_interpretation: analysisAi } : {}),
+      ...(humanFeedback.length ? { human_feedback: humanFeedback } : {}),
     };
   }, [reportResponse]);
   const mcpTools = useMemo(() => mcpToolsFromReport(report), [report]);
@@ -3982,6 +4464,7 @@ export function WorkflowPage({
         ) : null}
         <AgentDetailPage
           agent={detailAgent}
+          taskId={taskId}
           onBack={onAgentDetailClose}
           report={report}
           status={agentStatuses[detailAgent.name] ?? "waiting"}
@@ -3994,6 +4477,7 @@ export function WorkflowPage({
           externalProductCandidates={externalProductCandidates}
           quality={quality}
           onNavigate={onNavigate}
+          onDataChanged={() => setManualRefreshTick((value) => value + 1)}
         />
       </section>
     );

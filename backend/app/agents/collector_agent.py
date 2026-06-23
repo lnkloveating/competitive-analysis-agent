@@ -36,6 +36,11 @@ from app.services.review_intel_mcp_service import (
     merge_review_records_into_evidence,
     summarize_review_intel_status,
 )
+from app.services.observability_service import (
+    append_mcp_usage,
+    append_usage_from_records,
+    make_mcp_usage_record,
+)
 from app.services.search_mcp_service import search_candidates
 
 
@@ -309,19 +314,10 @@ def _append_price_pending(
     """价格未全收齐、或仅低可信 / 官方价被反爬拦截时，登记一条 price pending，
     让 QualityAgent 据此下调报告可信度分。"""
     fully_collected = bool(target_count) and collected_count >= target_count
-    low_conf = (
-        _as_text(price_status.get("price_confidence")) == "low"
-        or int(price_status.get("low_confidence_count") or 0) > 0
-        or int(price_status.get("official_blocked_count") or 0) > 0
-    )
-    if fully_collected and not low_conf:
+    if fully_collected:
         return [item for item in state.get("pending_data", []) if isinstance(item, dict)]
-    if fully_collected and low_conf:
-        status_label = "low_confidence"
-        note = "实时价格仅来自低可信来源（官方价被反爬拦截或未找到高可信报价），报告可信度据此下调。"
-    else:
-        status_label = _as_text(price_status.get("status")) or "pending"
-        note = _as_text(price_status.get("note")) or "Realtime price is intentionally not read from local JSON."
+    status_label = _as_text(price_status.get("status")) or "pending"
+    note = _as_text(price_status.get("note")) or "Realtime price is intentionally not read from local JSON."
     return _append_pending(
         state,
         _pending_entry(
@@ -334,15 +330,29 @@ def _append_price_pending(
 
 
 def _search_unresolved_products(unresolved: List[str], category: str) -> List[Dict[str, Any]]:
-    return [
-        search_candidates(
+    results: List[Dict[str, Any]] = []
+    for item in unresolved:
+        if not _as_text(item):
+            continue
+        started = time.perf_counter()
+        result = search_candidates(
             item,
             category=category,
             intent="product_entity_resolution",
         )
-        for item in unresolved
-        if _as_text(item)
-    ]
+        result["mcp_usage"] = make_mcp_usage_record(
+            agent="CollectorAgent",
+            tool="search_mcp",
+            status=_as_text(result.get("status")) or "success",
+            started_at=started,
+            provider=_as_text(result.get("provider")) or "search",
+            query=_as_text(result.get("executed_query") or result.get("_executed_query") or item),
+            result_count=len(result.get("candidates") if isinstance(result.get("candidates"), list) else []),
+            uses_llm=False,
+            metadata={"intent": "product_entity_resolution", "input": item},
+        )
+        results.append(result)
+    return results
 
 
 LOCAL_COMPLETE_FIELDS = [
@@ -568,7 +578,7 @@ def _append_review_pending(
         if _as_text(item)
     ] if isinstance(review_status.get("review_dimensions_pending"), list) else []
     low_conf = int(review_status.get("low_confidence_count") or 0) > 0
-    if fully_collected and not pending_dimensions and not low_conf:
+    if fully_collected and not pending_dimensions:
         return [item for item in state.get("pending_data", []) if isinstance(item, dict)]
     status_label = "partial" if collected_count else (_as_text(review_status.get("status")) or "pending")
     if low_conf:
@@ -982,6 +992,15 @@ def collector_agent(state: dict) -> Dict[str, Any]:
                 "price_mcp_pending",
             ],
         }
+        append_usage_from_records(next_state, [*merged_records, *price_records, *review_records])
+        append_mcp_usage(
+            next_state,
+            [
+                item.get("mcp_usage")
+                for item in search_results
+                if isinstance(item, dict) and isinstance(item.get("mcp_usage"), dict)
+            ],
+        )
         _append_trace(
             next_state,
             status="partial",
@@ -1137,13 +1156,14 @@ def collector_agent(state: dict) -> Dict[str, Any]:
         "price_status": price_status,
         "pending_data": pending_data,
         "knowledge_schema": _product_schema(category),
-        "data_requirements": [
-            "local_product_json",
-            "official_spec_mcp_pending",
-            "review_intel_mcp_pending",
-            "price_mcp_pending",
-        ],
-    }
+            "data_requirements": [
+                "local_product_json",
+                "official_spec_mcp_pending",
+                "review_intel_mcp_pending",
+                "price_mcp_pending",
+            ],
+        }
+    append_usage_from_records(next_state, [*official_records, *price_records, *review_records])
     _append_trace(
         next_state,
         status="success",

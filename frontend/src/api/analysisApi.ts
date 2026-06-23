@@ -4,6 +4,7 @@ import type {
   StartAnalysisRequest,
   StartAnalysisResponse,
   AnalysisStatus,
+  AnalysisAiInterpretation,
   EvidenceItem,
   Claim,
   AgentTrace,
@@ -20,6 +21,8 @@ import type {
   FinalReport,
   ReviewTicket,
   SearchMcpResult,
+  HumanFeedbackRecord,
+  ObservabilityResponse,
 } from "../types/analysis";
 
 export const analysisApi = {
@@ -55,6 +58,8 @@ export const analysisApi = {
           review_intel_status?: Record<string, unknown>;
           price_records?: Array<Record<string, unknown>>;
           price_status?: Record<string, unknown>;
+          analysis_ai_interpretation?: AnalysisAiInterpretation;
+          human_feedback?: HumanFeedbackRecord[];
           error?: string;
         }
       | FinalReport
@@ -129,4 +134,30 @@ export const analysisApi = {
 
   getArtifacts: (taskId: string) =>
     apiGet<ArtifactsSummary>(`/api/analysis/${taskId}/artifacts`),
+
+  getObservability: (taskId: string) =>
+    apiGet<ObservabilityResponse>(`/api/analysis/${taskId}/observability`),
+
+  getSwot: (taskId: string) =>
+    apiGet<{
+      task_id: string;
+      analysis_ai_interpretation: AnalysisAiInterpretation;
+      human_feedback?: HumanFeedbackRecord[];
+    }>(`/api/analysis/${taskId}/swot`),
+
+  submitHumanFeedback: (
+    taskId: string,
+    payload: { message: string; product?: string; dimension?: string },
+  ) =>
+    apiPost<{
+      task_id: string;
+      assistant_reply: string;
+      feedback_record: HumanFeedbackRecord;
+      evidence?: Record<string, unknown>;
+      claim?: Claim;
+      human_feedback?: HumanFeedbackRecord[];
+      analysis_ai_interpretation?: AnalysisAiInterpretation;
+      final_report?: FinalReport;
+      faithfulness_report?: FaithfulnessReport;
+    }>(`/api/analysis/${taskId}/feedback`, payload),
 };

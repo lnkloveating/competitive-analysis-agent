@@ -9,6 +9,7 @@ import type {
   FeatureNode,
   FinalReport,
   HardwareSpec,
+  HumanFeedbackRecord,
   OfficialSpecRecord,
   ProductIdentity,
   QualityResult,
@@ -32,6 +33,7 @@ type ReportResponse = {
   search_mcp_results?: SearchMcpResult[];
   external_product_candidates?: ExternalProductCandidate[];
   official_spec_records?: OfficialSpecRecord[];
+  human_feedback?: HumanFeedbackRecord[];
 };
 
 type Tone = "neutral" | "success" | "warning" | "danger" | "info";
@@ -209,6 +211,14 @@ function scenarioConfTone(conf: string): ScenarioTone {
   if (conf === "medium") return "info";
   if (conf === "low") return "warning";
   return "neutral";
+}
+
+function feedbackStatusLabel(value: unknown): string {
+  const key = normalize(value);
+  if (key === "applied_to_report") return "已并入报告";
+  if (key === "pending_verification") return "待校验";
+  if (key === "verified") return "已校验";
+  return asString(value, "待校验");
 }
 
 function Recommendation({ report }: { report: FinalReport }) {
@@ -516,6 +526,32 @@ function PendingAndEvidence({ report, quality }: { report: FinalReport; quality:
   );
 }
 
+function HumanFeedbackSection({ report }: { report: FinalReport }) {
+  const feedback = asRecords(report.human_feedback) as HumanFeedbackRecord[];
+  const note = asString(report.human_feedback_note);
+  if (!feedback.length) return null;
+  return (
+    <Section
+      subtitle={note || "人工输入作为 human_feedback evidence 进入 VerificationAgent，不会绕过证据校验直接覆盖报告。"}
+      title="人工修正记录"
+    >
+      <div className="grid gap-3 lg:grid-cols-2">
+        {feedback.map((item, index) => (
+          <article className="rounded-lg border border-violet-400/25 bg-violet-400/10 p-4" key={asString(item.feedback_id) || index}>
+            <div className="flex flex-wrap items-center gap-2">
+              <StatusBadge label={asString(item.feedback_id, `HF${index + 1}`)} tone="info" />
+              <StatusBadge label={feedbackStatusLabel(item.status)} tone={normalize(item.status) === "applied_to_report" ? "success" : "warning"} />
+              <StatusBadge label={asString(item.dimension, "human_feedback")} tone="neutral" />
+            </div>
+            <p className="mt-3 text-sm leading-6 text-slate-200">{asString(item.message)}</p>
+            <p className="mt-2 text-xs text-slate-500">{asString(item.product, "未指定产品")}</p>
+          </article>
+        ))}
+      </div>
+    </Section>
+  );
+}
+
 function PersonaAndPrice({ report }: { report: FinalReport }) {
   const persona = report.user_persona;
   const pricing = report.pricing_model;
@@ -734,6 +770,7 @@ export function ReportPage({ taskId, displayTaskId, onNavigate }: ReportPageProp
           <PersonaAndPrice report={report} />
           <ScoreFlowSection report={report} />
           <PendingAndEvidence report={report} quality={quality} />
+          <HumanFeedbackSection report={report} />
           <AgentContributions items={report.agent_contributions} />
           <RisksSection risks={reportRisks} />
         </div>

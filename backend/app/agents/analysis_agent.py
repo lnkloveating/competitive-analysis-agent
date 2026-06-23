@@ -203,38 +203,6 @@ def _business_analysis() -> Dict[str, Any]:
     }
 
 
-def _score_flow(product_scores: Dict[str, Any]) -> Dict[str, Any]:
-    products = []
-    for item in product_scores.get("products", []) if isinstance(product_scores, dict) else []:
-        if not isinstance(item, dict):
-            continue
-        products.append(
-            {
-                "product_id": item.get("product_id"),
-                "model": item.get("model"),
-                "baseline_hardware_score": item.get("overall_score", {}).get("current_score")
-                if isinstance(item.get("overall_score"), dict)
-                else None,
-                "agent_adjustment": 0,
-                "final_score": item.get("overall_score", {}).get("current_score")
-                if isinstance(item.get("overall_score"), dict)
-                else None,
-                "pending_adjustments": [
-                    "review_sentiment",
-                    "creator_reviews",
-                    "realtime_price",
-                    "driver_reputation",
-                    "long_term_reliability",
-                ],
-            }
-        )
-    return {
-        "score_type": "baseline_to_agent_final",
-        "products": products,
-        "note": "MCP-based dimensions are pending, so Agent adjustments are disclosed as zero for now.",
-    }
-
-
 def _risk_flags_from_state(state: dict, selected: List[Dict[str, Any]], evidence_list: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
     risks: List[Dict[str, Any]] = []
     unresolved = [_as_text(item) for item in state.get("unresolved_products", []) if _as_text(item)]
@@ -399,7 +367,9 @@ def _product_compare_analysis(state: dict, started: float) -> Dict[str, Any]:
         "hardware_analysis": hardware_analysis,
         "experience_analysis": experience_analysis,
         "business_analysis": _business_analysis(),
-        "score_flow": _score_flow(product_scores),
+        # AnalysisAgent only produces evidence-bound facts and tradeoffs. It does
+        # not emit product scores; scenario recommendations are ReportAgent's job.
+        "score_flow": {},
         "risk_flags": risk_flags,
     }
 

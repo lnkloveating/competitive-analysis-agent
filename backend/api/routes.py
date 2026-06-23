@@ -34,7 +34,16 @@ _configure_tracing()
 
 from orchestration.industry_config import INDUSTRY_CONFIGS, get_state_dimensions, get_state_industry_name
 from orchestration.workflow import app as workflow_app
+from app.agents.quality_agent import quality_agent
+from app.agents.report_agent import report_agent
+from app.agents.verification_agent import verification_agent
 from app.services.error_log_service import normalize_error_log
+from app.services.observability_service import (
+    build_observability_payload,
+    make_langsmith_run_collector,
+    resolve_langsmith_trace,
+)
+from app.services.swot_ai_service import build_human_feedback_patch, generate_swot_interpretation
 
 
 app = FastAPI(title="竞品分析 Agent 系统", version="1.0.0")
@@ -106,6 +115,12 @@ class AnalysisRequest(BaseModel):
     selected_products: Optional[List[Dict[str, Any]]] = None
 
 
+class HumanFeedbackRequest(BaseModel):
+    message: str
+    product: Optional[str] = ""
+    dimension: Optional[str] = ""
+
+
 def _product_input_names(request: AnalysisRequest) -> List[str]:
     names: List[str] = []
     for value in [request.target_platform, *request.competitors]:
@@ -146,6 +161,10 @@ def _build_initial_state(request: AnalysisRequest) -> Dict[str, Any]:
             "hardware_analysis": {},
             "experience_analysis": {},
             "business_analysis": {},
+            "analysis_ai_interpretation": {},
+            "human_feedback": [],
+            "llm_usage": [],
+            "mcp_usage": [],
             "agent_contributions": [],
             "pending_data": [],
             "pending_dimensions": [],
@@ -193,6 +212,19 @@ def _get_task_state(task_id: str) -> Dict[str, Any]:
         return dict(task.get("state", {}))
 
 
+def _append_system_trace(state: Dict[str, Any], *, agent_name: str, output_summary: str) -> None:
+    trace_log = state.setdefault("trace_log", [])
+    trace_log.append(
+        {
+            "step_id": len(trace_log) + 1,
+            "agent_name": agent_name,
+            "status": "success",
+            "output_summary": output_summary,
+            "error": None,
+        }
+    )
+
+
 def _task_progress(task: Dict[str, Any]) -> int:
     if task.get("status") == "completed":
         return 100
@@ -222,12 +254,16 @@ def _next_running_agent(node_name: str, state: Dict[str, Any]) -> str:
 def _run_workflow(task_id: str, initial_state: Dict[str, Any]) -> None:
     try:
         final_state = dict(initial_state)
+        langsmith_collector = make_langsmith_run_collector()
+        workflow_config: Dict[str, Any] = {"recursion_limit": 50}
+        if langsmith_collector is not None:
+            workflow_config["callbacks"] = [langsmith_collector]
         with TASK_LOCK:
             TASKS[task_id]["current_agent"] = "ResearchAgent"
 
         for event in workflow_app.stream(
             initial_state,
-            {"recursion_limit": 50},
+            workflow_config,
             stream_mode="updates",
         ):
             for node_name, update in event.items():
@@ -244,6 +280,10 @@ def _run_workflow(task_id: str, initial_state: Dict[str, Any]) -> None:
                         TASKS[task_id]["current_agent"] = current_agent
 
         current_agent = final_state.get("current_agent", "ReportAgent")
+        langsmith_info = resolve_langsmith_trace(langsmith_collector)
+        if langsmith_info.get("trace_url"):
+            final_state["langsmith_trace_url"] = langsmith_info["trace_url"]
+        final_state["langsmith"] = langsmith_info
 
         with TASK_LOCK:
             TASKS[task_id].update(
@@ -357,8 +397,164 @@ async def get_report(task_id: str):
         "review_intel_status": state.get("review_intel_status", {}),
         "price_status": state.get("price_status", {}),
         "price_records": state.get("price_records", []),
+        "analysis_ai_interpretation": state.get("analysis_ai_interpretation", {}),
+        "human_feedback": state.get("human_feedback", []),
         "error": task.get("error", ""),
     }
+
+
+@app.get("/api/analysis/{task_id}/swot")
+async def get_swot_interpretation(task_id: str):
+    with TASK_LOCK:
+        task = _get_task(task_id)
+        state = dict(task.get("state", {}))
+        current = state.get("analysis_ai_interpretation", {})
+        if isinstance(current, dict) and current:
+            return {
+                "task_id": task_id,
+                "analysis_ai_interpretation": current,
+                "human_feedback": state.get("human_feedback", []),
+            }
+
+    working_state = dict(state)
+    interpretation = generate_swot_interpretation(working_state)
+    with TASK_LOCK:
+        task = _get_task(task_id)
+        next_state = dict(task.get("state", {}))
+        next_state["llm_usage"] = working_state.get("llm_usage", next_state.get("llm_usage", []))
+        next_state["mcp_usage"] = working_state.get("mcp_usage", next_state.get("mcp_usage", []))
+        next_state["analysis_ai_interpretation"] = interpretation
+        final_report = dict(next_state.get("final_report", {})) if isinstance(next_state.get("final_report"), dict) else {}
+        if final_report:
+            final_report["analysis_ai_interpretation"] = interpretation
+            next_state["final_report"] = final_report
+        context_summary = dict(next_state.get("context_summary", {})) if isinstance(next_state.get("context_summary"), dict) else {}
+        context_summary["AnalysisAgent.SWOT"] = interpretation.get("context_summary", {})
+        next_state["context_summary"] = context_summary
+        _append_system_trace(
+            next_state,
+            agent_name="AnalysisAgent",
+            output_summary="generated SWOT AI interpretation from structured evidence",
+        )
+        task["state"] = next_state
+    return {
+        "task_id": task_id,
+        "analysis_ai_interpretation": interpretation,
+        "human_feedback": next_state.get("human_feedback", []),
+    }
+
+
+@app.get("/api/analysis/{task_id}/observability")
+async def get_observability(task_id: str):
+    with TASK_LOCK:
+        task = _get_task(task_id).copy()
+        state = dict(task.get("state", {}))
+
+    return build_observability_payload(
+        task_id,
+        state,
+        task_status=task.get("status", "failed"),
+        current_agent=task.get("current_agent", "") or state.get("current_agent", ""),
+    )
+
+
+@app.post("/api/analysis/{task_id}/feedback")
+async def submit_human_feedback(task_id: str, request: HumanFeedbackRequest):
+    try:
+        with TASK_LOCK:
+            task = _get_task(task_id)
+            state = dict(task.get("state", {}))
+
+        patch = build_human_feedback_patch(
+            state,
+            request.message,
+            product=request.product or "",
+            dimension=request.dimension or "",
+        )
+        next_state = {
+            **state,
+            "human_feedback": patch["human_feedback"],
+            "evidence_list": patch["evidence_list"],
+            "claims": patch["claims"],
+        }
+        _append_system_trace(
+            next_state,
+            agent_name="HumanFeedback",
+            output_summary=f"accepted human feedback {patch['feedback_record']['feedback_id']} and converted it into evidence",
+        )
+
+        # Re-run the deterministic post-analysis checks so Verification/Report pages
+        # immediately reflect the human correction without re-crawling or re-running
+        # the full LangGraph DAG.
+        verified_state = verification_agent(next_state)
+        quality_state = quality_agent(verified_state)
+        # Mirror the DAG forward path: verification -> quality -> SWOT -> report, so the
+        # refreshed report embeds the regenerated (evidence-validated) SWOT interpretation.
+        refreshed_interpretation = generate_swot_interpretation(quality_state)
+        quality_state["analysis_ai_interpretation"] = refreshed_interpretation
+        refreshed_state = report_agent(quality_state)
+        feedback_claim_id = patch["claim"].get("claim_id") if isinstance(patch.get("claim"), dict) else ""
+        unsupported_claims = {
+            str(item)
+            for item in (refreshed_state.get("unsupported_claim_ids", []) or [])
+            if str(item)
+        }
+        feedback_supported = bool(feedback_claim_id) and feedback_claim_id not in unsupported_claims
+        feedback_status = "verified" if feedback_supported else "needs_external_evidence"
+        refreshed_feedback = []
+        for item in refreshed_state.get("human_feedback", []):
+            if isinstance(item, dict) and item.get("feedback_id") == patch["feedback_record"]["feedback_id"]:
+                refreshed_feedback.append(
+                    {
+                        **item,
+                        "status": feedback_status,
+                        "needs_verification": not feedback_supported,
+                        "verification_note": (
+                            "External evidence supports this feedback."
+                            if feedback_supported
+                            else "No non-human evidence supports this feedback yet; CollectorAgent should gather corroborating sources."
+                        ),
+                    }
+                )
+            else:
+                refreshed_feedback.append(item)
+        refreshed_state["human_feedback"] = refreshed_feedback
+        refreshed_state["analysis_ai_interpretation"] = refreshed_interpretation
+        final_report = dict(refreshed_state.get("final_report", {})) if isinstance(refreshed_state.get("final_report"), dict) else {}
+        final_report["human_feedback"] = refreshed_state.get("human_feedback", [])
+        final_report["human_feedback_note"] = (
+            "人工补充已作为 evidence 进入校验链路；未被外部证据进一步支撑前，按人工输入披露，不直接当作最终事实。"
+        )
+        final_report["analysis_ai_interpretation"] = refreshed_interpretation
+        refreshed_state["final_report"] = final_report
+
+        with TASK_LOCK:
+            task = _get_task(task_id)
+            task["state"] = refreshed_state
+            task["current_agent"] = "ReportAgent"
+            if task.get("status") != "failed":
+                task["status"] = "completed"
+
+        return {
+            "task_id": task_id,
+            "assistant_reply": patch["assistant_reply"],
+            "feedback_record": next(
+                (
+                    item
+                    for item in refreshed_state.get("human_feedback", [])
+                    if isinstance(item, dict) and item.get("feedback_id") == patch["feedback_record"]["feedback_id"]
+                ),
+                patch["feedback_record"],
+            ),
+            "evidence": patch["evidence"],
+            "claim": patch["claim"],
+            "human_feedback": refreshed_state.get("human_feedback", []),
+            "analysis_ai_interpretation": refreshed_interpretation,
+            "final_report": final_report,
+            "faithfulness_report": refreshed_state.get("faithfulness_report", {}),
+        }
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
 @app.get("/api/analysis/{task_id}/evidence")

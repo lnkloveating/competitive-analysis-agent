@@ -25,6 +25,7 @@ from urllib.request import Request, urlopen
 
 from dotenv import load_dotenv
 
+from app.services.observability_service import make_llm_usage_record, make_mcp_usage_record
 from app.services.search_mcp_service import search_candidates
 
 
@@ -600,7 +601,19 @@ def _source_docs(
     if config.search_enabled:
         query = _as_text(target.get("model") or target.get("input"))
         if query:
+            search_started = time.perf_counter()
             search_result = search_candidates(query, category="gaming_mouse", intent="price_collection")
+            search_result["mcp_usage"] = make_mcp_usage_record(
+                agent="CollectorAgent",
+                tool="search_mcp",
+                status=_as_text(search_result.get("status")) or "success",
+                started_at=search_started,
+                provider=_as_text(search_result.get("provider")) or "search",
+                query=_as_text(search_result.get("executed_query") or search_result.get("_executed_query") or query),
+                result_count=len(search_result.get("candidates") if isinstance(search_result.get("candidates"), list) else []),
+                uses_llm=False,
+                metadata={"intent": "price_collection", "input": query},
+            )
             candidates = search_result.get("candidates") if isinstance(search_result.get("candidates"), list) else []
             for candidate in candidates[: config.max_sources]:
                 if not isinstance(candidate, dict):
@@ -626,6 +639,7 @@ def _source_docs(
 
 def collect_price_for_product(target: Dict[str, Any], *, category: str = "gaming_mouse") -> Dict[str, Any]:
     del category
+    mcp_started = time.perf_counter()
     config = _config()
     if not config.enabled and not config.search_enabled:
         return _pending_result(
@@ -645,6 +659,24 @@ def collect_price_for_product(target: Dict[str, Any], *, category: str = "gaming
             "blocked_sources": blocked,
             "official_price_blocked": bool(blocked),
             "confidence_level": "none",
+            "mcp_usage": [
+                item
+                for item in [
+                    search_result.get("mcp_usage") if isinstance(search_result, dict) else None,
+                    make_mcp_usage_record(
+                        agent="CollectorAgent",
+                        tool="price_mcp",
+                        status="no_sources",
+                        started_at=mcp_started,
+                        provider="price_sources",
+                        query=_as_text(target.get("input") or target.get("model")),
+                        result_count=0,
+                        uses_llm=False,
+                        metadata={"blocked_count": len(blocked)},
+                    ),
+                ]
+                if isinstance(item, dict)
+            ],
         }
     fallback_links = _fallback_links_from_docs(docs)
 
@@ -654,11 +686,26 @@ def collect_price_for_product(target: Dict[str, Any], *, category: str = "gaming
 
     llm_quotes: List[Dict[str, Any]] = []
     llm_error = ""
+    llm_usage: Dict[str, Any] | None = None
     if config.enabled and config.api_key and config.model:
         try:
             llm = _get_llm(config)
-            response = llm.invoke(_prompt(target, docs, config))
-            parsed = _parse_json_object(_response_to_text(response))
+            prompt = _prompt(target, docs, config)
+            llm_started = time.perf_counter()
+            response = llm.invoke(prompt)
+            response_text = _response_to_text(response)
+            llm_usage = make_llm_usage_record(
+                agent="CollectorAgent",
+                tool="price_mcp",
+                model=config.model,
+                started_at=llm_started,
+                prompt_text=prompt,
+                response=response,
+                response_text=response_text,
+                status="success",
+                metadata={"input": _as_text(target.get("input") or target.get("model")), "source_count": len(docs)},
+            )
+            parsed = _parse_json_object(response_text)
             for raw in parsed.get("quotes", []) if isinstance(parsed.get("quotes"), list) else []:
                 if not isinstance(raw, dict):
                     continue
@@ -672,6 +719,16 @@ def collect_price_for_product(target: Dict[str, Any], *, category: str = "gaming
                     llm_quotes.append(quote)
         except Exception as exc:  # noqa: BLE001 - MCP should degrade, not break the DAG.
             llm_error = f"{type(exc).__name__}"
+            llm_usage = make_llm_usage_record(
+                agent="CollectorAgent",
+                tool="price_mcp",
+                model=config.model,
+                started_at=llm_started if "llm_started" in locals() else mcp_started,
+                prompt_text=prompt if "prompt" in locals() else "",
+                status="failed",
+                error=llm_error,
+                metadata={"input": _as_text(target.get("input") or target.get("model")), "source_count": len(docs)},
+            )
 
     quotes = _filter_quotes(_dedupe_quotes([*llm_quotes, *rule_quotes]))
     if not quotes:
@@ -691,6 +748,25 @@ def collect_price_for_product(target: Dict[str, Any], *, category: str = "gaming
             "blocked_sources": blocked,
             "official_price_blocked": bool(blocked),
             "confidence_level": "none",
+            "llm_usage": llm_usage,
+            "mcp_usage": [
+                item
+                for item in [
+                    search_result.get("mcp_usage") if isinstance(search_result, dict) else None,
+                    make_mcp_usage_record(
+                        agent="CollectorAgent",
+                        tool="price_mcp",
+                        status=status,
+                        started_at=mcp_started,
+                        provider="price_sources",
+                        query=_as_text(target.get("input") or target.get("model")),
+                        result_count=0,
+                        uses_llm=bool(llm_usage),
+                        metadata={"source_count": len(docs), "blocked_count": len(blocked)},
+                    ),
+                ]
+                if isinstance(item, dict)
+            ],
         }
 
     summary = _summary(quotes)
@@ -719,6 +795,25 @@ def collect_price_for_product(target: Dict[str, Any], *, category: str = "gaming
         "source_urls": [_as_text(doc.get("url")) for doc in docs if _as_text(doc.get("url"))],
         "fallback_links": fallback_links,
         "search_result": search_result,
+        "llm_usage": llm_usage,
+        "mcp_usage": [
+            item
+            for item in [
+                search_result.get("mcp_usage") if isinstance(search_result, dict) else None,
+                make_mcp_usage_record(
+                    agent="CollectorAgent",
+                    tool="price_mcp",
+                    status="collected",
+                    started_at=mcp_started,
+                    provider="price_sources",
+                    query=_as_text(target.get("input") or target.get("model")),
+                    result_count=len(quotes),
+                    uses_llm=bool(llm_usage),
+                    metadata={"source_count": len(docs), "blocked_count": len(blocked)},
+                ),
+            ]
+            if isinstance(item, dict)
+        ],
         "note": (
             "官方价被反爬拦截，价格来自其他高可信来源。"
             if official_price_blocked
