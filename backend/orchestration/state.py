@@ -86,6 +86,10 @@ class CompetitiveAnalysisState(TypedDict):
     hardware_analysis: Dict
     experience_analysis: Dict
     business_analysis: Dict
+    analysis_ai_interpretation: Dict
+    human_feedback: List[Dict]
+    llm_usage: List[Dict]
+    mcp_usage: List[Dict]
     agent_contributions: List[Dict]
     pending_data: List[Dict]
     pending_dimensions: List[str]

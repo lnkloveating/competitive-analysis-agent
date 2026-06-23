@@ -23,6 +23,8 @@ from urllib.request import Request, urlopen
 
 from dotenv import load_dotenv
 
+from app.services.observability_service import make_llm_usage_record, make_mcp_usage_record
+
 
 BASE_URL = "https://ark.cn-beijing.volces.com/api/v3"
 
@@ -705,6 +707,7 @@ def _pending_result(target: Dict[str, Any], status: str, note: str) -> Dict[str,
 
 def extract_official_spec(target: Dict[str, Any], *, category: str = "gaming_mouse") -> Dict[str, Any]:
     """Extract one official product spec record from an official URL."""
+    mcp_started = time.perf_counter()
     config = _config()
     url = _as_text(target.get("official_url") or target.get("url"))
     if not url:
@@ -725,22 +728,112 @@ def extract_official_spec(target: Dict[str, Any], *, category: str = "gaming_mou
     try:
         page = _fetch_page_text(url, config.timeout_seconds, config.max_chars)
     except HTTPError as exc:
-        return _pending_result(target, "fetch_failed", f"Official page HTTP error: {exc.code}")
+        return {
+            **_pending_result(target, "fetch_failed", f"Official page HTTP error: {exc.code}"),
+            "mcp_usage": make_mcp_usage_record(
+                agent="CollectorAgent",
+                tool="official_spec_mcp",
+                status="fetch_failed",
+                started_at=mcp_started,
+                provider=_domain(url),
+                query=url,
+                result_count=0,
+                uses_llm=False,
+                metadata={"http_error": exc.code, "input": _as_text(target.get("input") or target.get("model"))},
+            ),
+        }
     except (URLError, TimeoutError, OSError) as exc:
-        return _pending_result(target, "fetch_failed", f"Official page fetch failed: {type(exc).__name__}")
+        return {
+            **_pending_result(target, "fetch_failed", f"Official page fetch failed: {type(exc).__name__}"),
+            "mcp_usage": make_mcp_usage_record(
+                agent="CollectorAgent",
+                tool="official_spec_mcp",
+                status="fetch_failed",
+                started_at=mcp_started,
+                provider=_domain(url),
+                query=url,
+                result_count=0,
+                uses_llm=False,
+                metadata={"error": type(exc).__name__, "input": _as_text(target.get("input") or target.get("model"))},
+            ),
+        }
 
     if not page.get("text"):
-        return _pending_result(target, "fetch_failed", "Official page text was empty.")
+        return {
+            **_pending_result(target, "fetch_failed", "Official page text was empty."),
+            "mcp_usage": make_mcp_usage_record(
+                agent="CollectorAgent",
+                tool="official_spec_mcp",
+                status="fetch_failed",
+                started_at=mcp_started,
+                provider=_domain(url),
+                query=url,
+                result_count=0,
+                uses_llm=False,
+                metadata={"input": _as_text(target.get("input") or target.get("model"))},
+            ),
+        }
 
     try:
         llm = _get_llm(config)
-        response = llm.invoke(_prompt(target, page["text"]))
-        parsed = _parse_json_object(_response_to_text(response))
+        prompt = _prompt(target, page["text"])
+        llm_started = time.perf_counter()
+        response = llm.invoke(prompt)
+        response_text = _response_to_text(response)
+        llm_usage = make_llm_usage_record(
+            agent="CollectorAgent",
+            tool="official_spec_mcp",
+            model=config.model,
+            started_at=llm_started,
+            prompt_text=prompt,
+            response=response,
+            response_text=response_text,
+            status="success",
+            metadata={"input": _as_text(target.get("input") or target.get("model")), "url": url},
+        )
+        parsed = _parse_json_object(response_text)
     except Exception as exc:
-        return _pending_result(target, "llm_failed", f"OfficialSpecMCP LLM extraction failed: {type(exc).__name__}")
+        return {
+            **_pending_result(target, "llm_failed", f"OfficialSpecMCP LLM extraction failed: {type(exc).__name__}"),
+            "llm_usage": make_llm_usage_record(
+                agent="CollectorAgent",
+                tool="official_spec_mcp",
+                model=config.model,
+                started_at=llm_started if "llm_started" in locals() else mcp_started,
+                prompt_text=prompt if "prompt" in locals() else "",
+                status="failed",
+                error=type(exc).__name__,
+                metadata={"input": _as_text(target.get("input") or target.get("model")), "url": url},
+            ),
+            "mcp_usage": make_mcp_usage_record(
+                agent="CollectorAgent",
+                tool="official_spec_mcp",
+                status="llm_failed",
+                started_at=mcp_started,
+                provider=_domain(url),
+                query=url,
+                result_count=0,
+                uses_llm=True,
+                metadata={"input": _as_text(target.get("input") or target.get("model"))},
+            ),
+        }
 
     if not parsed:
-        return _pending_result(target, "validation_failed", "LLM did not return a parseable JSON object.")
+        return {
+            **_pending_result(target, "validation_failed", "LLM did not return a parseable JSON object."),
+            "llm_usage": llm_usage,
+            "mcp_usage": make_mcp_usage_record(
+                agent="CollectorAgent",
+                tool="official_spec_mcp",
+                status="validation_failed",
+                started_at=mcp_started,
+                provider=_domain(url),
+                query=url,
+                result_count=0,
+                uses_llm=True,
+                metadata={"input": _as_text(target.get("input") or target.get("model"))},
+            ),
+        }
 
     record = _normalize_record(parsed, target)
     _patch_record_from_official_text(record, target, _as_text(page.get("text")))
@@ -760,6 +853,18 @@ def extract_official_spec(target: Dict[str, Any], *, category: str = "gaming_mou
         "confidence": record["confidence"],
         "field_confidence": record["field_confidence"],
         "latency_ms": page.get("latency_ms"),
+        "llm_usage": llm_usage,
+        "mcp_usage": make_mcp_usage_record(
+            agent="CollectorAgent",
+            tool="official_spec_mcp",
+            status=status,
+            started_at=mcp_started,
+            provider=_domain(url),
+            query=url,
+            result_count=1,
+            uses_llm=True,
+            metadata={"input": _as_text(target.get("input") or target.get("model"))},
+        ),
         "note": (
             "Official hardware specs extracted from official page text by LLM."
             if status == "collected"
@@ -881,9 +986,18 @@ def merge_official_records(
         source_urls: List[str] = []
         source_domains: List[str] = []
         snippets: List[str] = []
+        llm_usage: List[Dict[str, Any]] = []
+        mcp_usage: List[Dict[str, Any]] = []
 
         for item in usable:
             record = item.get("record") or {}
+            if isinstance(item.get("llm_usage"), dict):
+                llm_usage.append(item["llm_usage"])
+            usage_item = item.get("mcp_usage")
+            if isinstance(usage_item, list):
+                mcp_usage.extend(x for x in usage_item if isinstance(x, dict))
+            elif isinstance(usage_item, dict):
+                mcp_usage.append(usage_item)
             url = _as_text(item.get("source_url") or record.get("official_url"))
             domain = _as_text(item.get("source_domain")) or _domain(url)
             if url and url not in source_urls:
@@ -928,6 +1042,8 @@ def merge_official_records(
                 "field_confidence": merged_record.get("field_confidence", {}),
                 "field_sources": field_sources,
                 "merged_source_count": len(source_urls),
+                "llm_usage": llm_usage,
+                "mcp_usage": mcp_usage,
                 "note": (
                     f"Merged hardware specs from {len(source_urls)} source(s): {', '.join(source_domains)}"
                     if source_urls

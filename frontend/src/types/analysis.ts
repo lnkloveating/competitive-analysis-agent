@@ -227,6 +227,82 @@ export type ArtifactsSummary = {
   has_final_report?: boolean;
 };
 
+export type ObservabilityAgentTrace = {
+  order: number;
+  agent: string;
+  status: string;
+  duration_ms?: number;
+  calls_mcp?: boolean;
+  calls_llm?: boolean;
+  mcp_call_count?: number;
+  llm_call_count?: number;
+  summary?: string;
+};
+
+export type LlmUsageRecord = {
+  agent?: string;
+  tool?: string;
+  model?: string;
+  prompt_tokens?: number;
+  completion_tokens?: number;
+  total_tokens?: number;
+  estimated_cost_usd?: number;
+  latency_ms?: number;
+  status?: string;
+  error?: string;
+  trace_url?: string;
+  usage_source?: string;
+  called_at?: string;
+  metadata?: Record<string, unknown>;
+};
+
+export type McpUsageRecord = {
+  agent?: string;
+  tool?: string;
+  provider?: string;
+  status?: string;
+  latency_ms?: number;
+  query?: string;
+  result_count?: number;
+  uses_llm?: boolean;
+  external_call_count?: number;
+  called_at?: string;
+  metadata?: Record<string, unknown>;
+};
+
+export type ObservabilityPerAgent = {
+  agent: string;
+  prompt_tokens?: number;
+  completion_tokens?: number;
+  total_tokens?: number;
+  estimated_cost_usd?: number;
+  llm_call_count?: number;
+};
+
+export type ObservabilityResponse = {
+  task_id: string;
+  status?: string;
+  current_agent?: string;
+  agent_trace?: ObservabilityAgentTrace[];
+  llm_usage?: LlmUsageRecord[];
+  mcp_usage?: McpUsageRecord[];
+  per_agent?: ObservabilityPerAgent[];
+  totals?: {
+    prompt_tokens?: number;
+    completion_tokens?: number;
+    total_tokens?: number;
+    estimated_cost_usd?: number;
+    mcp_call_count?: number;
+    llm_call_count?: number;
+    total_duration_ms?: number;
+  };
+  langsmith?: {
+    enabled?: boolean;
+    project?: string;
+    trace_url?: string;
+  };
+};
+
 export type ConfidenceLabel =
   | "official"
   | "review_verified"
@@ -513,5 +589,44 @@ export type FinalReport = {
   used_claim_ids?: string[];
   used_evidence_ids?: string[];
   generated_at?: string;
+  [key: string]: unknown;
+};
+
+export type SwotPoint = {
+  point?: string;
+  product?: string;
+  evidence_ids?: string[];
+  confidence?: string;
+  grounded?: boolean;
+};
+
+export type AnalysisAiInterpretation = {
+  status?: string;
+  model?: string;
+  overall_reading?: string;
+  swot?: {
+    strengths?: SwotPoint[];
+    weaknesses?: SwotPoint[];
+    opportunities?: SwotPoint[];
+    threats?: SwotPoint[];
+  };
+  data_gaps?: string[];
+  human_feedback_questions?: string[];
+  used_claim_ids?: string[];
+  used_evidence_ids?: string[];
+  generated_at?: string;
+  llm_error?: string;
+  [key: string]: unknown;
+};
+
+export type HumanFeedbackRecord = {
+  feedback_id?: string;
+  type?: string;
+  product?: string;
+  dimension?: string;
+  message?: string;
+  status?: string;
+  needs_verification?: boolean;
+  created_at?: string;
   [key: string]: unknown;
 };

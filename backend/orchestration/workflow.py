@@ -16,6 +16,7 @@ from __future__ import annotations
 from langgraph.graph import END, StateGraph
 
 from app.agents.analysis_agent import analysis_agent
+from app.agents.analysis_ai_agent import analysis_ai_agent
 from app.agents.collector_agent import collector_agent
 from app.agents.evidence_agent import evidence_agent
 from app.agents.quality_agent import quality_agent, quality_router
@@ -101,6 +102,10 @@ def analysis_agent_node(state: CompetitiveAnalysisState) -> dict:
     return run_node("AnalysisAgent", analysis_agent, state)
 
 
+def analysis_ai_node(state: CompetitiveAnalysisState) -> dict:
+    return run_node("AnalysisAgent.SWOT", analysis_ai_agent, state)
+
+
 def verification_agent_node(state: CompetitiveAnalysisState) -> dict:
     return run_node("VerificationAgent", verification_agent, state)
 
@@ -128,6 +133,7 @@ def build_workflow():
     workflow.add_node("analysis_agent", analysis_agent_node)
     workflow.add_node("verification_agent", verification_agent_node)
     workflow.add_node("quality_agent", quality_agent_node)
+    workflow.add_node("analysis_ai_agent", analysis_ai_node)
     workflow.add_node("report_agent", report_agent_node)
     workflow.add_node("human_review", human_review_node)
 
@@ -146,10 +152,12 @@ def build_workflow():
             "collector_agent": "collector_agent",
             "evidence_agent": "evidence_agent",
             "analysis_agent": "analysis_agent",
-            "report_agent": "report_agent",
+            # Forward (approved / partial) path runs the SWOT node once before ReportAgent.
+            "report_agent": "analysis_ai_agent",
             "human_review": "human_review",
         },
     )
+    workflow.add_edge("analysis_ai_agent", "report_agent")
     workflow.add_edge("report_agent", END)
     workflow.add_edge("human_review", END)
 

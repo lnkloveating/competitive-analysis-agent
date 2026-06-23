@@ -177,6 +177,23 @@ def check_claim(claim: Dict[str, Any], evidence_by_id: Dict[str, Dict[str, Any]]
         result["reason"] = "low_credibility_evidence" if weak_evidence else "grounded"
         return result
 
+    # 人工反馈类结论：人工输入会自引用同一段文字（claim 文本即 evidence 文本），词面
+    # grounding 天然必过。不能因为"自己引用自己"就当成已核实事实——只有当还有至少一条
+    # 非人工证据同向支撑时，才可能算支撑；否则一律降为"弱支撑 / 待验证"，按人工线索披露。
+    def _is_human_evidence(ev: Dict[str, Any]) -> bool:
+        return bool(ev.get("human_provided")) or _as_text(ev.get("source_type")).lower().startswith("human")
+
+    is_human_claim = (
+        any(_is_human_evidence(ev) for ev in cited_evidence)
+        or bool(claim.get("needs_verification"))
+        or _as_text(claim.get("generated_by")).lower() == "humanfeedback"
+    )
+    if is_human_claim:
+        has_external_support = any(not _is_human_evidence(ev) for ev in cited_evidence)
+        if not has_external_support:
+            result.update(supported=False, weak=True, reason="human_feedback_unverified")
+            return result
+
     if overlap < WEAK_GROUNDING_THRESHOLD:
         result["weak"] = True
         result["reason"] = "weak_lexical_grounding"

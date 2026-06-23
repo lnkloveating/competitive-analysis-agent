@@ -4,6 +4,7 @@ import type { AuthUser } from "./api/authApi";
 import { AppLayout } from "./components/layout/AppLayout";
 import type { AgentSidebarItem, NavItem } from "./components/layout/Sidebar";
 import { HomePage } from "./pages/HomePage";
+import { ObservabilityPage } from "./pages/ObservabilityPage";
 import { ProductComparePage } from "./pages/ProductComparePage";
 import { ReportPage } from "./pages/ReportPage";
 import { WelcomePage } from "./pages/WelcomePage";
@@ -14,12 +15,13 @@ const AUTH_TOKEN_KEY = "authToken";
 const CURRENT_USER_KEY = "currentUser";
 const ACTIVE_TASK_KEY = "activeTaskId";
 
-type PageKey = "overview" | "product-compare" | "workflow" | "report";
+type PageKey = "overview" | "product-compare" | "workflow" | "observability" | "report";
 
 const navItems: Array<NavItem & { key: PageKey }> = [
   { key: "overview", label: "总览" },
   { key: "product-compare", label: "产品输入" },
   { key: "workflow", label: "Agent 工作流" },
+  { key: "observability", label: "运行观测" },
   { key: "report", label: "最终报告" },
 ];
 
@@ -222,6 +224,16 @@ export default function App() {
     if (activePage === "report") {
       return (
         <ReportPage
+          displayTaskId={displayTaskId ?? undefined}
+          onNavigate={navigate}
+          taskId={taskId ?? undefined}
+        />
+      );
+    }
+
+    if (activePage === "observability") {
+      return (
+        <ObservabilityPage
           displayTaskId={displayTaskId ?? undefined}
           onNavigate={navigate}
           taskId={taskId ?? undefined}

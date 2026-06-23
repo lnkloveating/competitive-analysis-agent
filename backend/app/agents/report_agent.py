@@ -267,58 +267,9 @@ def _user_persona(state: dict) -> Dict[str, Any]:
 
 def _score_flow(state: dict) -> Dict[str, Any]:
     flow = state.get("score_flow", {}) if isinstance(state.get("score_flow"), dict) else {}
-    if flow.get("baseline_score") or flow.get("final_score"):
-        return flow
-
-    products = flow.get("products", []) if isinstance(flow.get("products"), list) else []
-    best = None
-    best_score = None
-    for item in products:
-        if not isinstance(item, dict):
-            continue
-        score = item.get("final_score")
-        if isinstance(score, (int, float)) and (best_score is None or score > best_score):
-            best_score = score
-            best = item.get("model") or item.get("product_id")
-
-    return {
-        "baseline_score": {
-            "label": "本地硬件事实",
-            "score": best_score,
-            "source": "local_product_json",
-            "description": "只基于稳定硬件参数，不包含用户口碑或实时价格。",
-        },
-        "agent_adjustments": [
-            {
-                "agent": "AnalysisAgent",
-                "dimension": "hardware_facts",
-                "adjustment": 0,
-                "status": "applied",
-                "reason": "硬件事实已进入结构化对比。",
-            },
-            {
-                "agent": "CollectorAgent",
-                "dimension": "review_price_mcp",
-                "adjustment": 0,
-                "status": "pending",
-                "reason": "评价、博主测评和实时价格 MCP 尚未接入。",
-            },
-            {
-                "agent": "QualityAgent",
-                "dimension": "report_credibility",
-                "adjustment": 0,
-                "status": "applied",
-                "reason": "质量分表示报告可信度，不等于产品好坏。",
-            },
-        ],
-        "final_score": {
-            "label": "Agent 最终综合建议",
-            "score": best_score,
-            "recommended_product": best or "待定",
-            "description": "MCP 维度 pending 时不做口碑或性价比修正。",
-        },
-        "products": products,
-    }
+    # Product scoring is intentionally removed from the Agent workflow. ReportAgent
+    # uses scenario recommendations and credibility metrics instead.
+    return flow if flow.get("baseline_score") or flow.get("final_score") else {}
 
 
 def _final_recommendation(state: dict, score_flow: Dict[str, Any]) -> Dict[str, Any]:
@@ -329,7 +280,7 @@ def _final_recommendation(state: dict, score_flow: Dict[str, Any]) -> Dict[str, 
             "recommended_product": "待定",
             "reason": "当前缺少完整产品事实或证据链，不输出确定购买建议。",
             "top_reasons": ["本地事实不足或外部数据仍为 pending。"],
-            "cautions": ["等待搜索、官网规格、评价测评和实时价格 MCP 补齐。"],
+            "cautions": [],
         }
 
     return {
@@ -340,10 +291,7 @@ def _final_recommendation(state: dict, score_flow: Dict[str, Any]) -> Dict[str, 
             "所有正式 claim 必须引用有效 evidence_id。",
             "pending 的评价、测评和实时价格已披露，不伪造成已完成。",
         ],
-        "cautions": [
-            "握法、手型、适合游戏和长期可靠性等待真实用户/测评证据。",
-            "实时价格未接入前，不输出最终性价比结论。",
-        ],
+        "cautions": [],
     }
 
 
@@ -374,18 +322,31 @@ def _scenario_recommendations(state: dict) -> List[Dict[str, Any]]:
     def model_of(product: Dict[str, Any]) -> str:
         return _as_text(product.get("model") or product.get("brand")) or "产品"
 
-    def add(scenario: str, key: str, status: str, recommended: str | None, verdict: str, reason: str, confidence: str) -> None:
-        scenarios.append(
-            {
-                "scenario": scenario,
-                "key": key,
-                "status": status,  # recommended / tie / data_missing / pending_review
-                "recommended_product": recommended,
-                "verdict": verdict,
-                "reason": reason,
-                "confidence": confidence,  # high / medium / low / pending
-            }
-        )
+    def add(
+        scenario: str,
+        key: str,
+        status: str,
+        recommended: str | None,
+        verdict: str,
+        reason: str,
+        confidence: str,
+        evidence_ids: List[str] | None = None,
+        source: str | None = None,
+    ) -> None:
+        item = {
+            "scenario": scenario,
+            "key": key,
+            "status": status,  # recommended / tie / data_missing / pending_review
+            "recommended_product": recommended,
+            "verdict": verdict,
+            "reason": reason,
+            "confidence": confidence,  # high / medium / low / pending
+        }
+        if evidence_ids:
+            item["evidence_ids"] = evidence_ids
+        if source:
+            item["source"] = source
+        scenarios.append(item)
 
     a, b = products[0], products[1]
     a_name, b_name = model_of(a), model_of(b)
@@ -557,6 +518,80 @@ def _scenario_recommendations(state: dict) -> List[Dict[str, Any]]:
     add_review_scenario("重视手感 / 握法", "grip_feel", "grip_feel")
     add_review_scenario("长期可靠性", "long_term", "long_term_reliability")
 
+    def canonical_feedback_product(raw: Any, message: str) -> str | None:
+        text = norm(raw)
+        message_text = norm(message)
+        for name in (a_name, b_name):
+            normalized_name = norm(name)
+            if normalized_name and (
+                normalized_name in text
+                or text in normalized_name
+                or normalized_name in message_text
+            ):
+                return name
+        return _as_text(raw) or None
+
+    def replace_scenario(payload: Dict[str, Any]) -> None:
+        key = _as_text(payload.get("key"))
+        for index, item in enumerate(scenarios):
+            if _as_text(item.get("key")) == key:
+                scenarios[index] = payload
+                return
+        scenarios.append(payload)
+
+    for feedback in state.get("human_feedback", []):
+        if not isinstance(feedback, dict):
+            continue
+        message = _as_text(feedback.get("message"))
+        if not message:
+            continue
+        feedback_status = _as_text(feedback.get("status")).lower()
+        if feedback.get("needs_verification") or feedback_status in {
+            "pending_verification",
+            "needs_external_evidence",
+        }:
+            continue
+        dimension = norm(feedback.get("dimension"))
+        message_norm = norm(message)
+        product_name = canonical_feedback_product(feedback.get("product"), message)
+        if not product_name:
+            continue
+
+        evidence_id = _as_text(feedback.get("feedback_id"))
+        evidence_ids = [evidence_id] if evidence_id else []
+        if dimension in {"fps_performance", "scenario_fit", "game_type_fit"} and any(
+            hint in message_norm for hint in ("fps", "瓦", "cs", "valorant", "apex", "竞技")
+        ):
+            replace_scenario(
+                {
+                    "scenario": "追求极限 FPS",
+                    "key": "fps",
+                    "status": "recommended",
+                    "recommended_product": product_name,
+                    "verdict": f"推荐：{product_name}",
+                    "reason": f"人工修正指出：{message}；已进入 VerificationAgent 校验链路，按中可信场景证据展示。",
+                    "confidence": "medium",
+                    "evidence_ids": evidence_ids,
+                    "source": "human_feedback",
+                }
+            )
+        elif dimension in {"grip_feel", "scenario_fit"} and any(
+            hint in message_norm for hint in ("手感", "握", "抓", "趴", "指握", "掌握")
+        ):
+            replace_scenario(
+                {
+                    "scenario": "重视手感 / 握法",
+                    "key": "grip_feel",
+                    "status": "recommended",
+                    "recommended_product": product_name,
+                    "verdict": f"推荐：{product_name}",
+                    "reason": f"人工修正指出：{message}；该结论等待更多用户/测评证据增强。",
+                    "confidence": "medium",
+                    "evidence_ids": evidence_ids,
+                    "source": "human_feedback",
+                }
+            )
+
     return scenarios
 
 
@@ -658,6 +693,7 @@ def report_agent(state: dict) -> Dict[str, Any]:
         "review_intel_records": state.get("review_intel_records", []),
         "review_intel_status": state.get("review_intel_status", {}),
         "hardware_fact_comparison": state.get("hardware_analysis", {}),
+        "analysis_ai_interpretation": state.get("analysis_ai_interpretation", {}),
         "product_matrix": state.get("product_matrix", {}),
         "business_matrix": state.get("business_matrix", {}),
         "feature_tree": _feature_tree(state, hardware_specs),
@@ -677,17 +713,8 @@ def report_agent(state: dict) -> Dict[str, Any]:
         "limitations": quality_result.get("limitations", []),
         "final_recommendation": _final_recommendation(state, score_flow),
         "scenario_recommendations": _scenario_recommendations(state),
-        "final_score": [
-            {
-                "product_id": item.get("product_id"),
-                "product": _product_label(item),
-                "score": item.get("overall_score", {}).get("current_score")
-                if isinstance(item.get("overall_score"), dict)
-                else None,
-                "score_type": "hardware_fact_baseline",
-            }
-            for item in _score_products(state)
-        ],
+        # Final report uses scenario recommendations instead of product scores.
+        "final_score": [],
         "used_claim_ids": used_claim_ids,
         "used_evidence_ids": used_evidence_ids,
         "metrics": metrics,

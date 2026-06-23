@@ -29,6 +29,7 @@ from urllib.request import Request, urlopen
 
 from dotenv import load_dotenv
 
+from app.services.observability_service import make_llm_usage_record, make_mcp_usage_record
 from app.services.search_mcp_service import search_candidates
 
 
@@ -585,7 +586,19 @@ def _source_docs(target: Dict[str, Any], config: ReviewIntelConfig) -> tuple[Lis
     if not query:
         return docs, search_result, blocked
 
+    search_started = time.perf_counter()
     search_result = search_candidates(query, category="gaming_mouse", intent="review_collection")
+    search_result["mcp_usage"] = make_mcp_usage_record(
+        agent="CollectorAgent",
+        tool="search_mcp",
+        status=_as_text(search_result.get("status")) or "success",
+        started_at=search_started,
+        provider=_as_text(search_result.get("provider")) or "search",
+        query=_as_text(search_result.get("executed_query") or search_result.get("_executed_query") or query),
+        result_count=len(search_result.get("candidates") if isinstance(search_result.get("candidates"), list) else []),
+        uses_llm=False,
+        metadata={"intent": "review_collection", "input": query},
+    )
     raw_candidates: List[Dict[str, Any]] = []
     for key in ("review_candidates", "usable_candidates", "candidates"):
         values = search_result.get(key)
@@ -1055,6 +1068,7 @@ def _record_from_local_entry(entry: Dict[str, Any], target: Dict[str, Any]) -> D
 
 def collect_review_intel_for_product(target: Dict[str, Any], *, category: str = "gaming_mouse") -> Dict[str, Any]:
     del category
+    mcp_started = time.perf_counter()
     config = _config()
     if config.local_db_enabled:
         local_entry = _match_local_review(target)
@@ -1076,6 +1090,24 @@ def collect_review_intel_for_product(target: Dict[str, Any], *, category: str = 
                 search_result=search_result,
             ),
             "blocked_sources": blocked,
+            "mcp_usage": [
+                item
+                for item in [
+                    search_result.get("mcp_usage") if isinstance(search_result, dict) else None,
+                    make_mcp_usage_record(
+                        agent="CollectorAgent",
+                        tool="review_intel_mcp",
+                        status="no_sources",
+                        started_at=mcp_started,
+                        provider="review_sources",
+                        query=_as_text(target.get("input") or target.get("model")),
+                        result_count=0,
+                        uses_llm=False,
+                        metadata={"blocked_count": len(blocked)},
+                    ),
+                ]
+                if isinstance(item, dict)
+            ],
         }
 
     signals: List[Dict[str, Any]] = []
@@ -1083,14 +1115,39 @@ def collect_review_intel_for_product(target: Dict[str, Any], *, category: str = 
     complaints: List[str] = []
     limitations: List[str] = []
     llm_error = ""
+    llm_usage: Dict[str, Any] | None = None
     if config.enabled and config.api_key and config.model:
         try:
             llm = _get_llm(config)
-            response = llm.invoke(_prompt(target, docs, config.per_source_chars))
-            parsed = _parse_json_object(_response_to_text(response))
+            prompt = _prompt(target, docs, config.per_source_chars)
+            llm_started = time.perf_counter()
+            response = llm.invoke(prompt)
+            response_text = _response_to_text(response)
+            llm_usage = make_llm_usage_record(
+                agent="CollectorAgent",
+                tool="review_intel_mcp",
+                model=config.model,
+                started_at=llm_started,
+                prompt_text=prompt,
+                response=response,
+                response_text=response_text,
+                status="success",
+                metadata={"input": _as_text(target.get("input") or target.get("model")), "source_count": len(docs)},
+            )
+            parsed = _parse_json_object(response_text)
             signals, recommendations, complaints, limitations = _parse_llm_result(parsed, docs)
         except Exception as exc:  # noqa: BLE001 - MCP should degrade, not break the DAG.
             llm_error = f"{type(exc).__name__}"
+            llm_usage = make_llm_usage_record(
+                agent="CollectorAgent",
+                tool="review_intel_mcp",
+                model=config.model,
+                started_at=llm_started if "llm_started" in locals() else mcp_started,
+                prompt_text=prompt if "prompt" in locals() else "",
+                status="failed",
+                error=llm_error,
+                metadata={"input": _as_text(target.get("input") or target.get("model")), "source_count": len(docs)},
+            )
 
     if not signals:
         if config.allow_rule_fallback and not config.require_llm:
@@ -1124,6 +1181,25 @@ def collect_review_intel_for_product(target: Dict[str, Any], *, category: str = 
                 "llm_model": config.model,
                 "llm_error": llm_error,
                 "extraction_method": "llm_required",
+                "llm_usage": llm_usage,
+                "mcp_usage": [
+                    item
+                    for item in [
+                        search_result.get("mcp_usage") if isinstance(search_result, dict) else None,
+                        make_mcp_usage_record(
+                            agent="CollectorAgent",
+                            tool="review_intel_mcp",
+                            status=status,
+                            started_at=mcp_started,
+                            provider="review_sources",
+                            query=_as_text(target.get("input") or target.get("model")),
+                            result_count=0,
+                            uses_llm=bool(llm_usage),
+                            metadata={"source_count": len(docs), "blocked_count": len(blocked)},
+                        ),
+                    ]
+                    if isinstance(item, dict)
+                ],
             }
 
     if not signals:
@@ -1139,6 +1215,25 @@ def collect_review_intel_for_product(target: Dict[str, Any], *, category: str = 
             "source_urls": [_as_text(doc.get("url")) for doc in docs if _as_text(doc.get("url"))],
             "blocked_sources": blocked,
             "limitations": limitations or ["No supported review signal extracted."],
+            "llm_usage": llm_usage,
+            "mcp_usage": [
+                item
+                for item in [
+                    search_result.get("mcp_usage") if isinstance(search_result, dict) else None,
+                    make_mcp_usage_record(
+                        agent="CollectorAgent",
+                        tool="review_intel_mcp",
+                        status="insufficient_evidence",
+                        started_at=mcp_started,
+                        provider="review_sources",
+                        query=_as_text(target.get("input") or target.get("model")),
+                        result_count=0,
+                        uses_llm=bool(llm_usage),
+                        metadata={"source_count": len(docs), "blocked_count": len(blocked)},
+                    ),
+                ]
+                if isinstance(item, dict)
+            ],
         }
 
     # Group signals per dimension and cross-check corroboration across distinct domains.
@@ -1195,6 +1290,25 @@ def collect_review_intel_for_product(target: Dict[str, Any], *, category: str = 
         "note": "ReviewIntelMCP extracted review-backed experience signals.",
         "extraction_method": "rule_fallback" if limitations and any("rule-based" in item for item in limitations) else "llm",
         "llm_model": config.model if config.enabled and config.api_key and config.model else "",
+        "llm_usage": llm_usage,
+        "mcp_usage": [
+            item
+            for item in [
+                search_result.get("mcp_usage") if isinstance(search_result, dict) else None,
+                make_mcp_usage_record(
+                    agent="CollectorAgent",
+                    tool="review_intel_mcp",
+                    status=status,
+                    started_at=mcp_started,
+                    provider="review_sources",
+                    query=_as_text(target.get("input") or target.get("model")),
+                    result_count=len(signals_by_dimension),
+                    uses_llm=bool(llm_usage),
+                    metadata={"source_count": len(docs), "blocked_count": len(blocked)},
+                ),
+            ]
+            if isinstance(item, dict)
+        ],
         "collected_at": _now(),
     }
 

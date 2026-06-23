@@ -64,6 +64,8 @@ def _claim_owner(claim: Dict[str, Any]) -> str:
     if claim_id.startswith(("PCL", "BCL", "ACL")):
         return "AnalysisAgent"
     generated_by = _as_text(claim.get("generated_by"))
+    if generated_by == "HumanFeedback":
+        return "CollectorAgent"
     if generated_by == "AnalysisAgent":
         return "AnalysisAgent"
     return "AnalysisAgent"
@@ -109,16 +111,26 @@ def _build_checked_items(
         for evidence in evidence_list
         if isinstance(evidence, dict) and evidence.get("evidence_id")
     }
+    # 覆盖度只认非人工证据：人工反馈是"待验证线索"，不能靠手动输入一句话就把某个缺失
+    # 维度/竞品标成已覆盖、从而抬高质量分（否则反馈闭环会变成可被操纵的伪闭环）。
+    def _is_human_evidence(evidence: Dict[str, Any]) -> bool:
+        return bool(evidence.get("human_provided")) or _as_text(
+            evidence.get("source_type")
+        ).lower().startswith("human")
+
     platforms_in_evidence = {
         _as_text(evidence.get("platform"))
         for evidence in evidence_list
-        if isinstance(evidence, dict) and _as_text(evidence.get("platform"))
+        if isinstance(evidence, dict)
+        and _as_text(evidence.get("platform"))
+        and not _is_human_evidence(evidence)
     }
     dimensions_in_evidence = {
         _dimension_key(evidence.get("related_dimension") or evidence.get("dimension"))
         for evidence in evidence_list
         if isinstance(evidence, dict)
         and _dimension_key(evidence.get("related_dimension") or evidence.get("dimension"))
+        and not _is_human_evidence(evidence)
     }
 
     missing_platforms = [
@@ -346,6 +358,25 @@ def quality_agent(state: dict) -> Dict[str, Any]:
         price_verification.get("weak_price_records") or 0
     )
     weak_review_count = int(review_verification.get("weak_review_signals") or 0)
+    claim_results = [
+        item for item in faithfulness_report.get("claim_results", []) if isinstance(item, dict)
+    ]
+    weak_claim_count = int(faithfulness_report.get("weak_claim_count") or 0)
+    human_unverified_count = len(
+        [item for item in claim_results if _as_text(item.get("reason")) == "human_feedback_unverified"]
+    )
+    weak_price_penalty = min(12, weak_price_count * 4)
+    weak_review_penalty = min(10, weak_review_count * 2)
+    weak_claim_penalty = min(10, max(0, weak_claim_count - human_unverified_count) * 2)
+    human_feedback_penalty = min(18, human_unverified_count * 8)
+    score = max(
+        0,
+        score
+        - weak_price_penalty
+        - weak_review_penalty
+        - weak_claim_penalty
+        - human_feedback_penalty,
+    )
     reject_reason = None if approved else "部分质量检查未通过"
 
     quality_result = QualityResult(
@@ -369,6 +400,8 @@ def quality_agent(state: dict) -> Dict[str, Any]:
         or high_risk_count
         or weak_price_count
         or weak_review_count
+        or weak_claim_count
+        or human_unverified_count
     )
     quality_status = (
         "approved_with_limitations"
@@ -411,6 +444,8 @@ def quality_agent(state: dict) -> Dict[str, Any]:
         quality_result_dict["limitations"].append("weak_price_support")
     if weak_review_count:
         quality_result_dict["limitations"].append("weak_review_support")
+    if human_unverified_count:
+        quality_result_dict["limitations"].append("human_feedback_unverified")
     if degraded_report:
         quality_result_dict["degradation_reason"] = (
             "Automatic repair attempts were exhausted; unsupported or invalid content "
@@ -433,6 +468,12 @@ def quality_agent(state: dict) -> Dict[str, Any]:
         "pending_data_deductions": pending_penalty,
         "weak_price_support_count": weak_price_count,
         "weak_review_support_count": weak_review_count,
+        "weak_claim_count": weak_claim_count,
+        "human_feedback_unverified_count": human_unverified_count,
+        "weak_price_deductions": weak_price_penalty,
+        "weak_review_deductions": weak_review_penalty,
+        "weak_claim_deductions": weak_claim_penalty,
+        "human_feedback_deductions": human_feedback_penalty,
         "note": (
             "Report credibility is reduced by disclosed pending data and risks. Weak price support is "
             "shown as a limitation; weak or pending review/user-feedback data is also part of the reason."
